@@ -16,6 +16,7 @@ import {
 } from '@/shared/messages';
 import { handleVaultRequest, isVaultRequest } from './vault-service';
 import { handleDocumentRequest } from './document-service';
+import { harvestTab } from './harvest-service';
 import { lockVault } from '@/vault/session';
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -41,6 +42,10 @@ async function route(request: ExtensionRequest): Promise<Result<unknown>> {
   }
 
   switch (request.type) {
+    case 'harvest:tab':
+      return harvestTab(request.tabId);
+    case 'harvest:ready':
+      return { ok: true, data: null };
     case 'ping':
       return { ok: true, data: 'pong' };
     default:

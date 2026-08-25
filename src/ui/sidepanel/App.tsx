@@ -10,6 +10,7 @@ import type { VaultStatus } from '@/vault/session';
 import { errorMessage, send } from '@/ui/lib/client';
 import { VaultGate } from '@/ui/vault-editor/VaultGate';
 import { VaultEditor } from '@/ui/vault-editor/VaultEditor';
+import { FieldsPanel } from './FieldsPanel';
 
 export function App() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
@@ -60,7 +61,10 @@ export function App() {
   return (
     <main className="min-h-screen bg-white font-sans text-slate-900">
       {status.unlocked ? (
-        <VaultEditor onLocked={() => void refresh()} />
+        <>
+          <FieldsPanel />
+          <VaultEditor onLocked={() => void refresh()} />
+        </>
       ) : (
         <>
           <VaultGate exists={status.exists} onUnlocked={() => void refresh()} />

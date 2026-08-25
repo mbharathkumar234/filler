@@ -8,6 +8,7 @@
  */
 
 import { derive, type DerivationResult } from '@/documents/derive';
+import { harvest } from '@/content/harvester';
 import { parseConstraint } from '@/documents/constraints';
 import { createRasterBackend } from '@/documents/raster';
 
@@ -40,4 +41,35 @@ async function run(url: string, sourceMime: string, constraintText: string): Pro
   };
 }
 
+/**
+ * Harvest the *current* page in a real browser.
+ *
+ * jsdom has no layout engine, so the unit suite cannot test visibility, and its
+ * iframes are not really cross-origin. Both are only real here.
+ */
+function runHarvest() {
+  const { fields, blockers, wizard, labelSources } = harvest(document);
+  const visible = fields.filter((f) => f.visible);
+  return {
+    fields: fields.map((f) => ({
+      ref: f.ref,
+      tag: f.tag,
+      labelText: f.labelText,
+      nearbyText: f.nearbyText,
+      visible: f.visible,
+      enabled: f.enabled,
+      required: f.required,
+      selectors: f.selectors,
+      optionCount: f.options?.length ?? 0,
+      source: labelSources.get(f.ref) ?? 'none',
+    })),
+    blockers: blockers.map((b) => ({ type: b.type, reason: b.reason })),
+    wizard,
+    visibleCount: visible.length,
+    labelledCount: visible.filter((f) => f.labelText.trim() !== '').length,
+    domUnchanged: document.body.innerHTML,
+  };
+}
+
 window.__derive = run;
+window.__harvest = runHarvest;

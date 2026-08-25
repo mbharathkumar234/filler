@@ -20,8 +20,31 @@ export interface HarnessResult {
   magic?: number[];
 }
 
+export interface HarvestedField {
+  ref: string;
+  tag: string;
+  labelText: string;
+  nearbyText: string;
+  visible: boolean;
+  enabled: boolean;
+  required: boolean;
+  selectors: string[];
+  optionCount: number;
+  source: string;
+}
+
+export interface HarvestSnapshot {
+  fields: HarvestedField[];
+  blockers: { type: string; reason: string }[];
+  wizard: { step: number | null; totalSteps: number | null; evidence: string } | null;
+  visibleCount: number;
+  labelledCount: number;
+  domUnchanged: string;
+}
+
 declare global {
   interface Window {
+    __harvest: () => HarvestSnapshot;
     __derive: (
       url: string,
       sourceMime: string,

@@ -19,13 +19,12 @@ It is an assistant for a person at the keyboard. It is not a bot.
 
 ## Status
 
-**Phase 2 complete — the vault and the document pipeline.** You can create an encrypted vault, enter
-your details once, and add document masters. Paste a portal's upload rules and the extension derives
-a compliant file — resizing, cropping, and binary-searching JPEG quality into the stated byte window
-— or explains precisely why it cannot.
+**Phase 3 complete — the vault, the document pipeline, and the DOM harvester.** Create an encrypted
+vault and enter your details once. Add document masters and get portal-sized versions on demand.
+Press **Scan page** on any form and see every field the extension can read — with the label it
+resolved, how it resolved it, and what it *cannot* handle (CAPTCHAs, cross-origin widgets).
 
-No harvesting, matching, or filling code exists yet — that starts in Phase 3. See
-`IMPLEMENTATION_PLAN.md` for the phase plan.
+Nothing is matched or filled yet — that starts in Phase 4. See `IMPLEMENTATION_PLAN.md`.
 
 The product target is **any portal**, not a hand-picked shortlist: site profiles are a cache and a
 repair mechanism, not a precondition. See the scope amendment at the top of the plan.
@@ -56,6 +55,8 @@ See §2 of `IMPLEMENTATION_PLAN.md`. The short version:
 - `src/vault/` — encrypted storage. `session.ts` is the sole owner of the unlocked key.
 - `src/documents/` — constraint parsing and the derivation pipeline. Pure logic; `raster.ts` is the
   only part that touches a canvas.
+- `src/content/` — the harvester. Read-only: it never writes to the page. Injected on an explicit
+  click, never declared in the manifest.
 - `src/background/vault-service.ts` — the only bridge between the message bus and the key.
 - `site-profiles/` — versioned selector maps. Selectors only, never values.
 - `fixtures/` — saved portal HTML for tests. Never a live portal.

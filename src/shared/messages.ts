@@ -17,7 +17,7 @@
  */
 
 import type { FieldKey } from '@/matching/taxonomy';
-import type { FieldDescriptor, RunState } from './types';
+import type { RunState } from './types';
 import type { ProfileEntry } from '@/vault/profile-store';
 import type { Completeness } from '@/vault/profile-store';
 import type { VaultStatus } from '@/vault/session';
@@ -25,6 +25,7 @@ import type { ImportResult } from '@/vault/backup-format';
 import type { DocConstraint } from './types';
 import type { DocumentSummary } from '@/vault/document-store';
 import type { DerivedPayload } from '@/background/document-service';
+import type { TabHarvest } from '@/background/harvest-service';
 
 // ---------------------------------------------------------------------------
 // Requests
@@ -63,12 +64,19 @@ export type DocumentRequest =
 
 export type RuntimeRequest =
   | { type: 'ping' }
-  | { type: 'harvest:result'; fields: FieldDescriptor[] }
   | { type: 'harvest:request' }
+  | { type: 'harvest:ready' }
   | { type: 'run:state'; state: RunState }
   | { type: 'run:abort'; why: string };
 
-export type ExtensionRequest = VaultRequest | DocumentRequest | RuntimeRequest;
+/** Panel-initiated harvest of the active tab. Privileged. */
+export type HarvestRequest = { type: 'harvest:tab'; tabId: number };
+
+export type ExtensionRequest =
+  | VaultRequest
+  | DocumentRequest
+  | HarvestRequest
+  | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
 
 /** Request types that must never be honoured for a content script. */
@@ -89,6 +97,7 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'doc:delete',
   'doc:derive',
   'doc:preflight',
+  'harvest:tab',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -115,9 +124,10 @@ export interface ResponseMap {
   /** A derived file, or a readable explanation of why it could not be made. */
   'doc:derive': DerivedPayload | { failed: true; reason: string; code: string };
   'doc:preflight': { ok: boolean; warnings: string[]; reason?: string };
+  'harvest:tab': TabHarvest;
   ping: 'pong';
-  'harvest:result': null;
   'harvest:request': null;
+  'harvest:ready': null;
   'run:state': null;
   'run:abort': null;
 }

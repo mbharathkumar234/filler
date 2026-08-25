@@ -301,28 +301,61 @@ doing before release because they change what a user can salvage from a bad scan
 
 **Goal:** on any page, produce a precise structured description of every fillable field. No filling.
 
+**Status: complete.** 401 unit tests + 24 e2e green.
+
 ### Must Achieve
 
-- [ ] Content script injected on user activation (`activeTab` + explicit click), **not** broad `<all_urls>` auto-injection.
-- [ ] `content/harvester.ts` emits `FieldDescriptor[]` (declared in `src/shared/types.ts`).
-- [ ] Label resolution handles the ugly cases: `<table>` layouts, `<label>` siblings without `for`,
-      floating labels, `aria-labelledby`, and text nodes preceding the input.
-- [ ] Same-origin iframe traversal; cross-origin frames are detected and reported as
-      `BLOCKED:unknown_widget` candidates rather than silently skipped.
-- [ ] Side panel shows the harvested list live for the active tab.
+- [x] Content script injected on user activation (`activeTab` + explicit click), **not** broad
+      `<all_urls>` auto-injection. The built manifest declares no `content_scripts` at all; the
+      script is a separate Vite entry (`dist/content.js`) injected by `chrome.scripting`.
+- [x] `content/harvester.ts` emits `FieldDescriptor[]`.
+- [x] Label resolution handles the ugly cases: `<table>` layouts (including header-row grids),
+      `<label>` siblings without `for`, floating labels, `aria-labelledby`, and text nodes
+      preceding the input. Each field reports *which rule won*, for the Phase 7 rationale.
+- [x] Same-origin iframe traversal (`allFrames: true`); cross-origin frames are reported as
+      `unknown_widget` blockers rather than silently skipped.
+- [x] Side panel shows the harvested list live for the active tab, with the labelled-percentage
+      readout and the blockers it cannot handle.
 
 ### Should Achieve
 
-- [ ] Shadow DOM piercing.
-- [ ] Detect multi-step wizards (step indicators, `Next` buttons) and record step index in the fingerprint.
-- [ ] Detect dependent dropdowns (State → District → Taluk) by observing XHR/mutation after a select changes.
+- [x] Shadow DOM piercing (open roots).
+- [x] Detect multi-step wizards and record the step index in the fingerprint.
+- [ ] Detect dependent dropdowns (State → District → Taluk) by observing XHR/mutation after a
+      select changes. **Not done** — deferred, see below.
 
 **Out of scope:** matching, filling.
 
-**Verify:** run the harvester over every fixture page; snapshot-test the output. Manually confirm >=95% of
-visible fields are captured with a non-empty `labelText`.
+**Verify:** run the harvester over every fixture page; snapshot-test the output. Manually confirm
+>=95% of visible fields are captured with a non-empty `labelText`.
 
----
+*Done:* `content/fixtures.test.ts` snapshots every fixture page and asserts the >=95% bar per page;
+`tests/e2e/harvest.spec.ts` repeats it in a real browser, where layout-based visibility and genuine
+cross-origin frames actually exist.
+
+### Design notes
+
+**Security fields are reported, never described as fillable.** Inputs named `captcha`/`otp`/`vcode`
+and every `type="password"` are emitted as blockers. P4 says we never fill them; not describing them
+as fields means no later phase can be tempted to try.
+
+**Hidden fields are kept, marked `visible: false`.** A field hidden on step 1 may appear on step 2;
+dropping it would make Phase 6's `REVERIFYING` think the form changed shape.
+
+**Every label-anchored XPath is verified against the live DOM before being offered.** Generating one
+from label text alone produces confident nonsense — a `<th>` is not a `<td>`, an aria-label matches
+no element, and in a grid `following::input[1]` from the third header resolves to the *first*
+column's input. A selector that silently fills the wrong field is the §6.4 Critical risk. The
+structural path is always present as a fallback, so refusing a bad XPath costs nothing.
+
+**The harvester never mutates.** No attributes, no styles, no events. Asserted in both suites by
+comparing `body.innerHTML` before and after.
+
+### Deferred to a later pass
+
+Dependent-dropdown detection (observing XHR/mutation after a select changes) needs the fill engine
+to drive a select before there is anything to observe. It is better built alongside Phase 5's
+sequential filling, where the plan already requires waiting for dependent selects to repopulate.
 
 ## Phase 4 — Deterministic matcher & site profiles
 

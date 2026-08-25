@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Ugly Portal — every label pattern that breaks harvesters</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 46rem; color: #0f172a; }
+      table { border-collapse: collapse; width: 100%; }
+      td, th { padding: .35rem .5rem; vertical-align: top; text-align: left; }
+      td.lbl { width: 42%; color: #334155; }
+      input, select, textarea { width: 100%; padding: .3rem; box-sizing: border-box; }
+      .banner { background: #e2e8f0; padding: .75rem; font-size: .8rem; margin-bottom: 1.5rem; }
+      .float { position: relative; margin: .5rem 0; }
+      .hidden-block { display: none; }
+      h2 { font-size: 1rem; margin-top: 1.5rem; border-bottom: 1px solid #cbd5e1; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>Synthetic fixture.</strong> Deliberately hostile markup: every label pattern §Phase 3
+      names, plus the ones that produce a <em>wrong</em> label rather than none. Not a copy of any
+      real portal; contains no real personal data.
+    </p>
+
+    <h1>Application Form</h1>
+
+    <!-- Case 1: table layout, label in the cell to the left (the ASP.NET classic) -->
+    <h2>Personal Details</h2>
+    <table>
+      <tr>
+        <td class="lbl">Candidate Name *</td>
+        <td><input type="text" id="ctl00_ContentPlaceHolder1_txtName" name="ctl00$txtName" maxlength="60" /></td>
+      </tr>
+      <tr>
+        <td class="lbl">पिता का नाम / Father's Name</td>
+        <td><input type="text" id="ctl00_ContentPlaceHolder1_txtFName" name="ctl00$txtFName" maxlength="50" /></td>
+      </tr>
+      <!-- Case 2: two inputs in one row — the second must NOT inherit the first's label -->
+      <tr>
+        <td class="lbl">City</td>
+        <td><input type="text" id="txtCity" name="txtCity" /></td>
+        <td><input type="text" id="txtPin" name="txtPin" maxlength="6" placeholder="PIN Code" /></td>
+      </tr>
+    </table>
+
+    <!-- Case 3: grid with header row above, no label to the left -->
+    <h2>Education</h2>
+    <table>
+      <tr><th>Board or University</th><th>Year of Passing</th><th>Percentage</th></tr>
+      <tr>
+        <td><input type="text" name="edu_board_1" /></td>
+        <td><input type="text" name="edu_year_1" maxlength="4" /></td>
+        <td><input type="text" name="edu_pct_1" /></td>
+      </tr>
+    </table>
+
+    <!-- Case 4: label[for], wrapping label, aria-labelledby, aria-label -->
+    <h2>Contact</h2>
+    <p><label for="txtEmail">Email ID</label>
+       <input type="email" id="txtEmail" name="txtEmail" autocomplete="email" /></p>
+
+    <p><label>Mobile Number
+       <input type="tel" name="txtMobile" maxlength="10" pattern="[0-9]{10}" /></label></p>
+
+    <p><span id="lbl-a">Alternate</span> <span id="lbl-b">Mobile</span>
+       <input type="tel" name="txtAltMobile" aria-labelledby="lbl-a lbl-b" /></p>
+
+    <p><input type="text" name="txtLandline" aria-label="Landline Number" /></p>
+
+    <!-- Case 5: floating label — the <label> FOLLOWS the input -->
+    <h2>Permanent Address</h2>
+    <div class="float">
+      <input type="text" name="addr1" id="addr1" />
+      <label for="addr1">Address Line 1</label>
+    </div>
+    <div class="float">
+      <input type="text" name="addr2" />
+      <label>Address Line 2</label>
+    </div>
+
+    <!-- Case 6: bare text node before the input, no element at all -->
+    <p>District <input type="text" name="district" /></p>
+
+    <!-- Case 7: identically-labelled block under a different heading -->
+    <h2>Correspondence Address</h2>
+    <div class="float">
+      <input type="text" name="c_addr1" />
+      <label>Address Line 1</label>
+    </div>
+
+    <!-- Case 8: radio group — one logical field, three inputs -->
+    <h2>Other</h2>
+    <fieldset>
+      <legend>Gender</legend>
+      <label><input type="radio" name="gender" value="M" /> Male</label>
+      <label><input type="radio" name="gender" value="F" /> Female</label>
+      <label><input type="radio" name="gender" value="T" /> Transgender</label>
+    </fieldset>
+
+    <!-- Case 9: select with a full option set -->
+    <p><label for="ddlState">State</label>
+      <select id="ddlState" name="ddlState">
+        <option value="">-- Select State --</option>
+        <option value="AP">Andhra Pradesh</option>
+        <option value="KA">Karnataka</option>
+        <option value="MH">Maharashtra</option>
+        <option value="TN">Tamil Nadu</option>
+        <option value="TS">Telangana</option>
+      </select>
+    </p>
+
+    <!-- Case 10: checkbox, file input, textarea -->
+    <p><label><input type="checkbox" name="sameAsPermanent" /> Correspondence address same as permanent</label></p>
+    <p><label for="fuPhoto">Upload Photograph</label>
+       <input type="file" id="fuPhoto" name="fuPhoto" accept="image/jpeg" /></p>
+    <p><label for="remarks">Remarks</label><textarea id="remarks" name="remarks"></textarea></p>
+
+    <!-- Case 11: things that must NOT be harvested -->
+    <input type="hidden" name="__VIEWSTATE" value="dDwtMTkwNjA4MTY1O..." />
+    <input type="hidden" name="__EVENTVALIDATION" value="/wEWAgLd..." />
+    <p><label for="pwd">Password</label><input type="password" id="pwd" name="pwd" /></p>
+    <p><label for="txtCaptcha">Enter the code shown</label>
+       <input type="text" id="txtCaptcha" name="captcha" /></p>
+
+    <!-- Case 12: a hidden block that a later step reveals -->
+    <div class="hidden-block">
+      <label for="hiddenField">Revealed Later</label><input type="text" id="hiddenField" name="hiddenField" />
+    </div>
+
+    <!-- Case 13: a cross-origin frame we cannot read -->
+    <iframe src="https://payments.example.com/widget" title="Payment" width="300" height="150"></iframe>
+
+    <p><button type="submit" id="btnFinalSubmit">Final Submit</button></p>
+  </body>
+</html>
