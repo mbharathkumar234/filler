@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Demo Portal — Application Form (synthetic fixture)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 44rem; color: #0f172a; }
+      h1 { font-size: 1.25rem; }
+      h2 { font-size: 1rem; margin-top: 2rem; border-bottom: 1px solid #cbd5e1; padding-bottom: .25rem; }
+      table { border-collapse: collapse; width: 100%; }
+      td { padding: .35rem .5rem; vertical-align: top; }
+      td.label { width: 45%; color: #334155; }
+      input, select { width: 100%; padding: .3rem; box-sizing: border-box; }
+      .note { background: #fef3c7; padding: .5rem .75rem; font-size: .8rem; }
+      .banner { background: #e2e8f0; padding: .75rem; font-size: .8rem; margin-bottom: 1.5rem; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>Synthetic fixture.</strong> This page is hand-written for local testing. It is not a copy
+      of any real portal and contains no real personal data. Real portal fixtures go in
+      <code>fixtures/&lt;site-id&gt;/</code> once Phase 0's portal selection is done.
+    </p>
+
+    <h1>Demo Portal — Scholarship Application</h1>
+
+    <form id="frmApply" action="/submit" method="post">
+      <h2>Personal Details</h2>
+      <table>
+        <tr>
+          <td class="label"><label for="txtFullName">Candidate Name</label></td>
+          <td><input type="text" id="txtFullName" name="txtFullName" maxlength="60" required /></td>
+        </tr>
+        <!-- label in the adjacent cell, no `for` — the ugly case the harvester must handle -->
+        <tr>
+          <td class="label">पिता का नाम / Father's Name</td>
+          <td><input type="text" id="txtFName" name="txtFName" maxlength="50" required /></td>
+        </tr>
+        <tr>
+          <td class="label"><label for="txtDob">Date of Birth</label></td>
+          <td><input type="date" id="txtDob" name="txtDob" required /></td>
+        </tr>
+        <tr>
+          <td class="label"><label for="ddlGender">Gender</label></td>
+          <td>
+            <select id="ddlGender" name="ddlGender">
+              <option value="">-- Select --</option>
+              <option value="M">Male</option>
+              <option value="F">Female</option>
+              <option value="T">Transgender</option>
+            </select>
+          </td>
+        </tr>
+      </table>
+
+      <h2>Contact</h2>
+      <table>
+        <tr>
+          <td class="label"><label for="txtEmail">Email ID</label></td>
+          <td><input type="email" id="txtEmail" name="txtEmail" autocomplete="email" /></td>
+        </tr>
+        <tr>
+          <td class="label"><label for="txtMobile">Mobile Number</label></td>
+          <td><input type="tel" id="txtMobile" name="txtMobile" maxlength="10" pattern="[0-9]{10}" /></td>
+        </tr>
+      </table>
+
+      <h2>Permanent Address</h2>
+      <table>
+        <tr>
+          <td class="label"><label for="txtAddr1">Address Line 1</label></td>
+          <td><input type="text" id="txtAddr1" name="txtAddr1" autocomplete="address-line1" /></td>
+        </tr>
+        <tr>
+          <td class="label"><label for="ddlState">State</label></td>
+          <td>
+            <select id="ddlState" name="ddlState">
+              <option value="">-- Select State --</option>
+              <option value="AP">Andhra Pradesh</option>
+              <option value="KA">Karnataka</option>
+              <option value="MH">Maharashtra</option>
+              <option value="TN">Tamil Nadu</option>
+              <option value="TS">Telangana</option>
+            </select>
+          </td>
+        </tr>
+        <tr>
+          <td class="label"><label for="txtPin">PIN Code</label></td>
+          <td><input type="text" id="txtPin" name="txtPin" maxlength="6" autocomplete="postal-code" /></td>
+        </tr>
+      </table>
+
+      <h2>Documents</h2>
+      <p class="note">
+        Photograph must be JPEG/JPG, 20 KB to 50 KB, 3.5 cm &times; 4.5 cm.
+        Signature must be JPEG, 10 KB to 20 KB.
+      </p>
+      <table>
+        <tr>
+          <td class="label"><label for="fuPhoto">Upload Photograph</label></td>
+          <td><input type="file" id="fuPhoto" name="fuPhoto" accept="image/jpeg" /></td>
+        </tr>
+        <tr>
+          <td class="label"><label for="fuSign">Upload Signature</label></td>
+          <td><input type="file" id="fuSign" name="fuSign" accept="image/jpeg" /></td>
+        </tr>
+      </table>
+
+      <p style="margin-top: 1.5rem">
+        <button type="submit" id="btnFinalSubmit">Final Submit</button>
+      </p>
+    </form>
+  </body>
+</html>

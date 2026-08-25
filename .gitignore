@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.vite/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+*.local
+.env
+.env.*
+.DS_Store
+Thumbs.db
+
+# Never commit a real vault or a real document.
+*.afvault
+fixtures/**/private/
