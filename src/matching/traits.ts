@@ -123,10 +123,18 @@ export function capabilityOf(field: FieldDescriptor): FieldCapability {
   else if (type === 'tel') shape = 'phone';
   else if (type === 'number') shape = 'numeric';
 
+  const inputmode = (field.inputmode ?? '').toLowerCase();
   const numericOnly =
     type === 'number' ||
+    inputmode === 'numeric' ||
+    inputmode === 'tel' ||
     (field.pattern !== undefined && NUMERIC_PATTERN.test(field.pattern)) ||
     (field.pattern !== undefined && /^\[0-9\][{+*]/.test(field.pattern));
+
+  // A field that declares itself numeric *is* numeric, whatever its label
+  // claims. This is the plan's own worked example, reached through the
+  // attribute portals actually use rather than only through `type="number"`.
+  if (shape === 'unknown' && numericOnly) shape = 'numeric';
 
   const capability: FieldCapability = { shape, numericOnly };
   if (field.maxLength !== undefined) capability.maxLength = field.maxLength;

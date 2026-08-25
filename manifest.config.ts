@@ -35,6 +35,11 @@ export default defineManifest({
   // Nothing is declared here on purpose.
 
   content_security_policy: {
-    extension_pages: "script-src 'self'; object-src 'self'",
+    // `connect-src` names the one host this extension talks to, so the CSP is
+    // itself a statement of the egress boundary: a reviewer can read the
+    // manifest and see there is exactly one. 'self' covers the extension's own
+    // bundled assets.
+    extension_pages:
+      "script-src 'self'; object-src 'self'; connect-src 'self' https://api.anthropic.com",
   },
 });

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Municipal Corporation — Trade Licence Renewal (fourth portal, no profile)</title>
+    <style>
+      body { font-family: Georgia, serif; margin: 1.5rem; max-width: 46rem; color: #1f2937; }
+      .note { background: #f8fafc; border-left: 3px solid #64748b; padding: .5rem .7rem; font-size: .78rem; }
+      table { border-collapse: collapse; width: 100%; margin-top: 1rem; }
+      td { padding: .3rem .4rem; vertical-align: middle; border-bottom: 1px solid #e5e7eb; }
+      td.q { width: 46%; font-size: .88rem; }
+      input, select { width: 100%; padding: .2rem; box-sizing: border-box; }
+      h2 { font-size: 1rem; margin-top: 1.4rem; border-bottom: 2px solid #1f2937; }
+      .hint { color: #6b7280; font-size: .72rem; }
+    </style>
+  </head>
+  <body>
+    <p class="note">
+      <strong>FOURTH PORTAL — § Phase 8 Verify.</strong> A form with no site profile, written in
+      municipal-register English rather than the phrasing used anywhere in <code>synonyms.json</code>.
+      "Appellation", "Progenitor", "Natal Date", "Habitation" — deliberately obtuse, because the
+      point of this fixture is to be the sort of page the deterministic rules cannot carry alone.
+      Ground truth is in <code>data-expect</code>, which the matcher never reads.
+    </p>
+
+    <h1>Municipal Corporation — Trade Licence Renewal, Form MC-7B</h1>
+
+    <h2>Part A — Particulars of the Applicant</h2>
+    <table>
+      <tr>
+        <td class="q"><label for="q1">Appellation of the Applicant (in full, as per record)</label></td>
+        <td><input id="q1" name="ctl_appellation" data-expect="identity.full_name" maxlength="80" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q2">Natal Date</label>
+          <div class="hint">Reckoned as per the Gregorian calendar</div></td>
+        <td><input id="q2" name="ctl_natal" type="date" data-expect="identity.dob" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q3">Sex of the Applicant</label></td>
+        <td>
+          <select id="q3" name="ctl_sex" data-expect="identity.gender">
+            <option value="">--Choose--</option>
+            <option value="M">Male</option>
+            <option value="F">Female</option>
+            <option value="O">Third Gender</option>
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q4">Name of Progenitor (Father)</label></td>
+        <td><input id="q4" name="ctl_progenitor" data-expect="family.father_name" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q5">Name of Maternal Parent</label></td>
+        <td><input id="q5" name="ctl_maternal" data-expect="family.mother_name" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q6">Reservation Stratum</label></td>
+        <td>
+          <select id="q6" name="ctl_stratum" data-expect="identity.category">
+            <option value="">--Choose--</option>
+            <option value="GEN">Unreserved</option>
+            <option value="OBC">Other Backward Classes</option>
+            <option value="SC">Scheduled Caste</option>
+            <option value="ST">Scheduled Tribe</option>
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q7">Conjugal Status</label></td>
+        <td>
+          <select id="q7" name="ctl_conjugal" data-expect="identity.marital_status">
+            <option value="">--Choose--</option>
+            <option value="S">Unwed</option>
+            <option value="M">Wedded</option>
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q8">Haemal Group</label>
+          <div class="hint">For the emergency register only</div></td>
+        <td><input id="q8" name="ctl_haemal" data-expect="identity.blood_group" maxlength="3" /></td>
+      </tr>
+    </table>
+
+    <h2>Part B — Means of Correspondence</h2>
+    <table>
+      <tr>
+        <td class="q"><label for="q9">Electronic Mail Identifier</label></td>
+        <td><input id="q9" name="ctl_epost" type="email" data-expect="contact.email" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q10">Cellular Contact Number</label>
+          <div class="hint">10 digits, without the country prefix</div></td>
+        <td><input id="q10" name="ctl_cellular" data-expect="contact.mobile" maxlength="10" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q11">Alternative Cellular Contact</label></td>
+        <td><input id="q11" name="ctl_cellular_alt" data-expect="contact.alt_mobile" maxlength="10" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q12">Wired Telephone (with STD)</label></td>
+        <td><input id="q12" name="ctl_wired" data-expect="contact.landline" /></td>
+      </tr>
+    </table>
+
+    <h2>Part C — Habitation on Record</h2>
+    <table>
+      <tr>
+        <td class="q"><label for="q13">Premises Number and Thoroughfare</label></td>
+        <td><input id="q13" name="ctl_premises" data-expect="address.permanent.line1" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q14">Locality / Sub-locality</label></td>
+        <td><input id="q14" name="ctl_locality" data-expect="address.permanent.line2" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q15">Urban Agglomeration</label></td>
+        <td><input id="q15" name="ctl_agglom" data-expect="address.permanent.city" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q16">Revenue Division</label></td>
+        <td><input id="q16" name="ctl_revdiv" data-expect="address.permanent.district" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q17">Constituent State / Union Territory</label></td>
+        <td>
+          <select id="q17" name="ctl_conststate" data-expect="address.permanent.state">
+            <option value="">--Choose--</option>
+            <option value="KA">Karnataka</option>
+            <option value="TN">Tamil Nadu</option>
+            <option value="MH">Maharashtra</option>
+            <option value="DL">Delhi</option>
+          </select>
+        </td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q18">Postal Index Number</label></td>
+        <td><input id="q18" name="ctl_pin" data-expect="address.permanent.pincode" maxlength="6" /></td>
+      </tr>
+    </table>
+
+    <h2>Part D — Statutory Identifiers</h2>
+    <table>
+      <tr>
+        <td class="q"><label for="q19">Unique Identification Authority Number</label></td>
+        <td><input id="q19" name="ctl_uidai" data-expect="id.aadhaar" maxlength="12" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q20">Permanent Account Number (Income Tax)</label></td>
+        <td><input id="q20" name="ctl_itpan" data-expect="id.pan" maxlength="10" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q21">Electoral Photo Identity Number</label></td>
+        <td><input id="q21" name="ctl_epic" data-expect="id.voter" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q22">Motor Vehicle Operator Licence Number</label></td>
+        <td><input id="q22" name="ctl_mvol" data-expect="id.driving_licence" /></td>
+      </tr>
+    </table>
+
+    <h2>Part E — Remittance Particulars</h2>
+    <table>
+      <tr>
+        <td class="q"><label for="q23">Name in which the Deposit Account stands</label></td>
+        <td><input id="q23" name="ctl_deposit_holder" data-expect="bank.account_holder" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q24">Deposit Account Numeral</label></td>
+        <td><input id="q24" name="ctl_deposit_no" data-expect="bank.account_number" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q25">Indian Financial System Code of the Branch</label></td>
+        <td><input id="q25" name="ctl_ifs" data-expect="bank.ifsc" maxlength="11" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q26">Name of the Banking Institution</label></td>
+        <td><input id="q26" name="ctl_bankinst" data-expect="bank.bank_name" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q27">Branch at which the Account is maintained</label></td>
+        <td><input id="q27" name="ctl_branch" data-expect="bank.branch" /></td>
+      </tr>
+    </table>
+
+    <h2>Part F — Not for the Applicant to Supply</h2>
+    <table>
+      <tr>
+        <td class="q"><label for="q28">Licence Serial (allotted by this office)</label></td>
+        <td><input id="q28" name="ctl_licser" data-expect="unknown" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q29">Ward Inspector's Remarks</label></td>
+        <td><input id="q29" name="ctl_remarks" data-expect="unknown" /></td>
+      </tr>
+      <tr>
+        <td class="q"><label for="q30">Name</label>
+          <div class="hint">Trade category numeral, 4 digits — from Schedule II</div></td>
+        <td><input id="q30" name="ctl_tradecat" data-expect="unknown" maxlength="4" inputmode="numeric" /></td>
+      </tr>
+    </table>
+
+    <p style="margin-top:1.2rem">
+      <button type="submit" id="btnFinalSubmit">Submit Application</button>
+    </p>
+  </body>
+</html>

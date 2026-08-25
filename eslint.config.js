@@ -37,9 +37,20 @@ export default tseslint.config(
   },
   {
     // P3 / CLAUDE.md rule 2: the LLM egress path must not be able to reach user data.
-    // Phase 8 tightens this into a full module-boundary rule; the boundary is declared
-    // here from Phase 0 so it can never be crossed by accident in between.
-    files: ['src/background/redaction.ts', 'src/background/llm-client.ts'],
+    //
+    // Phase 8 note: `value-guard.ts` is deliberately NOT on this list. It is the
+    // one module that must see the user's own values — to check that the page is
+    // not echoing them back at the model — and it can only subtract. Everything
+    // downstream of it (llm-client) stays on the list, so a value cannot travel
+    // any further than the check that removes it.
+    files: [
+      'src/background/redaction.ts',
+      'src/background/llm-client.ts',
+      // Phase 8: the response validator and merge rules sit on the same path.
+      // They handle model output, which is untrusted input, and there is no
+      // reason for either to reach a value.
+      'src/matching/llm-matcher.ts',
+    ],
     rules: {
       'no-restricted-imports': [
         'error',

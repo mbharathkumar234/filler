@@ -48,6 +48,15 @@ export interface FieldDescriptor {
   options?: FieldOption[];
   maxLength?: number;
   pattern?: string;
+  /**
+   * The field's own `inputmode`, when it declares one.
+   *
+   * Added in Phase 8: `inputmode="numeric"` is how a modern portal says "this
+   * box takes digits", and nothing was reading it — so a four-character
+   * numeric box labelled "Name" was confidently mapped to a full name. Sits
+   * beside `pattern` because it serves exactly the same purpose.
+   */
+  inputmode?: string;
   required: boolean;
   /** iframes are first-class. */
   frameId: number;

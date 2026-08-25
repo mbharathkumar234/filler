@@ -15,82 +15,500 @@
     "    auto-fill threshold rather than guessed at.",
     "  - Every entry needs a fixture test (CLAUDE.md rule 5)."
   ],
-
-  "identity.full_name": ["full name", "name", "candidate name", "applicant name", "name of applicant", "name of candidate", "student name", "your name", "name in full", "full name of applicant", "नाम", "पूरा नाम", "अभ्यर्थी का नाम", "आवेदक का नाम"],
-  "identity.given_name": ["first name", "given name", "forename", "first"],
-  "identity.middle_name": ["middle name", "middle"],
-  "identity.surname": ["last name", "surname", "family name", "sur name", "उपनाम"],
-  "identity.dob": ["date of birth", "dob", "birth date", "birthdate", "date of birth dd mm yyyy", "जन्म तिथि", "जन्मतिथि", "जन्म दिनांक"],
-  "identity.gender": ["gender", "sex", "लिंग"],
-  "identity.category": ["category", "social category", "caste category", "reservation category", "community", "वर्ग", "श्रेणी", "जाति वर्ग"],
-  "identity.nationality": ["nationality", "citizenship", "राष्ट्रीयता", "नागरिकता"],
-  "identity.marital_status": ["marital status", "married", "वैवाहिक स्थिति"],
-  "identity.religion": ["religion", "धर्म"],
-  "identity.mother_tongue": ["mother tongue", "native language", "मातृभाषा"],
-  "identity.blood_group": ["blood group", "blood type", "रक्त समूह", "रक्त वर्ग"],
-
-  "family.father_name": ["fathers name", "father name", "name of father", "fathers full name", "father", "पिता का नाम", "पिता"],
-  "family.mother_name": ["mothers name", "mother name", "name of mother", "mother", "माता का नाम", "माता"],
-  "family.guardian_name": ["guardian name", "guardians name", "name of guardian", "parent guardian name", "father or guardian name", "अभिभावक का नाम"],
-  "family.father_occupation": ["fathers occupation", "father occupation", "occupation of father", "parents occupation", "पिता का व्यवसाय"],
-  "family.annual_income": ["annual income", "family income", "yearly income", "annual family income", "income per annum", "parental income", "वार्षिक आय", "पारिवारिक आय"],
-
-  "contact.email": ["email", "email id", "email address", "e mail", "e mail id", "mail id", "ईमेल", "ईमेल आईडी"],
-  "contact.mobile": ["mobile", "mobile number", "mobile no", "cell number", "phone number", "contact number", "mobile no 10 digits", "मोबाइल", "मोबाइल नंबर", "दूरभाष"],
-  "contact.alt_mobile": ["alternate mobile", "alternate mobile number", "alternate number", "secondary mobile", "other contact number", "alternate contact"],
-  "contact.landline": ["landline", "landline number", "telephone", "telephone number", "std code landline"],
-
-  "address.permanent.line1": ["address line 1", "address line i", "address", "permanent address", "house no street", "house number", "address 1", "flat house no", "पता", "स्थायी पता"],
-  "address.permanent.line2": ["address line 2", "address line ii", "address 2", "locality", "street area", "area locality", "landmark"],
-  "address.permanent.city": ["city", "town", "city town", "village", "town city village", "शहर", "नगर", "गाँव"],
-  "address.permanent.district": ["district", "जिला", "जिला नाम"],
-  "address.permanent.state": ["state", "state ut", "state union territory", "राज्य"],
-  "address.permanent.pincode": ["pin code", "pincode", "pin", "postal code", "zip code", "zip", "पिन कोड", "डाक कोड"],
-  "address.permanent.country": ["country", "देश"],
-
-  "address.correspondence.line1": ["correspondence address", "communication address", "present address", "current address", "mailing address", "correspondence address line 1", "पत्राचार का पता", "वर्तमान पता"],
-  "address.correspondence.line2": ["correspondence address line 2", "communication address line 2"],
-  "address.correspondence.city": ["correspondence city", "present city"],
-  "address.correspondence.district": ["correspondence district", "present district"],
-  "address.correspondence.state": ["correspondence state", "present state"],
-  "address.correspondence.pincode": ["correspondence pin code", "present pin code", "correspondence pincode"],
-  "address.correspondence.country": ["correspondence country", "present country"],
-
-  "id.aadhaar": ["aadhaar", "aadhar", "aadhaar number", "aadhar no", "aadhaar card number", "uid", "uidai number", "आधार", "आधार संख्या", "आधार नंबर"],
-  "id.pan": ["pan", "pan number", "pan card number", "permanent account number", "pan no"],
-  "id.passport": ["passport", "passport number", "passport no", "पासपोर्ट"],
-  "id.voter": ["voter id", "voter id number", "epic number", "elector photo identity card", "मतदाता पहचान"],
-  "id.driving_licence": ["driving licence", "driving license", "dl number", "licence number", "ड्राइविंग लाइसेंस"],
-  "id.abc_id": ["abc id", "academic bank of credits id", "abc account id"],
-  "id.apaar": ["apaar", "apaar id", "automated permanent academic account registry"],
-
-  "education[].level": ["qualification", "level", "examination", "exam passed", "course level", "degree level", "qualifying examination", "योग्यता", "परीक्षा"],
-  "education[].board_or_university": ["board", "university", "board university", "name of board", "name of university", "board or university", "बोर्ड", "विश्वविद्यालय"],
-  "education[].institution": ["school", "college", "institution", "name of school", "name of college", "institute name", "school college name", "विद्यालय", "महाविद्यालय"],
-  "education[].roll_number": ["roll number", "roll no", "registration number", "enrolment number", "seat number", "अनुक्रमांक", "रोल नंबर"],
-  "education[].year_of_passing": ["year of passing", "passing year", "year passed", "yop", "उत्तीर्ण वर्ष"],
-  "education[].marks_obtained": ["marks obtained", "obtained marks", "marks secured", "total marks obtained", "प्राप्त अंक"],
-  "education[].max_marks": ["maximum marks", "total marks", "max marks", "out of", "पूर्णांक"],
-  "education[].percentage": ["percentage", "percent", "percentage of marks", "aggregate percentage", "प्रतिशत"],
-  "education[].cgpa": ["cgpa", "gpa", "grade point average", "sgpa"],
-
-  "bank.account_holder": ["account holder name", "name as per bank", "beneficiary name", "account holder", "name of account holder", "खाताधारक का नाम"],
-  "bank.account_number": ["account number", "bank account number", "account no", "ac no", "खाता संख्या", "बैंक खाता संख्या"],
-  "bank.ifsc": ["ifsc", "ifsc code", "ifs code", "आईएफएससी"],
-  "bank.bank_name": ["bank name", "name of bank", "बैंक का नाम"],
-  "bank.branch": ["branch", "branch name", "bank branch", "शाखा"],
-  "bank.account_type": ["account type", "type of account", "savings current"],
-
-  "doc.photo": ["photo", "photograph", "upload photo", "upload photograph", "passport size photograph", "recent photograph", "candidate photo", "फोटो", "फोटोग्राफ"],
-  "doc.signature": ["signature", "upload signature", "scanned signature", "specimen signature", "हस्ताक्षर"],
-  "doc.aadhaar_card": ["aadhaar card", "aadhar card copy", "upload aadhaar", "aadhaar copy"],
-  "doc.pan_card": ["pan card", "upload pan", "pan card copy"],
-  "doc.marksheet_10": ["10th marksheet", "class 10 marksheet", "matriculation certificate", "sslc marksheet", "tenth marksheet", "10th certificate"],
-  "doc.marksheet_12": ["12th marksheet", "class 12 marksheet", "intermediate marksheet", "hsc marksheet", "twelfth marksheet", "12th certificate"],
-  "doc.degree_certificate": ["degree certificate", "graduation certificate", "provisional certificate", "convocation certificate"],
-  "doc.income_certificate": ["income certificate", "आय प्रमाण पत्र"],
-  "doc.caste_certificate": ["caste certificate", "community certificate", "जाति प्रमाण पत्र"],
-  "doc.domicile_certificate": ["domicile certificate", "residence certificate", "nativity certificate", "निवास प्रमाण पत्र"],
-  "doc.bank_passbook": ["bank passbook", "passbook", "cancelled cheque", "passbook first page"],
-  "doc.disability_certificate": ["disability certificate", "pwd certificate", "divyang certificate", "handicap certificate"]
+  "identity.full_name": [
+    "full name",
+    "name",
+    "candidate name",
+    "applicant name",
+    "name of applicant",
+    "name of candidate",
+    "student name",
+    "your name",
+    "name in full",
+    "full name of applicant",
+    "नाम",
+    "पूरा नाम",
+    "अभ्यर्थी का नाम",
+    "आवेदक का नाम"
+  ],
+  "identity.given_name": [
+    "first name",
+    "given name",
+    "forename",
+    "first"
+  ],
+  "identity.middle_name": [
+    "middle name",
+    "middle"
+  ],
+  "identity.surname": [
+    "last name",
+    "surname",
+    "family name",
+    "sur name",
+    "उपनाम"
+  ],
+  "identity.dob": [
+    "date of birth",
+    "dob",
+    "birth date",
+    "birthdate",
+    "date of birth dd mm yyyy",
+    "जन्म तिथि",
+    "जन्मतिथि",
+    "जन्म दिनांक"
+  ],
+  "identity.gender": [
+    "gender",
+    "sex",
+    "लिंग"
+  ],
+  "identity.category": [
+    "category",
+    "social category",
+    "caste category",
+    "reservation category",
+    "community",
+    "वर्ग",
+    "श्रेणी",
+    "जाति वर्ग"
+  ],
+  "identity.nationality": [
+    "nationality",
+    "citizenship",
+    "राष्ट्रीयता",
+    "नागरिकता"
+  ],
+  "identity.marital_status": [
+    "marital status",
+    "married",
+    "वैवाहिक स्थिति"
+  ],
+  "identity.religion": [
+    "religion",
+    "धर्म"
+  ],
+  "identity.mother_tongue": [
+    "mother tongue",
+    "native language",
+    "मातृभाषा"
+  ],
+  "identity.blood_group": [
+    "blood group",
+    "blood type",
+    "रक्त समूह",
+    "रक्त वर्ग"
+  ],
+  "family.father_name": [
+    "fathers name",
+    "father name",
+    "name of father",
+    "fathers full name",
+    "father",
+    "पिता का नाम",
+    "पिता"
+  ],
+  "family.mother_name": [
+    "mothers name",
+    "mother name",
+    "name of mother",
+    "mother",
+    "माता का नाम",
+    "माता"
+  ],
+  "family.guardian_name": [
+    "guardian name",
+    "guardians name",
+    "name of guardian",
+    "parent guardian name",
+    "father or guardian name",
+    "अभिभावक का नाम"
+  ],
+  "family.father_occupation": [
+    "fathers occupation",
+    "father occupation",
+    "occupation of father",
+    "parents occupation",
+    "पिता का व्यवसाय"
+  ],
+  "family.annual_income": [
+    "annual income",
+    "family income",
+    "yearly income",
+    "annual family income",
+    "income per annum",
+    "parental income",
+    "वार्षिक आय",
+    "पारिवारिक आय"
+  ],
+  "contact.email": [
+    "email",
+    "email id",
+    "email address",
+    "e mail",
+    "e mail id",
+    "mail id",
+    "ईमेल",
+    "ईमेल आईडी"
+  ],
+  "contact.mobile": [
+    "mobile",
+    "mobile number",
+    "mobile no",
+    "cell number",
+    "phone number",
+    "contact number",
+    "mobile no 10 digits",
+    "मोबाइल",
+    "मोबाइल नंबर",
+    "दूरभाष"
+  ],
+  "contact.alt_mobile": [
+    "alternate mobile",
+    "alternate mobile number",
+    "alternate number",
+    "secondary mobile",
+    "other contact number",
+    "alternate contact"
+  ],
+  "contact.landline": [
+    "landline",
+    "landline number",
+    "telephone",
+    "telephone number",
+    "std code landline"
+  ],
+  "address.permanent.line1": [
+    "address line 1",
+    "address line i",
+    "address",
+    "permanent address",
+    "house no street",
+    "house number",
+    "address 1",
+    "flat house no",
+    "पता",
+    "स्थायी पता"
+  ],
+  "address.permanent.line2": [
+    "address line 2",
+    "address line ii",
+    "address 2",
+    "locality",
+    "street area",
+    "area locality",
+    "landmark"
+  ],
+  "address.permanent.city": [
+    "city",
+    "town",
+    "city town",
+    "village",
+    "town city village",
+    "शहर",
+    "नगर",
+    "गाँव"
+  ],
+  "address.permanent.district": [
+    "district",
+    "जिला",
+    "जिला नाम"
+  ],
+  "address.permanent.state": [
+    "state",
+    "state ut",
+    "state union territory",
+    "राज्य"
+  ],
+  "address.permanent.pincode": [
+    "pin code",
+    "pincode",
+    "pin",
+    "postal code",
+    "zip code",
+    "zip",
+    "पिन कोड",
+    "डाक कोड"
+  ],
+  "address.permanent.country": [
+    "country",
+    "देश"
+  ],
+  "address.correspondence.line1": [
+    "correspondence address",
+    "communication address",
+    "present address",
+    "current address",
+    "mailing address",
+    "correspondence address line 1",
+    "पत्राचार का पता",
+    "वर्तमान पता"
+  ],
+  "address.correspondence.line2": [
+    "correspondence address line 2",
+    "communication address line 2"
+  ],
+  "address.correspondence.city": [
+    "correspondence city",
+    "present city"
+  ],
+  "address.correspondence.district": [
+    "correspondence district",
+    "present district"
+  ],
+  "address.correspondence.state": [
+    "correspondence state",
+    "present state"
+  ],
+  "address.correspondence.pincode": [
+    "correspondence pin code",
+    "present pin code",
+    "correspondence pincode"
+  ],
+  "address.correspondence.country": [
+    "correspondence country",
+    "present country"
+  ],
+  "id.aadhaar": [
+    "aadhaar",
+    "aadhar",
+    "aadhaar number",
+    "aadhar no",
+    "aadhaar card number",
+    "uid",
+    "uidai number",
+    "आधार",
+    "आधार संख्या",
+    "आधार नंबर"
+  ],
+  "id.pan": [
+    "pan",
+    "pan number",
+    "pan card number",
+    "permanent account number",
+    "pan no"
+  ],
+  "id.passport": [
+    "passport",
+    "passport number",
+    "passport no",
+    "पासपोर्ट"
+  ],
+  "id.voter": [
+    "voter id",
+    "voter id number",
+    "epic number",
+    "elector photo identity card",
+    "मतदाता पहचान"
+  ],
+  "id.driving_licence": [
+    "driving licence",
+    "driving license",
+    "dl number",
+    "licence number",
+    "ड्राइविंग लाइसेंस"
+  ],
+  "id.abc_id": [
+    "abc id",
+    "academic bank of credits id",
+    "abc account id"
+  ],
+  "id.apaar": [
+    "apaar",
+    "apaar id",
+    "automated permanent academic account registry"
+  ],
+  "education[].level": [
+    "qualification",
+    "level",
+    "examination",
+    "exam passed",
+    "course level",
+    "degree level",
+    "qualifying examination",
+    "योग्यता",
+    "परीक्षा"
+  ],
+  "education[].board_or_university": [
+    "board",
+    "university",
+    "board university",
+    "name of board",
+    "name of university",
+    "board or university",
+    "बोर्ड",
+    "विश्वविद्यालय"
+  ],
+  "education[].institution": [
+    "school",
+    "college",
+    "institution",
+    "name of school",
+    "name of college",
+    "institute name",
+    "school college name",
+    "विद्यालय",
+    "महाविद्यालय"
+  ],
+  "education[].roll_number": [
+    "roll number",
+    "roll no",
+    "registration number",
+    "enrolment number",
+    "seat number",
+    "अनुक्रमांक",
+    "रोल नंबर"
+  ],
+  "education[].year_of_passing": [
+    "year of passing",
+    "passing year",
+    "year passed",
+    "yop",
+    "उत्तीर्ण वर्ष"
+  ],
+  "education[].marks_obtained": [
+    "marks obtained",
+    "obtained marks",
+    "marks secured",
+    "total marks obtained",
+    "प्राप्त अंक"
+  ],
+  "education[].max_marks": [
+    "maximum marks",
+    "total marks",
+    "max marks",
+    "out of",
+    "पूर्णांक"
+  ],
+  "education[].percentage": [
+    "percentage",
+    "percent",
+    "percentage of marks",
+    "aggregate percentage",
+    "प्रतिशत"
+  ],
+  "education[].cgpa": [
+    "cgpa",
+    "gpa",
+    "grade point average",
+    "sgpa"
+  ],
+  "bank.account_holder": [
+    "account holder name",
+    "name as per bank",
+    "beneficiary name",
+    "account holder",
+    "name of account holder",
+    "खाताधारक का नाम"
+  ],
+  "bank.account_number": [
+    "account number",
+    "bank account number",
+    "account no",
+    "ac no",
+    "खाता संख्या",
+    "बैंक खाता संख्या"
+  ],
+  "bank.ifsc": [
+    "ifsc",
+    "ifsc code",
+    "ifs code",
+    "indian financial system code",
+    "indian financial system",
+    "आईएफएससी"
+  ],
+  "bank.bank_name": [
+    "bank name",
+    "name of bank",
+    "बैंक का नाम"
+  ],
+  "bank.branch": [
+    "branch",
+    "branch name",
+    "bank branch",
+    "शाखा"
+  ],
+  "bank.account_type": [
+    "account type",
+    "type of account",
+    "savings current"
+  ],
+  "doc.photo": [
+    "photo",
+    "photograph",
+    "upload photo",
+    "upload photograph",
+    "passport size photograph",
+    "recent photograph",
+    "candidate photo",
+    "फोटो",
+    "फोटोग्राफ"
+  ],
+  "doc.signature": [
+    "signature",
+    "upload signature",
+    "scanned signature",
+    "specimen signature",
+    "हस्ताक्षर"
+  ],
+  "doc.aadhaar_card": [
+    "aadhaar card",
+    "aadhar card copy",
+    "upload aadhaar",
+    "aadhaar copy"
+  ],
+  "doc.pan_card": [
+    "pan card",
+    "upload pan",
+    "pan card copy"
+  ],
+  "doc.marksheet_10": [
+    "10th marksheet",
+    "class 10 marksheet",
+    "matriculation certificate",
+    "sslc marksheet",
+    "tenth marksheet",
+    "10th certificate"
+  ],
+  "doc.marksheet_12": [
+    "12th marksheet",
+    "class 12 marksheet",
+    "intermediate marksheet",
+    "hsc marksheet",
+    "twelfth marksheet",
+    "12th certificate"
+  ],
+  "doc.degree_certificate": [
+    "degree certificate",
+    "graduation certificate",
+    "provisional certificate",
+    "convocation certificate"
+  ],
+  "doc.income_certificate": [
+    "income certificate",
+    "आय प्रमाण पत्र"
+  ],
+  "doc.caste_certificate": [
+    "caste certificate",
+    "community certificate",
+    "जाति प्रमाण पत्र"
+  ],
+  "doc.domicile_certificate": [
+    "domicile certificate",
+    "residence certificate",
+    "nativity certificate",
+    "निवास प्रमाण पत्र"
+  ],
+  "doc.bank_passbook": [
+    "bank passbook",
+    "passbook",
+    "cancelled cheque",
+    "passbook first page"
+  ],
+  "doc.disability_certificate": [
+    "disability certificate",
+    "pwd certificate",
+    "divyang certificate",
+    "handicap certificate"
+  ]
 }

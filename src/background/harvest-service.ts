@@ -12,7 +12,9 @@ import { envelope } from '@/shared/messages';
 import type { HarvestReport } from '@/content/index';
 import type { MatchResult } from '@/shared/types';
 import { bundledProfiles } from '@/matching/profile-cache';
+import { loadLearned } from '@/matching/learned-profiles';
 import { matchFormWithContext } from '@/matching';
+import { enrichWithLlm, recordUsage } from './llm-service';
 
 /** Built by Vite as a separate entry; see vite.config.ts rollupOptions. */
 const CONTENT_SCRIPT = 'content.js';
@@ -41,6 +43,10 @@ export interface TabHarvest {
   profileStale: { siteId: string; version: number; resolveRate: number } | null;
   /** A "same as permanent address" control, for Phase 5. */
   sameAsPermanent: string | null;
+  /** § Phase 8: why the model did or did not run. Null when it was not needed. */
+  llmNotice: string | null;
+  /** True when a suggestion from the model is in `matches`. */
+  llmUsed: boolean;
 }
 
 /**
@@ -89,14 +95,33 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
 
   // Matching runs in the worker, not the page: the rules and the synonym
   // dictionary are ours, and a hostile page must not get to observe them.
+  // Learned profiles sit alongside the bundled ones: a form the model mapped
+  // once is matched by profile from then on, which is what makes the plan's
+  // "once per form, ever" true rather than aspirational.
+  const learned = await loadLearned().catch(() => []);
+
   const matched = matchFormWithContext(fields, {
     url,
     fingerprint: top.fingerprint,
-    profiles: bundledProfiles(),
+    profiles: [...bundledProfiles(), ...learned],
     // Selector resolution against the live page belongs to Phase 5's filler;
     // until then a shipped profile is trusted to resolve.
     resolve: () => true,
   });
+
+  // § Phase 8 — the LLM sees only what the rules could not place, and only
+  // after redaction and the value guard. It never throws: a failure comes back
+  // as a notice with the deterministic results untouched.
+  const enriched = await enrichWithLlm(fields, matched.results, {
+    url,
+    fingerprint: top.fingerprint,
+    submit: top.submit ? { selectors: [top.submit.selector], label: top.submit.label } : null,
+  });
+  if (enriched.usage) {
+    await recordUsage(enriched.usage).catch(() => {
+      // A meter that fails to write must not fail the match.
+    });
+  }
 
   return {
     ok: true,
@@ -111,7 +136,7 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
       fingerprint: top.fingerprint,
       visibleCount: frames.reduce((sum, f) => sum + f.visibleCount, 0),
       labelledCount: frames.reduce((sum, f) => sum + f.labelledCount, 0),
-      matches: matched.results,
+      matches: enriched.results,
       profileUsed: matched.profile
         ? {
             siteId: matched.profile.profile.siteId,
@@ -127,6 +152,8 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
           }
         : null,
       sameAsPermanent: matched.sameAsPermanent,
+      llmNotice: enriched.notice ?? null,
+      llmUsed: enriched.called && enriched.results.some((r) => r.source === 'llm'),
     },
   };
 }

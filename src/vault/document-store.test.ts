@@ -39,12 +39,16 @@ afterEach(async () => {
 });
 
 describe('schema migration', () => {
-  it('opens at version 2 with the document stores present', () => {
+  it('opens at the current version with every store present', () => {
+    // v1 profile + meta, v2 documents + variants, v3 sealed settings (the
+    // Phase 8 API key). Listed in full so a migration that forgets a store
+    // fails here rather than at the first read.
     expect(db.version).toBe(DB_VERSION);
     expect([...db.objectStoreNames].sort()).toEqual([
       'documents',
       'meta',
       'profile',
+      'settings',
       'variants',
     ]);
   });

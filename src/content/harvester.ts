@@ -237,6 +237,11 @@ export function harvest(
       const pattern = el.getAttribute('pattern');
       if (pattern) descriptor.pattern = pattern;
 
+      // `inputmode` is how a modern portal declares "digits only". The traits
+      // veto reads it, so a numeric box labelled "Name" cannot become one.
+      const inputmode = el.getAttribute('inputmode');
+      if (inputmode) descriptor.inputmode = inputmode;
+
       fields.push(descriptor);
       elements.set(ref, el);
       labelSources.set(ref, label.source);

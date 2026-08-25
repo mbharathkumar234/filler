@@ -37,6 +37,8 @@ import {
   readAudit,
   setAuditSettings,
 } from '@/runtime/audit';
+import { llmStatus, resetUsage, setApiKey, setModel } from './llm-service';
+import { forgetLearned } from '@/matching/learned-profiles';
 import { clearTab, pruneRuns } from '@/runtime/persistence';
 import { lockVault } from '@/vault/session';
 
@@ -141,6 +143,21 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
       return { ok: true, data: null };
     case 'audit:clear':
       await clearAuditLog();
+      return { ok: true, data: null };
+
+    case 'llm:status':
+      return { ok: true, data: await llmStatus() };
+    case 'llm:set-key':
+      await setApiKey(request.apiKey);
+      return { ok: true, data: null };
+    case 'llm:set-model':
+      await setModel(request.model);
+      return { ok: true, data: null };
+    case 'llm:reset-usage':
+      await resetUsage();
+      return { ok: true, data: null };
+    case 'llm:forget-learned':
+      await forgetLearned();
       return { ok: true, data: null };
 
     case 'run:abort':

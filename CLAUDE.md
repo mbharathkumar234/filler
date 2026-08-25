@@ -4,7 +4,10 @@
 1. Never write code that clicks a submit/final-action element outside `submit-guard.ts`,
    and only when `approvalToken` is present and valid.
 2. Never include user profile values, document bytes, or filenames in any network request.
-   All outbound LLM payloads must pass through `redaction.ts` and its test suite.
+   All outbound LLM payloads pass through `redaction.ts` (structure and syntax) and then
+   `value-guard.ts` (the user's own values, which have no syntax — a name is just words).
+   `llm-client.ts` accepts only a `GuardedPayload`, so skipping the check is a type error.
+   `redaction.ts`, `llm-client.ts` and `llm-matcher.ts` may not import `vault/` or `documents/`.
 3. Never implement CAPTCHA solving, OTP reading, or eSign automation.
    `content/blockers.ts` may notice such a control exists and say where it is; it may never read
    one. Its test asserts that against the file's own source, so adding `.value`, a canvas read,

@@ -15,6 +15,7 @@ import { VaultGate } from '@/ui/vault-editor/VaultGate';
 import { VaultEditor } from '@/ui/vault-editor/VaultEditor';
 import { ReviewScreen } from '@/ui/review/ReviewScreen';
 import { AuditPanel } from '@/ui/review/AuditPanel';
+import { LlmPanel } from '@/ui/review/LlmPanel';
 import { FieldsPanel } from './FieldsPanel';
 
 export function App() {
@@ -73,6 +74,7 @@ export function App() {
             <ReviewScreen tabId={reviewTabId} onDone={() => setReviewTabId(null)} />
           )}
           <VaultEditor onLocked={() => void refresh()} />
+          <LlmPanel />
           <AuditPanel />
         </>
       ) : (

@@ -29,6 +29,7 @@ import type { TabHarvest } from '@/background/harvest-service';
 import type { FillReport, WriteInstruction } from '@/background/fill-service';
 import type { ReviewPayload } from '@/background/review-service';
 import type { AuditEntry, AuditSettings } from '@/runtime/audit';
+import type { LlmStatus } from '@/background/llm-service';
 import type { ApprovalToken } from '@/content/submit-guard';
 
 // ---------------------------------------------------------------------------
@@ -135,6 +136,20 @@ export type ApprovalRequest =
   | { type: 'approval:revoke'; tabId: number }
   | { type: 'approval:status'; tabId: number };
 
+/**
+ * The model settings (§ Phase 8). All privileged.
+ *
+ * Note there is no request that *reads* the API key. The panel can store one,
+ * clear one, and ask whether one exists; it can never fetch it back. A UI that
+ * cannot obtain a secret cannot leak it.
+ */
+export type LlmRequest =
+  | { type: 'llm:status' }
+  | { type: 'llm:set-key'; apiKey: string | null }
+  | { type: 'llm:set-model'; model: string | null }
+  | { type: 'llm:reset-usage' }
+  | { type: 'llm:forget-learned' };
+
 export type AuditRequest =
   | { type: 'audit:read'; limit?: number }
   | { type: 'audit:configure'; logValues: boolean }
@@ -149,6 +164,7 @@ export type ExtensionRequest =
   | ReviewRequest
   | ApprovalRequest
   | AuditRequest
+  | LlmRequest
   | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
 
@@ -185,6 +201,11 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'audit:configure',
   'audit:settings',
   'audit:clear',
+  'llm:status',
+  'llm:set-key',
+  'llm:set-model',
+  'llm:reset-usage',
+  'llm:forget-learned',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -235,6 +256,11 @@ export interface ResponseMap {
   'audit:configure': null;
   'audit:settings': AuditSettings;
   'audit:clear': null;
+  'llm:status': LlmStatus;
+  'llm:set-key': null;
+  'llm:set-model': null;
+  'llm:reset-usage': null;
+  'llm:forget-learned': null;
   ping: 'pong';
   'harvest:request': null;
   'harvest:ready': null;

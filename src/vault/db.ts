@@ -13,7 +13,7 @@ import type { DocumentMeta } from '@/shared/types';
 import type { KdfParams, SealedRecord } from './crypto';
 
 export const DB_NAME = 'autofill-vault';
-export const DB_VERSION = 2;
+export const DB_VERSION = 3;
 
 /** Where a stored value came from — surfaced in the review screen (Phase 7). */
 export type ProvenanceSource = 'user' | 'imported' | 'corrected';
@@ -27,6 +27,13 @@ export interface StoredProfileRecord {
 }
 
 /** Vault metadata. Not secret — the salt and iteration count are public inputs. */
+/** A setting whose value is a secret — sealed under the vault key. */
+export interface StoredSetting {
+  name: string;
+  sealed: SealedRecord;
+  updatedAt: string;
+}
+
 export interface VaultMeta {
   id: 'vault';
   schemaVersion: number;
@@ -66,6 +73,7 @@ export interface StoredVariant {
 
 interface VaultSchema extends DBSchema {
   meta: { key: 'vault'; value: VaultMeta };
+  settings: { key: string; value: StoredSetting };
   profile: { key: FieldKey; value: StoredProfileRecord };
   documents: { key: string; value: StoredDocument; indexes: { byKey: FieldKey } };
   variants: { key: string; value: StoredVariant; indexes: { byMaster: string } };
@@ -89,6 +97,15 @@ export function openVaultDb(): Promise<VaultDb> {
         documents.createIndex('byKey', 'key');
         const variants = db.createObjectStore('variants', { keyPath: 'id' });
         variants.createIndex('byMaster', 'masterId');
+      }
+      // v3 — sealed settings (Phase 8). The API key lives here rather than in
+      // chrome.storage.local so that a copy of the profile directory does not
+      // hand over a working credential: it is encrypted under the vault key,
+      // which means the model can only be used while the vault is unlocked.
+      // That is the right coupling anyway — the LLM exists to help fill, and
+      // filling needs the vault open.
+      if (oldVersion < 3) {
+        db.createObjectStore('settings', { keyPath: 'name' });
       }
     },
   });

@@ -210,6 +210,27 @@ const SCORES = {
 const CORROBORATION_BONUS = 0.04;
 
 /**
+ * A longer synonym match is stronger evidence, and gets a little more score.
+ *
+ * Found by the Phase 8 fourth portal: "Indian Financial System Code of the
+ * Branch" was confidently mapped to `bank.branch`, because a fully-covered
+ * one-token synonym ("branch") scored exactly as high as a fully-covered
+ * four-token one would. Length is the whole difference between a phrase that
+ * happens to appear in a label and a phrase that *is* the label's subject.
+ *
+ * Capped at three steps so the ceiling (0.78 + 0.09 = 0.87) stays below
+ * `labelExact`: a contained phrase, however long, is still weaker evidence
+ * than a label that matches a synonym outright.
+ */
+const SPECIFICITY_BONUS = 0.03;
+const MAX_SPECIFICITY_STEPS = 3;
+
+function coverageScore(synonymTokens: number): number {
+  const steps = Math.min(synonymTokens - 1, MAX_SPECIFICITY_STEPS);
+  return SCORES.labelCoverage + Math.max(0, steps) * SPECIFICITY_BONUS;
+}
+
+/**
  * When the runner-up is this close, the match is ambiguous.
  *
  * Set just above the exact-vs-coverage gap (0.90 − 0.78 = 0.12), because that
@@ -268,7 +289,7 @@ function collectSignals(field: FieldDescriptor): Signal[] {
       if (covered === 1 && entry.tokens.length > 0) {
         signals.push({
           key: entry.key,
-          score: SCORES.labelCoverage,
+          score: coverageScore(entry.tokens.length),
           rationale: `label contains "${entry.phrase}"`,
         });
       } else if (
