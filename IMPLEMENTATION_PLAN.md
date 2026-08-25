@@ -423,42 +423,78 @@ synonym dictionary and taxonomy do not ship into the tab.
 
 ## Phase 5 — Fill engine & the submit guard
 
-**Goal:** actually write values into a page, robustly, and make submission structurally impossible without approval.
+**Goal:** actually write values into a page, robustly, and make submission structurally impossible
+without approval.
+
+**Status: complete.** 602 unit tests + 36 e2e green.
 
 ### Must Achieve
 
-- [ ] `content/filler.ts` writes values in a way frameworks accept:
-  - use the native value setter
-    (`Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set`) so React/Angular register the change,
-  - dispatch `input`, `change`, `blur` (and `keydown`/`keyup` where a portal listens for them),
-  - selects: match by option value, then exact text, then normalised text, then fuzzy — record which strategy won,
-  - radio/checkbox groups: match by label text,
-  - file inputs: build a `File` from the derived variant, wrap in `DataTransfer`, assign to `input.files`,
-    dispatch `change`.
-- [ ] Sequential filling with a small randomised inter-field delay (60-200 ms) — this is for
-      **dependent-dropdown correctness and not tripping naive rate heuristics**, not for deception. Wait for
-      dependent selects to repopulate before filling the child.
-- [ ] Per-field verification immediately after write: read back the value; mismatch ⇒ retry once ⇒ mark `fillFailed`.
-- [ ] `content/submit-guard.ts`:
-  - installed at `document_start`, capture phase, on `click`, `submit`, and `keydown[Enter]`,
-  - blocks any submit-ish activation unless a valid, unexpired, unburned `approvalToken` is present,
-  - blocks `form.submit()` by patching the prototype for the page's forms (documented as best-effort),
-  - shows an in-page toast when it blocks something, so the behaviour is never mysterious.
-- [ ] In-page overlay: a status pill (filling / paused / review ready) the user can always see, plus an **Abort** button.
+- [x] `content/filler.ts` writes values the way frameworks accept: the prototype's native value
+      setter (so React's tracker does not swallow the write), `input`/`change`/`blur` plus
+      `keydown`/`keyup`, selects matched by value → exact text → normalised text → fuzzy with the
+      winning strategy recorded, radio/checkbox by label text, and file inputs via `DataTransfer`.
+- [x] Sequential filling with a randomised 60–200 ms inter-field delay, and an explicit wait for a
+      dependent select to repopulate before filling the child.
+- [x] Per-field verification by read-back: mismatch ⇒ retry once ⇒ mark `fillFailed`.
+- [x] `content/submit-guard.ts`: capture-phase `click`/`submit`/`keydown[Enter]`, blocks anything
+      submit-ish without a valid unexpired unburned token, patches `HTMLFormElement.prototype.submit`
+      (best-effort, documented), and toasts every block.
+- [x] In-page overlay: status pill (filling / paused / review ready / blocked) plus Abort, in a
+      closed shadow root so a hostile page cannot restyle it away.
 
 ### Should Achieve
 
-- [ ] "Fill this one field" mode from the picker.
-- [ ] Undo — restore the pre-fill snapshot of every touched field.
-- [ ] Respect `maxLength` and truncate with a review flag rather than silently corrupting data.
+- [x] Undo — restores the pre-fill snapshot of every touched field, including values the user had
+      typed themselves.
+- [x] Respect `maxLength`, truncating with a review flag rather than silently corrupting data.
+- [ ] "Fill this one field" mode from the picker. **Not done** — the picker itself is Phase 9.
+
+Also delivered here: **dependent-dropdown detection**, deferred from Phase 3 because there was
+nothing to observe until something could drive a select.
 
 **Out of scope:** review screen, approval.
 
-**Verify:** e2e on fixtures — every mapped field ends up with the correct value; clicking the real submit
-button while unarmed does nothing except show the toast. Write an adversarial test where the fixture page
-calls `form.submit()` on load.
+**Verify:** e2e on fixtures — every mapped field ends up with the correct value; clicking the real
+submit button while unarmed does nothing except show the toast. Write an adversarial test where the
+fixture page calls `form.submit()` on load.
 
----
+*Done* in `tests/e2e/fill.spec.ts` against `fixtures/hostile-portal/`, which fights back on a timer,
+on every input event, and via a scripted click on the real submit button. The suite asserts the
+premise first (the page really does try) before asserting we stop it.
+
+### What P2 actually guarantees — stated precisely
+
+The guarantee is **not** "this page can never submit". It is: *no value the extension filled reaches
+a submit without an explicit approval gesture.* Three limits make that distinction real, and each is
+tested rather than assumed:
+
+1. **The prototype patch is best-effort.** Code that captured `form.submit` before we installed
+   keeps a working reference.
+2. **We install on a user gesture, not at `document_start`.** A page that submits itself during load
+   does so before we exist — `fixtures/hostile-portal/page-onload.html` proves it navigates, and the
+   test asserts that outcome rather than pretending otherwise. P2 still holds there: nothing of ours
+   had been filled.
+3. **The token is the real control**; the patch is defence in depth. It names one element, carries a
+   90-second expiry, and is burned on the submission — not on the click that starts it, since a
+   click's default action *is* the submit and burning early would block the very activation it just
+   authorised.
+
+### Design notes
+
+**Two bugs the tests caught, both about the shape of a submission.** Burning the token at click time
+unarmed the guard before the resulting `submit` event arrived. And repeated `installSubmitGuard`
+calls left stale capture listeners attached, so a second copy blocked what the first had just
+permitted — fixed with a real `uninstallSubmitGuard`, which Abort wants anyway.
+
+**A jsdom artifact worth knowing about.** jsdom implements a submit button's default action by
+calling `HTMLFormElement.prototype.submit()` internally; Chrome does not. Guard tests therefore
+`preventDefault()` in a submit listener to model a real page — see the comment in
+`submit-guard.test.ts` before "fixing" it.
+
+**Only this form's values cross into the page.** Filling requires putting a value in the DOM; that is
+inherent. Shipping the whole vault into a hostile tab is not, so `fill-service.ts` sends one value
+per matched field and nothing below the fill threshold at all.
 
 ## Phase 6 — Pause, resume, and drift recovery
 

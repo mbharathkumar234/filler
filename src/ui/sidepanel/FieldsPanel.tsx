@@ -10,6 +10,7 @@
 
 import { useCallback, useState } from 'react';
 import type { TabHarvest } from '@/background/harvest-service';
+import type { FillReport } from '@/background/fill-service';
 import type { FieldDescriptor, MatchResult } from '@/shared/types';
 import { bandOf, type MatchBand } from '@/matching';
 import { errorMessage, send } from '@/ui/lib/client';
@@ -33,6 +34,7 @@ export function FieldsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
+  const [fill, setFill] = useState<FillReport | null>(null);
 
   const scan = useCallback(async () => {
     setBusy(true);
@@ -44,6 +46,38 @@ export function FieldsPanel() {
         return;
       }
       setHarvest(await send({ type: 'harvest:tab', tabId: tab.id }));
+      setFill(null);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const runFill = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) {
+        setError('No active tab.');
+        return;
+      }
+      setFill(await send({ type: 'fill:tab', tabId: tab.id }));
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const undo = useCallback(async () => {
+    setBusy(true);
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id) return;
+      await send({ type: 'fill:undo:tab', tabId: tab.id });
+      setFill(null);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -74,8 +108,69 @@ export function FieldsPanel() {
       </div>
 
       <p className="mt-1 text-xs text-slate-500">
-        Reads the page only when you press Scan. Nothing is filled or submitted.
+        Reads the page only when you press Scan. Nothing is ever submitted without your approval.
       </p>
+
+      {harvest && harvest.matches.some((m) => bandOf(m) !== 'unmapped') && (
+        <div className="mt-2 flex gap-2">
+          <button
+            type="button"
+            onClick={() => void runFill()}
+            disabled={busy}
+            className="rounded bg-emerald-700 px-2 py-1 text-xs text-white disabled:bg-slate-300"
+          >
+            {busy ? 'Filling…' : 'Fill this form'}
+          </button>
+          {fill && (
+            <button
+              type="button"
+              onClick={() => void undo()}
+              disabled={busy}
+              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-700"
+            >
+              Undo
+            </button>
+          )}
+        </div>
+      )}
+
+      {fill && (
+        <div className="mt-2 rounded border border-emerald-300 bg-emerald-50 p-2 text-xs text-emerald-900">
+          <p className="font-medium">
+            Filled {fill.filled} of {fill.attempted} fields
+            {fill.aborted && ' — aborted'}
+          </p>
+          <p className="mt-0.5 text-emerald-800">
+            Nothing has been submitted. Check every value before you approve.
+          </p>
+          {fill.records.filter((r) => r.truncated).length > 0 && (
+            <p className="mt-0.5 text-amber-800">
+              {fill.records.filter((r) => r.truncated).length} value(s) were shortened to fit —
+              check them.
+            </p>
+          )}
+          {fill.records.filter((r) => r.fuzzy).length > 0 && (
+            <p className="mt-0.5 text-amber-800">
+              {fill.records.filter((r) => r.fuzzy).length} dropdown(s) were matched approximately.
+            </p>
+          )}
+          {fill.records.filter((r) => r.fillFailed).length > 0 && (
+            <p className="mt-0.5 text-red-700">
+              {fill.records.filter((r) => r.fillFailed).length} field(s) would not accept a value.
+            </p>
+          )}
+          {fill.skippedLowConfidence.length > 0 && (
+            <p className="mt-0.5 text-slate-700">
+              {fill.skippedLowConfidence.length} field(s) left blank — not confident enough.
+            </p>
+          )}
+          {fill.blocked > 0 && (
+            <p className="mt-0.5 text-red-700">
+              Blocked {fill.blocked} submission attempt(s) during the run.
+            </p>
+          )}
+        </div>
+      )}
 
       {error && (
         <p role="alert" className="mt-2 rounded border border-red-300 bg-red-50 p-2 text-xs text-red-700">

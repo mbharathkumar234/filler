@@ -42,8 +42,36 @@ export interface HarvestSnapshot {
   domUnchanged: string;
 }
 
+export interface FillRecord {
+  ref: string;
+  ok: boolean;
+  strategy: string;
+  truncated: boolean;
+  fuzzy: boolean;
+  attempts: number;
+}
+
+export interface GuardReport {
+  blocked: number;
+  armed: boolean;
+  toasts: string[];
+  submitAttempts: number;
+  submitEventsSeen: number;
+}
+
+export interface HarnessWrite {
+  ref: string;
+  key: string;
+  value: string;
+  dependent?: boolean;
+}
+
 declare global {
   interface Window {
+    __installGuard: () => { installed: boolean };
+    __fill: (writes: HarnessWrite[]) => Promise<{ records: FillRecord[]; aborted: boolean }>;
+    __guardReport: () => GuardReport;
+    __arm: (token: { value: string; expiresAt: number; targetSelector: string }) => void;
     __harvest: () => HarvestSnapshot;
     __derive: (
       url: string,

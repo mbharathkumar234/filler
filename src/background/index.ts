@@ -17,6 +17,7 @@ import {
 import { handleVaultRequest, isVaultRequest } from './vault-service';
 import { handleDocumentRequest } from './document-service';
 import { harvestTab } from './harvest-service';
+import { fillTab, undoFillOnTab } from './fill-service';
 import { lockVault } from '@/vault/session';
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -44,6 +45,10 @@ async function route(request: ExtensionRequest): Promise<Result<unknown>> {
   switch (request.type) {
     case 'harvest:tab':
       return harvestTab(request.tabId);
+    case 'fill:tab':
+      return fillTab(request.tabId);
+    case 'fill:undo:tab':
+      return undoFillOnTab(request.tabId);
     case 'harvest:ready':
       return { ok: true, data: null };
     case 'ping':

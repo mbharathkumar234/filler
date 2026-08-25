@@ -19,13 +19,14 @@ It is an assistant for a person at the keyboard. It is not a bot.
 
 ## Status
 
-**Phase 4 complete — vault, documents, harvester, and matcher.** Create an encrypted vault and enter
-your details once. Add document masters and get portal-sized versions on demand. Press **Scan page**
-on any form and see every field the extension can read, *what each one maps to*, how confident it is,
-and why — plus what it cannot handle (CAPTCHAs, cross-origin widgets).
+**Phase 5 complete — it fills forms now.** Create an encrypted vault and enter your details once.
+Add document masters and get portal-sized versions on demand. Press **Scan page** on any form to see
+what each field maps to and why, then **Fill this form** to write the values in — with Undo, and with
+a status pill and Abort button on the page itself.
 
-On a held-out fixture corpus with no site profile, the matcher maps 98% of fields correctly at
-auto-fill confidence with zero high-confidence mis-mappings. Nothing is filled yet — that is Phase 5.
+**It will not submit.** A capture-phase guard blocks every submit path — button clicks, Enter,
+scripted `form.submit()` — unless handed a single-use approval token, which only the Phase 7 review
+screen can issue. The adversarial fixture that fights back on a timer is part of the test suite.
 
 The product target is **any portal**, not a hand-picked shortlist: site profiles are a cache and a
 repair mechanism, not a precondition. See the scope amendment at the top of the plan.

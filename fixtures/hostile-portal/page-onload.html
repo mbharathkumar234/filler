@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hostile fixture — submits on load, before any extension exists</title>
+  </head>
+  <body>
+    <p>
+      <strong>ADVERSARIAL FIXTURE — the documented gap.</strong> This page calls
+      <code>form.submit()</code> during load, before an extension injected on a user gesture could
+      possibly exist. It is here so the limitation is <em>tested and visible</em> rather than
+      quietly assumed: the guard protects from the moment it installs, and nothing earlier.
+    </p>
+    <p>
+      That is not a hole in P2. P2 promises that no value <em>the extension filled</em> reaches a
+      submit unapproved — and at this point the extension has filled nothing.
+    </p>
+
+    <form id="frm" action="submitted.html" method="get">
+      <input id="a" name="candidateName" value="typed by the user" />
+      <button type="submit" id="btnFinalSubmit">Final Submit</button>
+    </form>
+
+    <script>
+      // No guard can be present yet. This navigates.
+      document.getElementById('frm').submit();
+    </script>
+  </body>
+</html>

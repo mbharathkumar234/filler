@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hostile fixture — a page that tries to submit itself</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 40rem; }
+      .fld { margin: .6rem 0; }
+      label { display: block; font-size: .85rem; }
+      input { width: 100%; padding: .25rem; box-sizing: border-box; }
+      .banner { background: #fee2e2; padding: .6rem; font-size: .78rem; margin-bottom: 1rem; }
+      #log { font: 12px/1.5 monospace; background: #f1f5f9; padding: .5rem; margin-top: 1rem; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>ADVERSARIAL FIXTURE.</strong> This page tries to submit itself repeatedly — via
+      <code>form.submit()</code>, a scripted click, and on every input event. Hostilities begin when
+      the test calls <code>__startHostilities()</code>, so the guard can be installed first; the
+      pre-injection case is covered separately by <code>page-onload.html</code>.
+    </p>
+
+    <h1>Application</h1>
+
+    <form id="frm" action="/submit" method="post">
+      <div class="fld"><label for="a">Candidate Name</label>
+        <input id="a" name="candidateName" maxlength="60" /></div>
+      <div class="fld"><label for="b">Email ID</label>
+        <input id="b" name="email" type="email" /></div>
+      <div class="fld"><label for="c">Mobile Number</label>
+        <input id="c" name="mobile" maxlength="10" /></div>
+      <div class="fld"><label for="d">PIN Code</label>
+        <input id="d" name="pincode" maxlength="6" /></div>
+      <p><button type="submit" id="btnFinalSubmit">Final Submit</button></p>
+    </form>
+
+    <div id="log">submitAttempts=0 submitEventsSeen=0</div>
+
+    <script>
+      window.__submitAttempts = 0;
+      window.__submitEventsSeen = 0;
+
+      function render() {
+        document.getElementById('log').textContent =
+          'submitAttempts=' + window.__submitAttempts +
+          ' submitEventsSeen=' + window.__submitEventsSeen;
+      }
+
+      // Count every submit event that actually reaches the page, and stop the
+      // navigation so the harness can keep inspecting. Note this handler CANNOT
+      // see a bare form.submit() call — that bypasses the submit event entirely,
+      // which is precisely why the guard has to patch the method as well.
+      document.getElementById('frm').addEventListener('submit', function (event) {
+        window.__submitEventsSeen += 1;
+        event.preventDefault();
+        render();
+      });
+
+      function trySubmit() {
+        window.__submitAttempts += 1;
+        render();
+        try {
+          document.getElementById('frm').submit();
+        } catch (e) {
+          /* a guarded submit may throw; the attempt still counts */
+        }
+      }
+
+      window.__startHostilities = function () {
+        // 1. Immediately.
+        trySubmit();
+
+        // 2. On a timer.
+        var ticks = 0;
+        var timer = setInterval(function () {
+          ticks += 1;
+          trySubmit();
+          if (ticks >= 4) clearInterval(timer);
+        }, 300);
+
+        // 3. On every field change — this one fires while the extension fills.
+        document.getElementById('frm').addEventListener('input', trySubmit);
+
+        // 4. A scripted click on the real submit button.
+        setTimeout(function () {
+          document.getElementById('btnFinalSubmit').click();
+        }, 700);
+      };
+    </script>
+  </body>
+</html>

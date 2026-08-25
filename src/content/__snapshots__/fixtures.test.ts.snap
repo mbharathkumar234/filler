@@ -867,6 +867,92 @@ exports[`fixture corpus > 'heldout-scholarship/page-1.html' — harvest output s
 }
 `;
 
+exports[`fixture corpus > 'hostile-portal/page-1.html' — harvest output snapshot 1`] = `
+{
+  "blockers": [],
+  "fields": [
+    {
+      "enabled": true,
+      "labelText": "Candidate Name",
+      "maxLength": 60,
+      "nearbyText": "Application",
+      "optionCount": undefined,
+      "ref": "f0",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Email ID",
+      "maxLength": undefined,
+      "nearbyText": "Application",
+      "optionCount": undefined,
+      "ref": "f1",
+      "required": false,
+      "tag": "input",
+      "type": "email",
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Mobile Number",
+      "maxLength": 10,
+      "nearbyText": "Application",
+      "optionCount": undefined,
+      "ref": "f2",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "PIN Code",
+      "maxLength": 6,
+      "nearbyText": "Application",
+      "optionCount": undefined,
+      "ref": "f3",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+  ],
+  "wizard": null,
+}
+`;
+
+exports[`fixture corpus > 'hostile-portal/page-onload.html' — harvest output snapshot 1`] = `
+{
+  "blockers": [],
+  "fields": [
+    {
+      "enabled": true,
+      "labelText": "Candidate Name",
+      "maxLength": undefined,
+      "nearbyText": "",
+      "optionCount": undefined,
+      "ref": "f0",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+  ],
+  "wizard": null,
+}
+`;
+
+exports[`fixture corpus > 'hostile-portal/submitted.html' — harvest output snapshot 1`] = `
+{
+  "blockers": [],
+  "fields": [],
+  "wizard": null,
+}
+`;
+
 exports[`fixture corpus > 'ugly-portal/page-1.html' — harvest output snapshot 1`] = `
 {
   "blockers": [

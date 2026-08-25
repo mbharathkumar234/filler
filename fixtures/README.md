@@ -64,3 +64,14 @@ captured pages when real fixtures exist.
 
 Deliberately hostile markup covering every label pattern §Phase 3 names, plus the ones that produce
 a *wrong* label rather than none. Used by the harvester snapshot tests.
+
+## hostile-portal/
+
+The §Phase 5 adversarial fixture. `page-1.html` tries to submit itself on a timer, on every input
+event, and via a scripted click once `__startHostilities()` is called — the test installs the guard
+first, then turns the page loose while filling it.
+
+`page-onload.html` is the honest counterpart: it calls `form.submit()` during load, before any
+gesture-injected extension could exist, and **does** navigate. That test asserts the navigation
+rather than hiding it. The guard protects from the moment it installs and not before; P2 still holds
+there, because nothing had been filled yet.

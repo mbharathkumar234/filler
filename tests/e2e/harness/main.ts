@@ -9,6 +9,8 @@
 
 import { derive, type DerivationResult } from '@/documents/derive';
 import { harvest } from '@/content/harvester';
+import { installSubmitGuard, guardState, setToastHandler, arm, __resetGuardForTests } from '@/content/submit-guard';
+import { runFill, type PlannedWrite } from '@/content/fill-run';
 import { parseConstraint } from '@/documents/constraints';
 import { createRasterBackend } from '@/documents/raster';
 
@@ -71,5 +73,54 @@ function runHarvest() {
   };
 }
 
+/**
+ * Install the submit guard and drive a fill, exactly as the content script
+ * does. Exposed so Playwright can exercise the real P2 enforcement against the
+ * hostile fixture — jsdom cannot model a page that navigates.
+ */
+const toasts: string[] = [];
+
+function installGuard() {
+  __resetGuardForTests();
+  toasts.length = 0;
+  setToastHandler((message) => toasts.push(message));
+  installSubmitGuard(document);
+  return { installed: true };
+}
+
+async function fill(writes: PlannedWrite[]) {
+  const result = await runFill(writes, {
+    resolve: (ref) => document.getElementById(ref),
+    delay: () => new Promise((r) => setTimeout(r, 5)),
+  });
+  return {
+    records: result.records.map((r) => ({
+      ref: r.ref,
+      ok: r.ok,
+      strategy: r.strategy ?? '',
+      truncated: Boolean(r.truncated),
+      fuzzy: Boolean(r.fuzzy),
+      attempts: r.attempts,
+    })),
+    aborted: result.aborted,
+  };
+}
+
+function guardReport() {
+  return {
+    blocked: guardState().blocked,
+    armed: guardState().armed !== null,
+    toasts: [...toasts],
+    submitAttempts: (window as unknown as { __submitAttempts?: number }).__submitAttempts ?? 0,
+    submitEventsSeen: (window as unknown as { __submitEventsSeen?: number }).__submitEventsSeen ?? 0,
+  };
+}
+
 window.__derive = run;
 window.__harvest = runHarvest;
+window.__installGuard = installGuard;
+window.__fill = fill;
+window.__guardReport = guardReport;
+window.__arm = (token) => {
+  arm(token);
+};

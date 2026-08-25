@@ -26,6 +26,8 @@ import type { DocConstraint } from './types';
 import type { DocumentSummary } from '@/vault/document-store';
 import type { DerivedPayload } from '@/background/document-service';
 import type { TabHarvest } from '@/background/harvest-service';
+import type { FillReport, WriteInstruction } from '@/background/fill-service';
+import type { ApprovalToken } from '@/content/submit-guard';
 
 // ---------------------------------------------------------------------------
 // Requests
@@ -72,10 +74,22 @@ export type RuntimeRequest =
 /** Panel-initiated harvest of the active tab. Privileged. */
 export type HarvestRequest = { type: 'harvest:tab'; tabId: number };
 
+/**
+ * Fill operations. `fill:tab` and `fill:undo:tab` are privileged (panel only).
+ * `fill:apply`, `fill:undo` and `fill:submit` travel worker -> content script.
+ */
+export type FillRequest =
+  | { type: 'fill:tab'; tabId: number }
+  | { type: 'fill:undo:tab'; tabId: number }
+  | { type: 'fill:apply'; writes: WriteInstruction[] }
+  | { type: 'fill:undo' }
+  | { type: 'fill:submit'; token: ApprovalToken };
+
 export type ExtensionRequest =
   | VaultRequest
   | DocumentRequest
   | HarvestRequest
+  | FillRequest
   | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
 
@@ -98,6 +112,8 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'doc:derive',
   'doc:preflight',
   'harvest:tab',
+  'fill:tab',
+  'fill:undo:tab',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -125,6 +141,11 @@ export interface ResponseMap {
   'doc:derive': DerivedPayload | { failed: true; reason: string; code: string };
   'doc:preflight': { ok: boolean; warnings: string[]; reason?: string };
   'harvest:tab': TabHarvest;
+  'fill:tab': FillReport;
+  'fill:undo:tab': { restored: number };
+  'fill:apply': { records: FillReport['records']; aborted: boolean; blocked: number };
+  'fill:undo': { restored: number };
+  'fill:submit': { submitted: boolean };
   ping: 'pong';
   'harvest:request': null;
   'harvest:ready': null;
