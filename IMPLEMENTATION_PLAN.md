@@ -254,36 +254,48 @@ still worth doing by hand once.
 **Goal:** store one high-quality master per document; generate portal-specific variants on demand.
 This is the "upload once" promise and it is where a lot of the real value lives.
 
+**Status: complete.** 252 unit tests + 13 e2e green.
+
 ### Must Achieve
 
-- [ ] Store masters as encrypted blobs with metadata `{key, mime, bytes, width, height, dpi, pages, capturedAt}`.
-- [ ] `documents/constraints.ts`: a `DocConstraint` type —
-      `{mime[], minBytes, maxBytes, minW, minH, maxW, maxH, aspect?, dimensionsMm?, dpi?}` — plus a parser
-      that turns portal instruction text ("Photograph must be JPEG/JPG, 20 KB to 50 KB, 3.5 cm x 4.5 cm") into one.
-- [ ] `documents/derive.ts`: given master + constraint, produce a compliant file via:
-  - resize to target pixel dimensions (respect mm+DPI when given),
-  - binary-search JPEG quality to land inside the byte window,
-  - pad/letterbox only if aspect is fixed and cropping would cut content,
-  - PDF→JPEG rasterisation and JPEG→PDF wrapping as needed,
-  - **fail loudly** if the window is unsatisfiable (e.g. 20 KB max at 600x800 from a blurry source) with a
-    human-readable reason.
-- [ ] Derived variants cached, keyed by `hash(masterId + constraint)`.
-- [ ] Unit tests over a fixture set of >=10 real-world constraint strings, asserting output mime/bytes/dimensions.
+- [x] Store masters as encrypted blobs with metadata `{key, mime, bytes, width, height, dpi, pages, capturedAt}`.
+      DB schema v2 adds `documents` and `variants` stores. Filenames are deliberately **not** stored.
+- [x] `documents/constraints.ts`: a `DocConstraint` type plus a parser that turns portal instruction
+      text into one. 44 tests over a 12-string corpus.
+- [x] `documents/derive.ts`: master + constraint → compliant file, via resize, binary-search JPEG
+      quality, pad/letterbox, PDF↔JPEG conversion, and a loud, specific failure when unsatisfiable.
+- [x] Derived variants cached, keyed by `hash(masterId + constraint)`. Evicted when the master is
+      replaced or deleted.
+- [x] Unit tests over ≥10 real-world constraint strings, asserting output mime/bytes/dimensions.
 
 ### Should Achieve
 
-- [ ] In-browser crop/rotate/deskew for the master.
-- [ ] Background removal / white-background normalisation for photos.
-- [ ] Signature cleanup (threshold to black-on-white).
-- [ ] Quality gate on upload: warn if the master is too small to satisfy common constraints — better to fix
-      at intake than mid-form.
+- [ ] In-browser crop/rotate/deskew for the master. **Not done** — deferred, see below.
+- [ ] Background removal / white-background normalisation for photos. **Not done.**
+- [ ] Signature cleanup (threshold to black-on-white). **Not done.**
+- [x] Quality gate on upload: warns at intake when the master is too small for common constraints,
+      or when a fixed aspect will crop heavily.
 
 **Out of scope:** OCR, auto-extracting profile data from documents (tempting; defer to Phase 10+).
 
-**Verify:** feed a 4 MB phone photo and a "20-50 KB, 3.5x4.5 cm JPEG" constraint; output must be JPEG,
+**Verify:** feed a 4 MB phone photo and a "20–50 KB, 3.5×4.5 cm JPEG" constraint; output must be JPEG,
 within bytes, correct pixel dims, visually acceptable.
 
----
+*Done, in a real browser:* `tests/e2e/derivation.spec.ts` runs the real `OffscreenCanvas` pipeline over
+`fixtures/photo-4mb.jpg` (3.6 MB, 3024×4032) and asserts JPEG magic bytes, 20–50 KB, and 276×354 px.
+"Visually acceptable" is the one claim a test cannot make — open the preview in the side panel.
+
+### Architecture note
+
+The raster operations sit behind an injected `RasterBackend`. All the decisions — target box,
+format choice, the quality search — are pure TypeScript tested with a fake backend (§6.1: "no DOM"),
+while `raster.ts` only pushes pixels and is covered by the Playwright spec instead.
+
+### Deferred to a later pass
+
+The three image-editing "Should Achieve" items (crop/rotate/deskew, background removal, signature
+thresholding) are genuine UI work, not pipeline work, and none of them blocks Phase 3. They are worth
+doing before release because they change what a user can salvage from a bad scan.
 
 ## Phase 3 — Extension shell & DOM harvester
 

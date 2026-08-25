@@ -9,9 +9,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FieldKey } from '@/matching/taxonomy';
 import type { ProfileEntry, Completeness } from '@/vault/profile-store';
 import { errorMessage, isLockedError, send } from '@/ui/lib/client';
-import { DOCUMENT_KEYS, FIELD_GROUPS } from '@/ui/lib/field-groups';
+import { FIELD_GROUPS } from '@/ui/lib/field-groups';
 import { FieldRow } from './FieldRow';
 import { BackupPanel } from './BackupPanel';
+import { DocumentsPanel } from './DocumentsPanel';
 
 interface Props {
   onLocked: () => void;
@@ -166,15 +167,9 @@ export function VaultEditor({ onLocked }: Props) {
           );
         })}
 
-        <section className="border-b border-slate-100 py-3">
-          <h2 className="text-sm font-medium text-slate-800">Documents</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Photo, signature, and certificates arrive in Phase 2. {DOCUMENT_KEYS.length} document
-            slots are reserved in the taxonomy.
-          </p>
-        </section>
       </div>
 
+      <DocumentsPanel onLocked={onLocked} />
       <BackupPanel onImported={onLocked} />
     </div>
   );

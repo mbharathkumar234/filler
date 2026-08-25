@@ -19,8 +19,10 @@ It is an assistant for a person at the keyboard. It is not a bot.
 
 ## Status
 
-**Phase 1 complete — the vault.** You can create an encrypted vault, enter your details once, and
-have them persist across a browser restart. Export and import an encrypted `.afvault` backup.
+**Phase 2 complete — the vault and the document pipeline.** You can create an encrypted vault, enter
+your details once, and add document masters. Paste a portal's upload rules and the extension derives
+a compliant file — resizing, cropping, and binary-searching JPEG quality into the stated byte window
+— or explains precisely why it cannot.
 
 No harvesting, matching, or filling code exists yet — that starts in Phase 3. See
 `IMPLEMENTATION_PLAN.md` for the phase plan.
@@ -40,6 +42,8 @@ npm run fixtures:serve   # serve fixtures/ on :4173
 npm run e2e              # playwright against the served fixtures
 ```
 
+Regenerate the oversized test photo with `node scripts/make-photo-fixture.mjs`.
+
 Load the extension: `chrome://extensions` -> enable Developer mode -> **Load unpacked** ->
 select `dist/`. Click the toolbar icon to open the side panel.
 
@@ -50,6 +54,8 @@ See §2 of `IMPLEMENTATION_PLAN.md`. The short version:
 - `src/matching/taxonomy.ts` — the canonical field keys everything else keys off. Append-only.
 - `src/shared/types.ts` — locked type contracts (FieldDescriptor, MatchResult, RunState, FillPlan).
 - `src/vault/` — encrypted storage. `session.ts` is the sole owner of the unlocked key.
+- `src/documents/` — constraint parsing and the derivation pipeline. Pure logic; `raster.ts` is the
+  only part that touches a canvas.
 - `src/background/vault-service.ts` — the only bridge between the message bus and the key.
 - `site-profiles/` — versioned selector maps. Selectors only, never values.
 - `fixtures/` — saved portal HTML for tests. Never a live portal.

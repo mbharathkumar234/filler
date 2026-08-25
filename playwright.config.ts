@@ -6,6 +6,9 @@ import { defineConfig } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './tests/e2e',
+  // Builds the derivation harness (see vite.harness.config.ts) before any spec
+  // runs, so the real OffscreenCanvas pipeline is available in the browser.
+  globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0, // Flakiness here is a real defect (§ Phase 6 Verify), not test noise.

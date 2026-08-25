@@ -3,17 +3,28 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['dist/**', 'node_modules/**', 'coverage/**', 'playwright-report/**'] },
+  {
+    ignores: [
+      'dist/**',
+      'node_modules/**',
+      'coverage/**',
+      'playwright-report/**',
+      'test-results/**',
+      // Build output of the e2e derivation harness — generated, not authored.
+      'fixtures/_harness/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
     // Node-side tooling: build config, the fixtures server, test harness scripts.
-    files: ['*.config.{js,ts}', 'scripts/**/*.{js,mjs,ts}'],
-    languageOptions: { globals: globals.node },
+    // Scripts that drive a browser (page.evaluate) need browser globals too.
+    files: ['*.config.{js,ts}', 'scripts/**/*.{js,mjs,ts}', 'tests/e2e/**/*.ts'],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
   {
     // Extension code runs in a browser/service-worker context, not Node.
-    files: ['src/**/*.{ts,tsx}'],
+    files: ['src/**/*.{ts,tsx}', 'tests/e2e/harness/*.ts'],
     languageOptions: { globals: { ...globals.browser, chrome: 'readonly' } },
   },
   {

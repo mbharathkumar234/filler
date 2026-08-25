@@ -15,6 +15,7 @@ import {
   type Result,
 } from '@/shared/messages';
 import { handleVaultRequest, isVaultRequest } from './vault-service';
+import { handleDocumentRequest } from './document-service';
 import { lockVault } from '@/vault/session';
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -33,6 +34,10 @@ chrome.runtime.onSuspend?.addListener(() => {
 async function route(request: ExtensionRequest): Promise<Result<unknown>> {
   if (isVaultRequest(request.type)) {
     return handleVaultRequest(request as Parameters<typeof handleVaultRequest>[0]);
+  }
+
+  if (request.type.startsWith('doc:')) {
+    return handleDocumentRequest(request as Parameters<typeof handleDocumentRequest>[0]);
   }
 
   switch (request.type) {

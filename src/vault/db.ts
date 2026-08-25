@@ -9,10 +9,11 @@
 
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { FieldKey } from '@/matching/taxonomy';
+import type { DocumentMeta } from '@/shared/types';
 import type { KdfParams, SealedRecord } from './crypto';
 
 export const DB_NAME = 'autofill-vault';
-export const DB_VERSION = 1;
+export const DB_VERSION = 2;
 
 /** Where a stored value came from — surfaced in the review screen (Phase 7). */
 export type ProvenanceSource = 'user' | 'imported' | 'corrected';
@@ -36,9 +37,38 @@ export interface VaultMeta {
   updatedAt: string;
 }
 
+/**
+ * A stored document master. `meta` is plaintext (dimensions and byte counts are
+ * not secrets and are needed to plan a derivation without unlocking); `sealed`
+ * holds the encrypted file bytes.
+ */
+export interface StoredDocument {
+  id: string;
+  key: FieldKey;
+  /** User-facing name. Deliberately NOT the original filename — see note below. */
+  label: string;
+  meta: DocumentMeta;
+  sealed: SealedRecord;
+  createdAt: string;
+}
+
+/** A derived variant, cached under hash(masterId + constraint). */
+export interface StoredVariant {
+  id: string;
+  masterId: string;
+  key: FieldKey;
+  /** Canonical constraint string this variant satisfies. */
+  constraint: string;
+  meta: DocumentMeta;
+  sealed: SealedRecord;
+  createdAt: string;
+}
+
 interface VaultSchema extends DBSchema {
   meta: { key: 'vault'; value: VaultMeta };
   profile: { key: FieldKey; value: StoredProfileRecord };
+  documents: { key: string; value: StoredDocument; indexes: { byKey: FieldKey } };
+  variants: { key: string; value: StoredVariant; indexes: { byMaster: string } };
 }
 
 export type VaultDb = IDBPDatabase<VaultSchema>;
@@ -47,14 +77,19 @@ let handle: Promise<VaultDb> | null = null;
 
 export function openVaultDb(): Promise<VaultDb> {
   handle ??= openDB<VaultSchema>(DB_NAME, DB_VERSION, {
-    upgrade(db) {
-      if (!db.objectStoreNames.contains('meta')) {
+    upgrade(db, oldVersion) {
+      // v1 — the profile vault (Phase 1).
+      if (oldVersion < 1) {
         db.createObjectStore('meta', { keyPath: 'id' });
-      }
-      if (!db.objectStoreNames.contains('profile')) {
         db.createObjectStore('profile', { keyPath: 'key' });
       }
-      // Document blobs get their own store in Phase 2, behind a version bump.
+      // v2 — document masters and their derived variants (Phase 2).
+      if (oldVersion < 2) {
+        const documents = db.createObjectStore('documents', { keyPath: 'id' });
+        documents.createIndex('byKey', 'key');
+        const variants = db.createObjectStore('variants', { keyPath: 'id' });
+        variants.createIndex('byMaster', 'masterId');
+      }
     },
   });
   return handle;
@@ -99,6 +134,12 @@ export async function vaultExists(db: VaultDb): Promise<boolean> {
  * whole profile rather than merging into a half-populated one.
  */
 export async function clearVault(db: VaultDb): Promise<void> {
-  const tx = db.transaction(['meta', 'profile'], 'readwrite');
-  await Promise.all([tx.objectStore('meta').clear(), tx.objectStore('profile').clear(), tx.done]);
+  const tx = db.transaction(['meta', 'profile', 'documents', 'variants'], 'readwrite');
+  await Promise.all([
+    tx.objectStore('meta').clear(),
+    tx.objectStore('profile').clear(),
+    tx.objectStore('documents').clear(),
+    tx.objectStore('variants').clear(),
+    tx.done,
+  ]);
 }

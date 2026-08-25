@@ -22,6 +22,9 @@ import type { ProfileEntry } from '@/vault/profile-store';
 import type { Completeness } from '@/vault/profile-store';
 import type { VaultStatus } from '@/vault/session';
 import type { ImportResult } from '@/vault/backup-format';
+import type { DocConstraint } from './types';
+import type { DocumentSummary } from '@/vault/document-store';
+import type { DerivedPayload } from '@/background/document-service';
 
 // ---------------------------------------------------------------------------
 // Requests
@@ -41,6 +44,23 @@ export type VaultRequest =
   | { type: 'vault:import'; text: string; passphrase: string }
   | { type: 'vault:touch' };
 
+/** Document operations. Privileged, like the vault requests above. */
+export type DocumentRequest =
+  | { type: 'doc:list' }
+  | {
+      type: 'doc:put';
+      key: FieldKey;
+      label: string;
+      mime: string;
+      width: number;
+      height: number;
+      /** Plain array — structured clone over the bus does not keep Uint8Array. */
+      bytes: number[];
+    }
+  | { type: 'doc:delete'; id: string }
+  | { type: 'doc:derive'; key: FieldKey; constraint: DocConstraint }
+  | { type: 'doc:preflight'; key: FieldKey; constraint: DocConstraint };
+
 export type RuntimeRequest =
   | { type: 'ping' }
   | { type: 'harvest:result'; fields: FieldDescriptor[] }
@@ -48,7 +68,7 @@ export type RuntimeRequest =
   | { type: 'run:state'; state: RunState }
   | { type: 'run:abort'; why: string };
 
-export type ExtensionRequest = VaultRequest | RuntimeRequest;
+export type ExtensionRequest = VaultRequest | DocumentRequest | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
 
 /** Request types that must never be honoured for a content script. */
@@ -64,6 +84,11 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'vault:export',
   'vault:import',
   'vault:touch',
+  'doc:list',
+  'doc:put',
+  'doc:delete',
+  'doc:derive',
+  'doc:preflight',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -84,6 +109,12 @@ export interface ResponseMap {
   /** null means a wrong passphrase for the backup file. */
   'vault:import': ImportResult | null;
   'vault:touch': null;
+  'doc:list': DocumentSummary[];
+  'doc:put': DocumentSummary;
+  'doc:delete': null;
+  /** A derived file, or a readable explanation of why it could not be made. */
+  'doc:derive': DerivedPayload | { failed: true; reason: string; code: string };
+  'doc:preflight': { ok: boolean; warnings: string[]; reason?: string };
   ping: 'pong';
   'harvest:result': null;
   'harvest:request': null;
