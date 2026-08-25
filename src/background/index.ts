@@ -1,32 +1,66 @@
 /**
  * Background service worker.
  *
- * Phase 0 scope: open the side panel on the action click and answer a ping.
- * Run orchestration lands in Phase 6; the single LLM egress point in Phase 8.
+ * Owns the unlocked vault key (§ Phase 1) and, from Phase 6, run orchestration.
+ * It is the single LLM egress point from Phase 8.
+ *
+ * Every inbound message passes `assertSenderMayRequest`, which rejects both
+ * foreign senders and content scripts asking for vault operations.
  */
 
-import { assertTrustedSender, envelope, isEnvelope } from '@/shared/messages';
+import {
+  assertSenderMayRequest,
+  isEnvelope,
+  type ExtensionRequest,
+  type Result,
+} from '@/shared/messages';
+import { handleVaultRequest, isVaultRequest } from './vault-service';
+import { lockVault } from '@/vault/session';
 
 chrome.runtime.onInstalled.addListener(() => {
-  // The panel is opened by an explicit user gesture (P1), never automatically.
+  // The panel opens on an explicit user gesture (P1), never on its own.
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 });
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  try {
-    assertTrustedSender(sender);
-  } catch (err) {
-    console.warn('[autofill] dropped message', err);
-    return false;
+/**
+ * Belt-and-braces auto-lock. The worker being suspended already drops the key,
+ * but saying so explicitly means the intent survives a future refactor.
+ */
+chrome.runtime.onSuspend?.addListener(() => {
+  lockVault();
+});
+
+async function route(request: ExtensionRequest): Promise<Result<unknown>> {
+  if (isVaultRequest(request.type)) {
+    return handleVaultRequest(request as Parameters<typeof handleVaultRequest>[0]);
   }
 
+  switch (request.type) {
+    case 'ping':
+      return { ok: true, data: 'pong' };
+    default:
+      return { ok: false, error: `Unhandled request: ${request.type}` };
+  }
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isEnvelope(message)) return false;
 
-  switch (message.payload.type) {
-    case 'ping':
-      sendResponse(envelope({ type: 'ping' }));
-      return true;
-    default:
-      return false;
+  try {
+    assertSenderMayRequest(message.payload.type, sender);
+  } catch (error) {
+    console.warn('[autofill] rejected message', error);
+    sendResponse({ ok: false, error: 'Rejected.' } satisfies Result<never>);
+    return true;
   }
+
+  route(message.payload).then(sendResponse, (error: unknown) => {
+    sendResponse({
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unexpected error.',
+    } satisfies Result<never>);
+  });
+
+  // Keep the message channel open for the async response.
+  return true;
 });

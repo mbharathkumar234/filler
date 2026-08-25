@@ -19,9 +19,14 @@ It is an assistant for a person at the keyboard. It is not a bot.
 
 ## Status
 
-**Phase 0 — foundations.** Scaffold, taxonomy, and docs are in place. No harvesting, matching,
-or filling code exists yet. See `IMPLEMENTATION_PLAN.md` for the phase plan and
-`docs/portal-notes/` for which portals are in-bounds.
+**Phase 1 complete — the vault.** You can create an encrypted vault, enter your details once, and
+have them persist across a browser restart. Export and import an encrypted `.afvault` backup.
+
+No harvesting, matching, or filling code exists yet — that starts in Phase 3. See
+`IMPLEMENTATION_PLAN.md` for the phase plan.
+
+The product target is **any portal**, not a hand-picked shortlist: site profiles are a cache and a
+repair mechanism, not a precondition. See the scope amendment at the top of the plan.
 
 ## Development
 
@@ -44,6 +49,8 @@ See §2 of `IMPLEMENTATION_PLAN.md`. The short version:
 
 - `src/matching/taxonomy.ts` — the canonical field keys everything else keys off. Append-only.
 - `src/shared/types.ts` — locked type contracts (FieldDescriptor, MatchResult, RunState, FillPlan).
+- `src/vault/` — encrypted storage. `session.ts` is the sole owner of the unlocked key.
+- `src/background/vault-service.ts` — the only bridge between the message bus and the key.
 - `site-profiles/` — versioned selector maps. Selectors only, never values.
 - `fixtures/` — saved portal HTML for tests. Never a live portal.
 - `docs/` — portal ToS verdicts and the threat model.

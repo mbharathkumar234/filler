@@ -13,6 +13,33 @@ explicit out-of-scope items, and verification steps.
 
 ---
 
+## Scope amendment — 2026-08-25: any portal
+
+> **The product target is any portal, not three profiled ones.** This supersedes the
+> three-target framing the PDF used for Phase 0 and Phase 4.
+
+What this changes:
+
+- **Site profiles are a cache, not a precondition.** `matching/deterministic.ts` (Phase 4) is
+  built to work on a form it has never seen — synonym dictionary, `autocomplete` mapping, and
+  `name`/`id` token heuristics carry the general case. A site profile is a fast path with
+  recorded selectors, and the mechanism teach mode writes to.
+- **Phase 8 (LLM fallback) and Phase 9 (teach mode) are core, not optional.** They are what
+  makes "any portal" true for the fields rules miss. They still run *after* Phases 0–7.
+- **§6.5 sequencing still holds.** Do not build the generic matcher before a working
+  fill/review loop exists. Generality is the destination, not the build order.
+- **Phase 0's portal gate is reframed, not deleted.** For a general-purpose tool the ToS
+  question stops being a per-portal engineering gate and becomes a runtime disclosure plus
+  per-site user responsibility (Phase 10). `docs/portal-notes/` remains the place to record a
+  verdict for any portal you deliberately profile or ship a fixture for, and the §6.4 risk row
+  is unchanged.
+- **Phase 4's acceptance metric changes** from "≥70% across three fixture portals" to the same
+  bar measured across a fixture corpus of *unseen* forms. See Phase 4 below.
+
+Unaffected: Phases 1, 2, 5, 6, 7 and 10 are portal-agnostic as written.
+
+---
+
 ## 0. Non-negotiable product principles
 
 These are constraints, not preferences. Every phase is checked against them.
@@ -189,30 +216,38 @@ and understand which portals are in-bounds.
 
 **Goal:** encrypted local storage for profile data. No forms yet.
 
+**Status: complete.** 124 unit tests green.
+
 ### Must Achieve
 
-- [ ] `vault/crypto.ts`: AES-GCM 256 encrypt/decrypt; key derived from passphrase via PBKDF2-SHA256
+- [x] `vault/crypto.ts`: AES-GCM 256 encrypt/decrypt; key derived from passphrase via PBKDF2-SHA256
       >=600k iterations, per-vault random salt, per-record random IV. **Unit tested**, including
       tamper-detection (flipped ciphertext byte → decrypt throws).
-- [ ] Master key held only in the service worker's memory, never persisted, never in `chrome.storage.local`.
-- [ ] Auto-lock: key zeroed after 15 min idle or on browser close.
-- [ ] `vault/profile-store.ts`: CRUD over the taxonomy, with per-key `{value, verifiedAt, source}` provenance.
-- [ ] Vault editor UI: user can enter profile data once and see it persisted across a browser restart
+- [x] Master key held only in the service worker's memory, never persisted, never in `chrome.storage.local`.
+      Key is non-extractable; `vault/session.ts` is its only owner.
+- [x] Auto-lock: key zeroed after 15 min idle or on browser close. The deadline is checked on every
+      key access, not only by a timer, so a suspended service worker cannot extend the window.
+- [x] `vault/profile-store.ts`: CRUD over the taxonomy, with per-key `{value, verifiedAt, source}` provenance.
+- [x] Vault editor UI: user can enter profile data once and see it persisted across a browser restart
       (re-entering passphrase).
-- [ ] Export/import of an encrypted backup file (`.afvault`), with a scary-but-clear warning.
+- [x] Export/import of an encrypted backup file (`.afvault`), with a scary-but-clear warning.
 
 ### Should Achieve
 
-- [ ] Field-level validation: Aadhaar Verhoeff checksum, PAN regex, IFSC format, PIN code range, DOB sanity.
-- [ ] "Completeness meter" — % of taxonomy filled, so users can front-load data entry.
-- [ ] Passphrase strength meter; refuse anything under a reasonable floor.
+- [x] Field-level validation: Aadhaar Verhoeff checksum, PAN regex, IFSC format, PIN code range, DOB sanity
+      (plus mobile and email).
+- [x] "Completeness meter" — % of taxonomy filled, so users can front-load data entry.
+- [x] Passphrase strength meter; refuse anything under a reasonable floor (50 bits, 12 characters).
 
 **Out of scope:** documents (Phase 2), cloud sync (never, or a much later deliberate decision).
 
 **Verify:** kill the browser, reopen, unlock, data intact. Inspect IndexedDB in DevTools — you must see
 only ciphertext. Wrong passphrase → clean failure, no partial decrypt.
 
----
+*Automated equivalents:* `vault.test.ts` "at-rest inspection" serialises the raw profile store and
+asserts no canary plaintext appears; `session.test.ts` "survives a simulated browser restart" drops the
+session and re-unlocks; the wrong-passphrase path is covered in both. The DevTools inspection itself is
+still worth doing by hand once.
 
 ## Phase 2 — Document vault & the derivation pipeline
 
@@ -303,9 +338,11 @@ visible fields are captured with a non-empty `labelText`.
 
 **Out of scope:** LLM fallback.
 
-**Verify:** across the three fixture portals, deterministic matching alone maps **>=70%** of fields at >=0.85
-confidence, with **zero** high-confidence *mis*-mappings (a wrong high-confidence match is a bug of a
-different severity class than a miss — treat it as P0).
+**Verify** (amended for the any-portal target): across a fixture corpus of forms the matcher has **no
+profile for**, deterministic matching alone maps **>=70%** of fields at >=0.85 confidence, with **zero**
+high-confidence *mis*-mappings (a wrong high-confidence match is a bug of a different severity class
+than a miss — treat it as P0). Measure on held-out fixtures: a rule tuned against the fixture it is
+scored on proves nothing.
 
 ---
 
