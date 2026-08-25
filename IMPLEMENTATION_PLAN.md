@@ -359,37 +359,67 @@ sequential filling, where the plan already requires waiting for dependent select
 
 ## Phase 4 — Deterministic matcher & site profiles
 
-**Goal:** map `FieldDescriptor → FieldKey` without any LLM, for the three target portals.
+**Goal:** map `FieldDescriptor → FieldKey` without any LLM, on a form the matcher has never seen.
+
+**Status: complete.** 504 unit tests + 24 e2e green.
 
 ### Must Achieve
 
-- [ ] `matching/deterministic.ts`: scored matcher combining
-  - exact/normalised match against a synonym dictionary per `FieldKey` (include Hindi/regional-language
-    labels for government portals),
-  - `autocomplete` attribute mapping (`given-name`, `postal-code`, …),
-  - `name`/`id` token heuristics (`txtFatherName`, `ddlState`, `hdnPan`),
-  - type/`maxLength`/`pattern` compatibility as a *filter* (a 10-char numeric field is not `identity.full_name`),
-  - option-set matching for selects (a select containing all 28 Indian states ⇒ `address.*.state`).
-- [ ] Output `MatchResult { fieldRef, key | 'unknown', confidence, rationale, source: 'profile'|'rule'|'llm' }`.
-- [ ] **Confidence thresholds:** >=0.85 auto-fill; 0.5-0.85 fill but flag for review; <0.5 leave blank and mark unmapped.
-- [ ] `site-profiles/<site-id>.json` schema, versioned — see `site-profiles/README.md`.
-- [ ] Profile cache lookup precedes rules; rules precede LLM (Phase 8).
+- [x] `matching/deterministic.ts`: scored matcher combining a synonym dictionary (Hindi included),
+      `autocomplete` attribute mapping, `name`/`id` token heuristics, type/`maxLength`/`pattern`
+      compatibility **as a filter**, and option-set matching for selects.
+- [x] Output `MatchResult { fieldRef, key | 'unknown', confidence, rationale, source }`.
+- [x] Confidence thresholds: >=0.85 auto-fill; 0.5–0.85 fill but flag; <0.5 unmapped (`bandOf`).
+- [x] `site-profiles/<site-id>.json` schema, versioned — loaded by `matching/profile-cache.ts`.
+- [x] Profile cache lookup precedes rules; rules precede LLM (`matching/index.ts`).
 
 ### Should Achieve
 
-- [ ] Synonym dictionary loaded from JSON so non-developers can extend it.
-- [ ] Auto-detect `address.correspondence` vs `address.permanent` from section headings.
-- [ ] Handle "Same as permanent address" checkboxes.
+- [x] Synonym dictionary loaded from JSON (`matching/synonyms.json`) so non-developers can extend it.
+- [x] Auto-detect `address.correspondence` vs `address.permanent` from section headings.
+- [x] Detect a "Same as permanent address" checkbox (`detectSameAsPermanent`). Acting on it is
+      Phase 5's job — there is nothing to tick until there is a filler.
 
 **Out of scope:** LLM fallback.
 
 **Verify** (amended for the any-portal target): across a fixture corpus of forms the matcher has **no
-profile for**, deterministic matching alone maps **>=70%** of fields at >=0.85 confidence, with **zero**
-high-confidence *mis*-mappings (a wrong high-confidence match is a bug of a different severity class
-than a miss — treat it as P0). Measure on held-out fixtures: a rule tuned against the fixture it is
-scored on proves nothing.
+profile for**, deterministic matching alone maps **>=70%** of fields at >=0.85 confidence, with
+**zero** high-confidence *mis*-mappings.
 
----
+*Measured* by `matching/eval.test.ts` over `fixtures/heldout-*`:
+
+| metric | result |
+|---|---|
+| mappable fields | 52 |
+| auto-filled correctly (>=0.85) | 51 — **98.1%**, gate is 70% |
+| correct at any confidence | 52 — 100% |
+| **high-confidence mis-mappings** | **0** — gate is zero |
+
+**Read that 98% with suspicion.** The held-out fixtures are synthetic and were written by the same
+hand as the synonym dictionary, so "held-out" here means *not tuned against*, not *independently
+sourced*. Wording was deliberately varied from `synonyms.json` ("Applicant's Full Name", "Postal PIN
+Code", "Permanent Account Number", "Name of School / College"), and traps were planted that the
+traits veto must reject — but this is weaker evidence than captured portal HTML. Re-run this gate
+against real fixtures before trusting the number.
+
+### Design notes
+
+**Traits are a veto, not a score.** `traits.ts` rules a key out on the structural facts of the field
+— a 10-character numeric box is not a full name, a file input is not an email address. A signal that
+merely lowers a score can still be outvoted; a veto cannot, and §6.4 rates a confident mis-match as
+Critical.
+
+**The scoring is deliberately timid.** Corroboration adds at most 0.08. A runner-up within 0.15 caps
+the winner at 0.8 — below auto-fill — because exact-vs-coverage (0.90 vs 0.78) is the shape almost
+every real near-tie takes. A single weak signal never clears 0.5. Two fields claiming one key keeps
+the match but caps it, since "Confirm Email" is real and so is a mis-match.
+
+**Generic tokens cannot carry a match alone.** "Reference Code" shares "code" with PIN Code and IFSC
+Code; "Batch Number" shares "number" with half the dictionary. Partial coverage now requires a
+distinctive shared token — this is what stops confident nonsense.
+
+**Matching runs in the service worker, not the page.** Verified against `dist/content.js`: the
+synonym dictionary and taxonomy do not ship into the tab.
 
 ## Phase 5 — Fill engine & the submit guard
 

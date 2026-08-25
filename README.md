@@ -19,12 +19,13 @@ It is an assistant for a person at the keyboard. It is not a bot.
 
 ## Status
 
-**Phase 3 complete — the vault, the document pipeline, and the DOM harvester.** Create an encrypted
-vault and enter your details once. Add document masters and get portal-sized versions on demand.
-Press **Scan page** on any form and see every field the extension can read — with the label it
-resolved, how it resolved it, and what it *cannot* handle (CAPTCHAs, cross-origin widgets).
+**Phase 4 complete — vault, documents, harvester, and matcher.** Create an encrypted vault and enter
+your details once. Add document masters and get portal-sized versions on demand. Press **Scan page**
+on any form and see every field the extension can read, *what each one maps to*, how confident it is,
+and why — plus what it cannot handle (CAPTCHAs, cross-origin widgets).
 
-Nothing is matched or filled yet — that starts in Phase 4. See `IMPLEMENTATION_PLAN.md`.
+On a held-out fixture corpus with no site profile, the matcher maps 98% of fields correctly at
+auto-fill confidence with zero high-confidence mis-mappings. Nothing is filled yet — that is Phase 5.
 
 The product target is **any portal**, not a hand-picked shortlist: site profiles are a cache and a
 repair mechanism, not a precondition. See the scope amendment at the top of the plan.
@@ -57,6 +58,8 @@ See §2 of `IMPLEMENTATION_PLAN.md`. The short version:
   only part that touches a canvas.
 - `src/content/` — the harvester. Read-only: it never writes to the page. Injected on an explicit
   click, never declared in the manifest.
+- `src/matching/` — taxonomy, synonym dictionary (`synonyms.json`, editable without code), the
+  deterministic matcher, and site-profile lookup. Runs in the worker, never in the page.
 - `src/background/vault-service.ts` — the only bridge between the message bus and the key.
 - `site-profiles/` — versioned selector maps. Selectors only, never values.
 - `fixtures/` — saved portal HTML for tests. Never a live portal.

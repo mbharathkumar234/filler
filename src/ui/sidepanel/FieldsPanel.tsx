@@ -10,7 +10,8 @@
 
 import { useCallback, useState } from 'react';
 import type { TabHarvest } from '@/background/harvest-service';
-import type { FieldDescriptor } from '@/shared/types';
+import type { FieldDescriptor, MatchResult } from '@/shared/types';
+import { bandOf, type MatchBand } from '@/matching';
 import { errorMessage, send } from '@/ui/lib/client';
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -51,6 +52,8 @@ export function FieldsPanel() {
   }, []);
 
   const shown = harvest?.fields.filter((f) => showHidden || f.visible) ?? [];
+  const matchByRef = new Map((harvest?.matches ?? []).map((m) => [m.fieldRef, m]));
+  const mapped = (harvest?.matches ?? []).filter((m) => bandOf(m) !== 'unmapped').length;
   const labelledPercent =
     harvest && harvest.visibleCount > 0
       ? Math.round((harvest.labelledCount / harvest.visibleCount) * 100)
@@ -101,6 +104,28 @@ export function FieldsPanel() {
                 across {harvest.frames.length} frames
               </p>
             )}
+            {harvest.matches.length > 0 && (
+              <p className="mt-0.5 text-slate-600">
+                {mapped} of {harvest.matches.length} mapped
+                {harvest.profileUsed && (
+                  <span className="text-slate-500">
+                    {' '}· profile {harvest.profileUsed.siteId} v{harvest.profileUsed.version}
+                  </span>
+                )}
+              </p>
+            )}
+            {harvest.profileStale && (
+              <p className="mt-0.5 text-amber-700">
+                Saved profile {harvest.profileStale.siteId} v{harvest.profileStale.version} is
+                stale ({Math.round(harvest.profileStale.resolveRate * 100)}% of its selectors
+                resolve) — using rules instead.
+              </p>
+            )}
+            {harvest.sameAsPermanent && (
+              <p className="mt-0.5 text-slate-500">
+                Found a “same as permanent address” checkbox.
+              </p>
+            )}
             {harvest.wizard && (
               <p className="mt-0.5 text-slate-500">
                 Multi-step form
@@ -142,7 +167,12 @@ export function FieldsPanel() {
 
           <ul className="mt-2 space-y-1">
             {shown.map((field) => (
-              <FieldRow key={`${field.frameId}-${field.ref}`} field={field} harvest={harvest} />
+              <FieldRow
+                key={`${field.frameId}-${field.ref}`}
+                field={field}
+                harvest={harvest}
+                match={matchByRef.get(field.ref)}
+              />
             ))}
           </ul>
 
@@ -155,16 +185,33 @@ export function FieldsPanel() {
   );
 }
 
-function FieldRow({ field, harvest }: { field: FieldDescriptor; harvest: TabHarvest }) {
+const BAND_STYLE: Record<MatchBand, string> = {
+  'auto-fill': 'border-emerald-300 bg-emerald-50',
+  'fill-and-flag': 'border-amber-300 bg-amber-50',
+  unmapped: 'border-slate-200',
+};
+
+const BAND_LABEL: Record<MatchBand, string> = {
+  'auto-fill': 'will fill',
+  'fill-and-flag': 'fill & check',
+  unmapped: 'not mapped',
+};
+
+function FieldRow({
+  field,
+  harvest,
+  match,
+}: {
+  field: FieldDescriptor;
+  harvest: TabHarvest;
+  match: MatchResult | undefined;
+}) {
   const frame = harvest.frames.find((f) => f.frameId === field.frameId);
   const source = frame?.labelSources[field.ref];
+  const band: MatchBand = match ? bandOf(match) : 'unmapped';
 
   return (
-    <li
-      className={`rounded border p-1.5 text-xs ${
-        field.labelText ? 'border-slate-200' : 'border-amber-300 bg-amber-50'
-      }`}
-    >
+    <li className={`rounded border p-1.5 text-xs ${BAND_STYLE[band]}`}>
       <div className="flex items-baseline justify-between gap-2">
         <span className="font-medium text-slate-800">
           {field.labelText || <em className="text-amber-800">unlabelled</em>}
@@ -174,6 +221,22 @@ function FieldRow({ field, harvest }: { field: FieldDescriptor; harvest: TabHarv
           {field.type && field.type !== field.tag ? `/${field.type}` : ''}
         </span>
       </div>
+
+      {match && match.key !== 'unknown' && (
+        <p className="mt-0.5 text-[11px] text-slate-700">
+          → <span className="font-mono">{match.key}</span>
+          <span className="ml-1 text-slate-500">
+            {BAND_LABEL[band]} · {Math.round(match.confidence * 100)}%
+            {match.source === 'profile' && ' · from profile'}
+          </span>
+        </p>
+      )}
+      {match && match.key === 'unknown' && (
+        <p className="mt-0.5 text-[11px] text-slate-500">→ not mapped</p>
+      )}
+      {match && (
+        <p className="mt-0.5 text-[10px] text-slate-400">{match.rationale}</p>
+      )}
 
       <p className="mt-0.5 text-[10px] text-slate-500">
         {source && <>via {SOURCE_LABELS[source] ?? source}</>}

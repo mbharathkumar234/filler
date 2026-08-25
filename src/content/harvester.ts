@@ -226,6 +226,9 @@ export function harvest(
       const placeholder = el.getAttribute('placeholder');
       if (placeholder) descriptor.placeholder = placeholder;
 
+      const autocomplete = el.getAttribute('autocomplete');
+      if (autocomplete) descriptor.autocomplete = autocomplete;
+
       if (options && options.length > 0) descriptor.options = options;
 
       const maxLength = el.getAttribute('maxlength');

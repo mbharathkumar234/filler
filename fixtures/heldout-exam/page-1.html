@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Held-out fixture — examination registration</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 44rem; }
+      .fld { margin: .6rem 0; }
+      label { display: block; font-size: .85rem; color: #334155; }
+      input, select { width: 100%; padding: .25rem; box-sizing: border-box; }
+      h2 { font-size: 1rem; margin-top: 1.25rem; border-bottom: 1px solid #ccc; }
+      .banner { background: #fee2e2; padding: .6rem; font-size: .78rem; margin-bottom: 1rem; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>HELD-OUT EVALUATION FIXTURE.</strong> A different markup style from the scholarship
+      fixture — <code>label[for]</code> rather than table cells, split name fields, bilingual
+      captions, and some deliberate traps. Do not tune the matcher against this page.
+    </p>
+
+    <h2>Candidate Identity</h2>
+    <div class="fld"><label for="f1">First Name</label>
+      <input id="f1" maxlength="40" data-expect="identity.given_name" /></div>
+    <div class="fld"><label for="f2">Middle Name</label>
+      <input id="f2" maxlength="40" data-expect="identity.middle_name" /></div>
+    <div class="fld"><label for="f3">Surname</label>
+      <input id="f3" maxlength="40" data-expect="identity.surname" /></div>
+    <div class="fld"><label for="f4">पिता का नाम / Father's Name</label>
+      <input id="f4" maxlength="60" data-expect="family.father_name" /></div>
+    <div class="fld"><label for="f5">जन्म तिथि</label>
+      <input id="f5" type="date" data-expect="identity.dob" /></div>
+    <div class="fld"><label for="f6">Nationality</label>
+      <input id="f6" maxlength="30" data-expect="identity.nationality" /></div>
+    <div class="fld"><label for="f7">Blood Group</label>
+      <select id="f7" data-expect="identity.blood_group">
+        <option value="">Choose</option><option>A+</option><option>A-</option>
+        <option>B+</option><option>B-</option><option>O+</option><option>O-</option>
+        <option>AB+</option><option>AB-</option>
+      </select></div>
+    <div class="fld"><label for="f8">Marital Status</label>
+      <select id="f8" data-expect="identity.marital_status">
+        <option value="">Choose</option><option>Single</option><option>Married</option><option>Divorced</option>
+      </select></div>
+
+    <h2>Contact</h2>
+    <div class="fld"><label for="f9">Email ID</label>
+      <input id="f9" type="email" autocomplete="email" data-expect="contact.email" /></div>
+    <div class="fld"><label for="f10">Mobile No.</label>
+      <input id="f10" type="tel" maxlength="10" autocomplete="tel" data-expect="contact.mobile" /></div>
+    <div class="fld"><label for="f11">Alternate Mobile Number</label>
+      <input id="f11" type="tel" maxlength="10" data-expect="contact.alt_mobile" /></div>
+
+    <h2>Present Address</h2>
+    <div class="fld"><label for="f12">Address Line 1</label>
+      <input id="f12" maxlength="120" data-expect="address.correspondence.line1" /></div>
+    <div class="fld"><label for="f13">City</label>
+      <input id="f13" maxlength="40" data-expect="address.correspondence.city" /></div>
+    <div class="fld"><label for="f14">PIN Code</label>
+      <input id="f14" maxlength="6" data-expect="address.correspondence.pincode" /></div>
+
+    <h2>Academic Record</h2>
+    <div class="fld"><label for="f15">Qualifying Examination</label>
+      <select id="f15" data-expect="education[].level">
+        <option value="">Choose</option><option>10th</option><option>12th</option><option>Graduation</option>
+      </select></div>
+    <div class="fld"><label for="f16">Name of School / College</label>
+      <input id="f16" maxlength="90" data-expect="education[].institution" /></div>
+    <div class="fld"><label for="f17">Registration Number</label>
+      <input id="f17" maxlength="20" data-expect="education[].roll_number" /></div>
+    <div class="fld"><label for="f18">Marks Obtained</label>
+      <input id="f18" maxlength="4" data-expect="education[].marks_obtained" /></div>
+    <div class="fld"><label for="f19">Maximum Marks</label>
+      <input id="f19" maxlength="4" data-expect="education[].max_marks" /></div>
+    <div class="fld"><label for="f20">CGPA</label>
+      <input id="f20" maxlength="4" data-expect="education[].cgpa" /></div>
+
+    <h2>Documents</h2>
+    <div class="fld"><label for="f21">Recent Photograph</label>
+      <input id="f21" type="file" accept="image/jpeg" data-expect="doc.photo" /></div>
+    <div class="fld"><label for="f22">Scanned Signature</label>
+      <input id="f22" type="file" accept="image/jpeg" data-expect="doc.signature" /></div>
+    <div class="fld"><label for="f23">Class 10 Marksheet</label>
+      <input id="f23" type="file" accept="application/pdf" data-expect="doc.marksheet_10" /></div>
+
+    <h2>Traps</h2>
+    <!-- A field labelled "Name" but only 10 digits wide: the traits veto must
+         refuse identity.full_name here rather than mis-fill it. -->
+    <div class="fld"><label for="t1">Name</label>
+      <input id="t1" maxlength="10" pattern="[0-9]{10}" data-expect="unknown" /></div>
+    <!-- A text input labelled like a document: not a file input, so no doc key. -->
+    <div class="fld"><label for="t2">Photograph Reference</label>
+      <input id="t2" maxlength="20" data-expect="unknown" /></div>
+    <!-- Nothing in the taxonomy covers these. -->
+    <div class="fld"><label for="t3">Examination Centre Preference 1</label>
+      <input id="t3" maxlength="40" data-expect="unknown" /></div>
+    <div class="fld"><label for="t4">Do you require a scribe?</label>
+      <select id="t4" data-expect="unknown">
+        <option value="">Choose</option><option>Yes</option><option>No</option>
+      </select></div>
+
+    <p><button type="submit">Register</button></p>
+  </body>
+</html>

@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`quality of the misses > reports the measured numbers, for the record 1`] = `
+{
+  "autoFilledCorrectly": 51,
+  "correctAtAnyConfidence": 52,
+  "fields": 59,
+  "highConfidenceMisMatches": 0,
+  "mappable": 52,
+}
+`;

@@ -10,6 +10,9 @@
 import type { Result } from '@/shared/messages';
 import { envelope } from '@/shared/messages';
 import type { HarvestReport } from '@/content/index';
+import type { MatchResult } from '@/shared/types';
+import { bundledProfiles } from '@/matching/profile-cache';
+import { matchFormWithContext } from '@/matching';
 
 /** Built by Vite as a separate entry; see vite.config.ts rollupOptions. */
 const CONTENT_SCRIPT = 'content.js';
@@ -30,6 +33,14 @@ export interface TabHarvest {
   fingerprint: string;
   visibleCount: number;
   labelledCount: number;
+  /** Phase 4: what each field maps to, profile first then rules. */
+  matches: MatchResult[];
+  /** Site profile used, when one applied and was not stale. */
+  profileUsed: { siteId: string; version: number; resolveRate: number } | null;
+  /** Set when a profile applied but too few selectors resolved (§Phase 9). */
+  profileStale: { siteId: string; version: number; resolveRate: number } | null;
+  /** A "same as permanent address" control, for Phase 5. */
+  sameAsPermanent: string | null;
 }
 
 /**
@@ -74,12 +85,24 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
   );
 
   const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const url = tab?.url ?? top.url;
+
+  // Matching runs in the worker, not the page: the rules and the synonym
+  // dictionary are ours, and a hostile page must not get to observe them.
+  const matched = matchFormWithContext(fields, {
+    url,
+    fingerprint: top.fingerprint,
+    profiles: bundledProfiles(),
+    // Selector resolution against the live page belongs to Phase 5's filler;
+    // until then a shipped profile is trusted to resolve.
+    resolve: () => true,
+  });
 
   return {
     ok: true,
     data: {
       tabId,
-      url: tab?.url ?? top.url,
+      url,
       title: tab?.title ?? top.title,
       frames,
       fields,
@@ -88,6 +111,22 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
       fingerprint: top.fingerprint,
       visibleCount: frames.reduce((sum, f) => sum + f.visibleCount, 0),
       labelledCount: frames.reduce((sum, f) => sum + f.labelledCount, 0),
+      matches: matched.results,
+      profileUsed: matched.profile
+        ? {
+            siteId: matched.profile.profile.siteId,
+            version: matched.profile.profile.version,
+            resolveRate: matched.profile.resolveRate,
+          }
+        : null,
+      profileStale: matched.staleProfile
+        ? {
+            siteId: matched.staleProfile.profile.siteId,
+            version: matched.staleProfile.profile.version,
+            resolveRate: matched.staleProfile.resolveRate,
+          }
+        : null,
+      sameAsPermanent: matched.sameAsPermanent,
     },
   };
 }

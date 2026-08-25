@@ -37,6 +37,12 @@ export interface FieldDescriptor {
   /** Resolved from <label for>, aria-label, wrapping text, table cell to the left. */
   labelText: string;
   placeholder?: string;
+  /**
+   * The site's own `autocomplete` declaration, when present. The strongest
+   * matching signal there is (§ Phase 4): the page is telling us what the
+   * field holds rather than us inferring it.
+   */
+  autocomplete?: string;
   /** Trimmed, for LLM context. */
   nearbyText: string;
   options?: FieldOption[];

@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Held-out fixture — scholarship application</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 44rem; }
+      table { border-collapse: collapse; width: 100%; }
+      td { padding: .3rem .5rem; vertical-align: top; }
+      td.l { width: 45%; }
+      input, select { width: 100%; padding: .25rem; box-sizing: border-box; }
+      h2 { font-size: 1rem; margin-top: 1.25rem; border-bottom: 1px solid #ccc; }
+      .banner { background: #fee2e2; padding: .6rem; font-size: .78rem; margin-bottom: 1rem; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>HELD-OUT EVALUATION FIXTURE.</strong> Do not tune the matcher against this page.
+      Label wording is deliberately <em>not</em> verbatim from <code>synonyms.json</code>, to test
+      whether the rules generalise rather than memorise. <code>data-expect</code> carries the ground
+      truth and is never read by the matcher.
+    </p>
+
+    <h2>Applicant Particulars</h2>
+    <table>
+      <tr><td class="l">Applicant's Full Name</td>
+          <td><input name="app_fullname" maxlength="80" data-expect="identity.full_name" /></td></tr>
+      <tr><td class="l">Name of Father</td>
+          <td><input name="app_father" maxlength="60" data-expect="family.father_name" /></td></tr>
+      <tr><td class="l">Name of Mother</td>
+          <td><input name="app_mother" maxlength="60" data-expect="family.mother_name" /></td></tr>
+      <tr><td class="l">Date of Birth (DD/MM/YYYY)</td>
+          <td><input name="app_dob" type="date" data-expect="identity.dob" /></td></tr>
+      <tr><td class="l">Sex</td>
+          <td><select name="app_sex" data-expect="identity.gender">
+            <option value="">Choose</option><option>Male</option><option>Female</option><option>Transgender</option>
+          </select></td></tr>
+      <tr><td class="l">Social Category</td>
+          <td><select name="app_cat" data-expect="identity.category">
+            <option value="">Choose</option><option>General</option><option>OBC</option><option>SC</option><option>ST</option><option>EWS</option>
+          </select></td></tr>
+      <tr><td class="l">Religion</td>
+          <td><input name="app_religion" maxlength="30" data-expect="identity.religion" /></td></tr>
+    </table>
+
+    <h2>Reachability</h2>
+    <table>
+      <tr><td class="l">E-Mail Address</td>
+          <td><input name="app_email" type="email" data-expect="contact.email" /></td></tr>
+      <tr><td class="l">Mobile Number</td>
+          <td><input name="app_mobile" maxlength="10" pattern="[0-9]{10}" data-expect="contact.mobile" /></td></tr>
+    </table>
+
+    <h2>Permanent Address</h2>
+    <table>
+      <tr><td class="l">Address Line 1</td>
+          <td><input name="perm_l1" maxlength="120" data-expect="address.permanent.line1" /></td></tr>
+      <tr><td class="l">Address Line 2</td>
+          <td><input name="perm_l2" maxlength="120" data-expect="address.permanent.line2" /></td></tr>
+      <tr><td class="l">District</td>
+          <td><input name="perm_district" maxlength="40" data-expect="address.permanent.district" /></td></tr>
+      <tr><td class="l">State</td>
+          <td><select name="perm_state" data-expect="address.permanent.state">
+            <option value="">Choose</option>
+            <option>Andhra Pradesh</option><option>Bihar</option><option>Gujarat</option>
+            <option>Karnataka</option><option>Kerala</option><option>Maharashtra</option>
+            <option>Punjab</option><option>Rajasthan</option><option>Tamil Nadu</option>
+            <option>Telangana</option><option>Uttar Pradesh</option><option>West Bengal</option>
+          </select></td></tr>
+      <tr><td class="l">Postal PIN Code</td>
+          <td><input name="perm_pin" maxlength="6" data-expect="address.permanent.pincode" /></td></tr>
+    </table>
+
+    <h2>Correspondence Address</h2>
+    <table>
+      <tr><td class="l">Address Line 1</td>
+          <td><input name="corr_l1" maxlength="120" data-expect="address.correspondence.line1" /></td></tr>
+      <tr><td class="l">Postal PIN Code</td>
+          <td><input name="corr_pin" maxlength="6" data-expect="address.correspondence.pincode" /></td></tr>
+    </table>
+
+    <h2>Identification</h2>
+    <table>
+      <tr><td class="l">Aadhaar Number</td>
+          <td><input name="id_aadhaar" maxlength="12" data-expect="id.aadhaar" /></td></tr>
+      <tr><td class="l">Permanent Account Number</td>
+          <td><input name="id_pan" maxlength="10" data-expect="id.pan" /></td></tr>
+    </table>
+
+    <h2>Last Qualifying Examination</h2>
+    <table>
+      <tr><td class="l">Name of Board or University</td>
+          <td><input name="edu_board" maxlength="80" data-expect="education[].board_or_university" /></td></tr>
+      <tr><td class="l">Roll Number</td>
+          <td><input name="edu_roll" maxlength="20" data-expect="education[].roll_number" /></td></tr>
+      <tr><td class="l">Year of Passing</td>
+          <td><input name="edu_year" maxlength="4" data-expect="education[].year_of_passing" /></td></tr>
+      <tr><td class="l">Percentage of Marks</td>
+          <td><input name="edu_pct" maxlength="5" data-expect="education[].percentage" /></td></tr>
+    </table>
+
+    <h2>Bank Particulars for Disbursal</h2>
+    <table>
+      <tr><td class="l">Name of Bank</td>
+          <td><input name="bnk_name" maxlength="60" data-expect="bank.bank_name" /></td></tr>
+      <tr><td class="l">Bank Account Number</td>
+          <td><input name="bnk_acct" maxlength="18" data-expect="bank.account_number" /></td></tr>
+      <tr><td class="l">IFSC Code</td>
+          <td><input name="bnk_ifsc" maxlength="11" data-expect="bank.ifsc" /></td></tr>
+      <tr><td class="l">Annual Family Income</td>
+          <td><input name="fam_income" maxlength="10" data-expect="family.annual_income" /></td></tr>
+    </table>
+
+    <h2>Enclosures</h2>
+    <table>
+      <tr><td class="l">Upload Photograph</td>
+          <td><input type="file" name="up_photo" accept="image/jpeg" data-expect="doc.photo" /></td></tr>
+      <tr><td class="l">Upload Signature</td>
+          <td><input type="file" name="up_sign" accept="image/jpeg" data-expect="doc.signature" /></td></tr>
+      <tr><td class="l">Income Certificate</td>
+          <td><input type="file" name="up_income" accept="application/pdf" data-expect="doc.income_certificate" /></td></tr>
+    </table>
+
+    <h2>Office Use</h2>
+    <table>
+      <!-- These must NOT map. Nothing in the taxonomy covers them. -->
+      <tr><td class="l">File Reference Code</td>
+          <td><input name="off_ref" maxlength="20" data-expect="unknown" /></td></tr>
+      <tr><td class="l">Scrutiny Officer Remarks</td>
+          <td><input name="off_remarks" maxlength="200" data-expect="unknown" /></td></tr>
+      <tr><td class="l">Batch Number</td>
+          <td><input name="off_batch" maxlength="8" data-expect="unknown" /></td></tr>
+    </table>
+
+    <p><button type="submit">Submit Application</button></p>
+  </body>
+</html>
