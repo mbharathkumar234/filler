@@ -371,9 +371,12 @@ export function detectWizard(root: Document | ShadowRoot): WizardInfo | null {
   const scope = 'body' in root ? (root as Document).body : (root as ShadowRoot);
   if (!scope) return null;
 
+  // Headings are in the list because plenty of portals announce the step in an
+  // <h1> and nowhere else — "Scholarship Application — Step 2 of 3" — with no
+  // step class, no progress bar, and no numbered nav to find.
   const candidates = [
     ...scope.querySelectorAll(
-      '[class*="step" i], [class*="wizard" i], [class*="progress" i], [id*="step" i], nav, ol, ul',
+      '[class*="step" i], [class*="wizard" i], [class*="progress" i], [id*="step" i], nav, ol, ul, h1, h2, h3, h4, legend, caption',
     ),
   ].slice(0, 60);
 

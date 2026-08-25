@@ -58,6 +58,17 @@ export async function handleVaultRequest(
       case 'vault:unlock':
         return ok(await unlockVault(request.passphrase));
 
+      /**
+       * § Phase 6 re-auth gate. Deliberately the same code path as an unlock:
+       * it re-derives the key from the passphrase, so a wrong one fails for
+       * the same reason it always did, and a right one resets the
+       * authentication clock as a side effect of actually proving identity.
+       * A cheaper "just compare a hash" version would be a different, weaker
+       * check wearing the same name.
+       */
+      case 'vault:reauth':
+        return ok(await unlockVault(request.passphrase));
+
       case 'vault:lock':
         lockVault();
         return ok(null);

@@ -953,6 +953,94 @@ exports[`fixture corpus > 'hostile-portal/submitted.html' — harvest output sna
 }
 `;
 
+exports[`fixture corpus > 'postback-portal/page-1.html' — harvest output snapshot 1`] = `
+{
+  "blockers": [
+    {
+      "type": "captcha",
+    },
+  ],
+  "fields": [
+    {
+      "enabled": true,
+      "labelText": "Candidate Name",
+      "maxLength": 60,
+      "nearbyText": "Scholarship Application — Step 2 of 3",
+      "optionCount": undefined,
+      "ref": "f0",
+      "required": true,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Father’s Name",
+      "maxLength": 60,
+      "nearbyText": "Scholarship Application — Step 2 of 3",
+      "optionCount": undefined,
+      "ref": "f1",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Email ID",
+      "maxLength": undefined,
+      "nearbyText": "Scholarship Application — Step 2 of 3",
+      "optionCount": undefined,
+      "ref": "f2",
+      "required": true,
+      "tag": "input",
+      "type": "email",
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Mobile Number",
+      "maxLength": 10,
+      "nearbyText": "Scholarship Application — Step 2 of 3",
+      "optionCount": undefined,
+      "ref": "f3",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "PIN Code",
+      "maxLength": 6,
+      "nearbyText": "Scholarship Application — Step 2 of 3",
+      "optionCount": undefined,
+      "ref": "f4",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "State",
+      "maxLength": undefined,
+      "nearbyText": "Scholarship Application — Step 2 of 3",
+      "optionCount": 4,
+      "ref": "f5",
+      "required": false,
+      "tag": "select",
+      "type": undefined,
+      "visible": true,
+    },
+  ],
+  "wizard": {
+    "step": 2,
+    "totalSteps": 3,
+  },
+}
+`;
+
 exports[`fixture corpus > 'ugly-portal/page-1.html' — harvest output snapshot 1`] = `
 {
   "blockers": [

@@ -17,10 +17,11 @@ import { envelope } from '@/shared/messages';
 import type { MatchResult } from '@/shared/types';
 import { CONFIDENCE } from '@/shared/types';
 import { bandOf } from '@/matching';
-import { isDocumentKey, type FieldKey } from '@/matching/taxonomy';
+import { isDocumentKey, isFieldKey, type FieldKey } from '@/matching/taxonomy';
+import { describeReauth, reauthCheck } from '@/runtime/reauth';
 import { openVaultDb } from '@/vault/db';
 import { getAllFields } from '@/vault/profile-store';
-import { isUnlocked, VaultLockedError, withKey } from '@/vault/session';
+import { isUnlocked, lastAuthenticatedAt, VaultLockedError, withKey } from '@/vault/session';
 import { harvestTab, type TabHarvest } from './harvest-service';
 
 export interface SerializedFileValue {
@@ -112,6 +113,73 @@ export function buildWrites(
   return { writes, skipped, missingDocs };
 }
 
+// ---------------------------------------------------------------------------
+// Run authorisation (§ Phase 6)
+// ---------------------------------------------------------------------------
+
+/**
+ * What the worker will do for a tab without a fresh panel gesture.
+ *
+ * A postback wipes the form, and the run has to be able to put the values back
+ * without marching the user to the side panel again. That means honouring a
+ * refill request that *originates inside the page* — so it needs a boundary of
+ * its own, because a content script lives in hostile territory.
+ *
+ * The boundary is this: a refill may only ask for keys that were part of a run
+ * the user themselves started on that tab, and only while that run is live.
+ * A compromised content script gains the ability to re-request values the user
+ * already agreed to put on that form. It does not gain the vault.
+ */
+interface AuthorisedRun {
+  tabId: number;
+  /** ref -> key, exactly as the run was planned. */
+  refs: Map<string, FieldKey>;
+  startedAt: number;
+}
+
+/** How long a run stays refillable without a new gesture. */
+export const RUN_AUTHORISATION_MS = 10 * 60 * 1000;
+
+const authorisedRuns = new Map<number, AuthorisedRun>();
+
+export function authoriseRun(
+  tabId: number,
+  writes: readonly WriteInstruction[],
+  now: number = Date.now(),
+): void {
+  const refs = new Map<string, FieldKey>();
+  for (const write of writes) {
+    if (isFieldKey(write.key)) refs.set(write.ref, write.key);
+  }
+  authorisedRuns.set(tabId, { tabId, refs, startedAt: now });
+}
+
+export function endRun(tabId: number): void {
+  authorisedRuns.delete(tabId);
+}
+
+export function authorisedRun(
+  tabId: number,
+  now: number = Date.now(),
+): AuthorisedRun | null {
+  const run = authorisedRuns.get(tabId);
+  if (!run) return null;
+  if (now - run.startedAt > RUN_AUTHORISATION_MS) {
+    authorisedRuns.delete(tabId);
+    return null;
+  }
+  return run;
+}
+
+/** Test seam. */
+export function __resetRunsForTests(): void {
+  authorisedRuns.clear();
+}
+
+// ---------------------------------------------------------------------------
+// Filling
+// ---------------------------------------------------------------------------
+
 /**
  * Fill the active tab.
  *
@@ -143,6 +211,17 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
     fieldSelectors,
   );
 
+  // § Phase 6: the re-authentication gate. Checked here, before any value
+  // leaves the worker — not in the panel, which is only the thing that asks.
+  const gate = reauthCheck(
+    writes.map((write) => write.key).filter(isFieldKey),
+    lastAuthenticatedAt(),
+    Date.now(),
+  );
+  if (gate.required) {
+    return { ok: false, error: describeReauth(gate.keys), code: 'REAUTH_REQUIRED' };
+  }
+
   if (writes.length === 0) {
     return {
       ok: true,
@@ -157,6 +236,10 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
       },
     };
   }
+
+  // The user asked for this fill, so the tab may refill itself after a
+  // postback until the run ends or expires.
+  authoriseRun(tabId, writes);
 
   const response = (await chrome.tabs.sendMessage(
     tabId,
@@ -179,6 +262,97 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
       missingDocuments: missingDocs,
       blocked: response.data.blocked,
     },
+  };
+}
+
+/**
+ * Re-send the values for fields a postback reset (§ Phase 6).
+ *
+ * Requested by the content script, so every guard here matters:
+ *
+ *  - the vault must be unlocked;
+ *  - the tab must have a live, user-started run;
+ *  - the refs are intersected with that run's plan, so a request for anything
+ *    the user did not approve filling comes back empty rather than honoured;
+ *  - the re-auth gate applies again, because time has passed since the gesture.
+ */
+export async function refillTab(
+  tabId: number,
+  refs: readonly string[],
+): Promise<Result<FillReport>> {
+  if (!isUnlocked()) {
+    return { ok: false, error: new VaultLockedError().message, code: 'VAULT_LOCKED' };
+  }
+
+  const run = authorisedRun(tabId);
+  if (!run) {
+    return {
+      ok: false,
+      error: 'This tab has no run in progress. Start the fill from the side panel.',
+      code: 'NO_ACTIVE_RUN',
+    };
+  }
+
+  // Intersection, not trust: the page asks, the plan decides.
+  const wanted = refs.filter((ref) => run.refs.has(ref));
+  if (wanted.length === 0) {
+    return { ok: true, data: emptyReport() };
+  }
+
+  const values = await withKey(async (db, key) => {
+    const entries = await getAllFields(db, key);
+    return new Map(entries.map((entry) => [entry.key as string, entry.value]));
+  });
+
+  const keys = wanted.map((ref) => run.refs.get(ref)!).filter(isFieldKey);
+  const gate = reauthCheck(keys, lastAuthenticatedAt(), Date.now());
+  if (gate.required) {
+    return { ok: false, error: describeReauth(gate.keys), code: 'REAUTH_REQUIRED' };
+  }
+
+  const writes: WriteInstruction[] = [];
+  for (const ref of wanted) {
+    const key = run.refs.get(ref)!;
+    const value = values.get(key);
+    if (value === undefined || value === '') continue;
+    writes.push({ ref, key, value });
+  }
+
+  if (writes.length === 0) return { ok: true, data: emptyReport() };
+
+  const response = (await chrome.tabs.sendMessage(
+    tabId,
+    envelope({ type: 'fill:apply', writes }),
+    { frameId: 0 },
+  )) as Result<{ records: FillOutcomeRecord[]; aborted: boolean; blocked: number }> | undefined;
+
+  if (!response?.ok) {
+    return { ok: false, error: response?.error ?? 'The page did not respond to the refill.' };
+  }
+
+  return {
+    ok: true,
+    data: {
+      attempted: writes.length,
+      filled: response.data.records.filter((record) => record.ok).length,
+      records: response.data.records,
+      aborted: response.data.aborted,
+      skippedLowConfidence: [],
+      missingDocuments: [],
+      blocked: response.data.blocked,
+    },
+  };
+}
+
+function emptyReport(): FillReport {
+  return {
+    attempted: 0,
+    filled: 0,
+    records: [],
+    aborted: false,
+    skippedLowConfidence: [],
+    missingDocuments: [],
+    blocked: 0,
   };
 }
 

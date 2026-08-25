@@ -203,8 +203,15 @@ export type RunState =
   | { t: 'NEEDS_TEACHING'; unmapped: FieldDescriptor[] }
   /** User sees "Fill this form". */
   | { t: 'READY'; plan: FillPlan }
-  /** Vault passphrase / re-auth. */
-  | { t: 'UNLOCKING' }
+  /**
+   * Vault passphrase / re-auth.
+   *
+   * Carries the plan it interrupted. §5 wrote this state as payload-free, but
+   * a re-auth gate that forgets what the user was doing forces them to start
+   * the run again — which is a worse outcome than the gate prevents. `null`
+   * covers an unlock that happened before there was a plan.
+   */
+  | { t: 'UNLOCKING'; plan: FillPlan | null }
   | { t: 'FILLING'; plan: FillPlan; cursor: number }
   | { t: 'BLOCKED'; reason: BlockReason; plan: FillPlan }
   /** After DOM churn / postback / resume. */

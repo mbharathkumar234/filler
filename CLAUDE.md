@@ -6,6 +6,9 @@
 2. Never include user profile values, document bytes, or filenames in any network request.
    All outbound LLM payloads must pass through `redaction.ts` and its test suite.
 3. Never implement CAPTCHA solving, OTP reading, or eSign automation.
+   `content/blockers.ts` may notice such a control exists and say where it is; it may never read
+   one. Its test asserts that against the file's own source, so adding `.value`, a canvas read,
+   `fetch(`, OCR, or `dispatchEvent` to that file fails the build. The user completes these steps.
 4. All selectors live in versioned site-profile JSON. No hard-coded selectors in TS.
 5. Every new field-matching rule needs a fixture test.
 
@@ -37,5 +40,8 @@ If a requested feature conflicts with these, stop and flag it rather than implem
 ## Where things live
 - Canonical field keys: `src/matching/taxonomy.ts` (append-only — see §4 of the plan).
 - Locked type contracts: `src/shared/types.ts`.
+- Run state machine: `src/runtime/machine.ts` (pure reducer) + `store.ts` + `persistence.ts`.
+  The behaviour that uses them — pause, resume, drift recovery — is `content/run-controller.ts`,
+  which takes ports rather than reaching for `chrome.*` so it can be driven against a fixture.
 - Full phase plan and definition-of-done: `IMPLEMENTATION_PLAN.md`.
 - Portal in-bounds verdicts: `docs/portal-notes/`. Threat model: `docs/THREAT_MODEL.md`.

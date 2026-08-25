@@ -66,8 +66,38 @@ export interface HarnessWrite {
   dependent?: boolean;
 }
 
+/** § Phase 6: the run, driven from a spec. */
+export interface RunHarness {
+  /** Build a plan from these `name` → value pairs and fill. Returns the state. */
+  start(values: Record<string, string>): Promise<string>;
+  /** Re-attach to a persisted run in a freshly loaded document. */
+  resume(): Promise<string>;
+  state(): string;
+  /** How many fields the attached run's plan holds. */
+  planSize(): number;
+  blocker(): string | null;
+  blockerCount(): number;
+  instruction(): string;
+  continue(): Promise<string>;
+  reverify(): Promise<string>;
+  checkPage(): void;
+  values(): Record<string, string>;
+  events(): string[];
+  reset(): void;
+}
+
 declare global {
   interface Window {
+    __run: RunHarness;
+    /**
+     * Provided by `fixtures/postback-portal/page-1.html` itself, not by the
+     * harness — the fixture's way of letting a spec trigger the bad behaviour
+     * it exists to reproduce.
+     */
+    __postback: () => void;
+    __solveCaptcha: () => void;
+    __renderCount: () => number;
+    __postbackCount: () => number;
     __installGuard: () => { installed: boolean };
     __fill: (writes: HarnessWrite[]) => Promise<{ records: FillRecord[]; aborted: boolean }>;
     __guardReport: () => GuardReport;

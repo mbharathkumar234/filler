@@ -230,6 +230,22 @@ describe('wizard detection', () => {
     expect(detectWizard(document)).toMatchObject({ step: 2, totalSteps: 3 });
   });
 
+  it('reads the step out of a heading, which is often the only place it is', () => {
+    // Found via the Phase 6 postback fixture: the step was announced in the
+    // <h1> and nowhere else, so the detector fell through to the weak
+    // "there is a Next button" branch and reported no step number at all.
+    mount('<h1>Scholarship Application — Step 2 of 3</h1><form><input></form>');
+    expect(detectWizard(document)).toMatchObject({ step: 2, totalSteps: 3 });
+  });
+
+  it('prefers a real step count over the mere presence of a Next button', () => {
+    mount(`
+      <h1>Application — Step 2 of 3</h1>
+      <form><input><button type="submit">Save &amp; Continue</button></form>
+    `);
+    expect(detectWizard(document)).toMatchObject({ step: 2, totalSteps: 3 });
+  });
+
   it('infers a multi-step form from a Next button alone', () => {
     mount('<form><input><button type="submit">Next</button></form>');
     const wizard = detectWizard(document);

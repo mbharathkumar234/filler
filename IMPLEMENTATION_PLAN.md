@@ -500,34 +500,147 @@ per matched field and nothing below the fill threshold at all.
 
 **Goal:** survive CAPTCHAs, OTPs, and postbacks. This is the hardest phase — budget accordingly.
 
+**Status: complete.** 792 unit tests + 46 e2e green, including the 20x flakiness gate.
+
 ### Must Achieve
 
-- [ ] `runtime/machine.ts` implementing §5 exactly, as a pure reducer, **fully unit-tested** with no DOM.
-- [ ] Blocker detection: reCAPTCHA/hCaptcha/Turnstile iframes, `img` elements with `captcha` in src/alt/id,
-      inputs named `otp|token|vcode`, DigiLocker/eSign redirects, payment gateway origins.
-- [ ] On block: overlay explains *what* is needed, extension stops touching the page, "I've completed this —
-      continue" button appears.
-- [ ] MutationObserver + `webNavigation` listeners force `REVERIFYING` on postback/navigation.
-- [ ] `REVERIFYING` re-resolves every selector against the live DOM, re-reads every filled value, refills what
-      was reset, and escalates to `DRIFTED` when a selector no longer resolves.
-- [ ] Full run state persisted to `chrome.storage.session` on every transition; content script rehydrates on
-      load and continues without data loss.
-- [ ] Re-authentication gate: filling any `sensitivity: 'high'` key (Aadhaar, PAN, bank account) after an idle
-      period requires passphrase re-entry.
+- [x] `runtime/machine.ts` implementing §5 exactly, as a pure reducer, **fully unit-tested** with no
+      DOM. `now` is a parameter, so the 90-second TTL is testable without waiting ninety seconds.
+      An event the machine refuses returns the state object *by identity*, so callers can assert
+      `reduce(s, e) === s` and an unanticipated event can never advance a run.
+- [x] Blocker detection (`content/blockers.ts`): reCAPTCHA/hCaptcha/Turnstile/Arkose iframes and
+      vendor containers, `img` elements marked as a captcha, one-time-code inputs (by `name`, `id`,
+      `placeholder`, `aria-label`, or `autocomplete="one-time-code"`), DigiLocker/eSign hand-offs,
+      and payment gateway origins.
+- [x] On block: the overlay explains *what is needed* in our words, the extension stops touching the
+      page, and an "I have completed this — continue" button appears.
+- [x] MutationObserver forces `REVERIFYING` on churn; navigation is detected on the far side of the
+      reload. **Deviation from the plan text — `webNavigation` is not used**; see below.
+- [x] `REVERIFYING` re-resolves every selector, re-reads every filled value, refills what was reset,
+      and escalates to `DRIFTED` when a selector no longer resolves.
+- [x] Full run state persisted to `chrome.storage.session` on every transition; rehydrated on load
+      and continued without data loss.
+- [x] Re-authentication gate: any `sensitivity: 'high'` key after an idle period requires the
+      passphrase again (`runtime/reauth.ts`, `REAUTH_IDLE_MS` = 3 min).
 
 ### Should Achieve
 
-- [ ] Multi-step wizard support: a plan spanning steps, with per-step review checkpoints.
-- [ ] Session-expiry detection (redirect to login) → clean `ABORTED` with a "log in and press resume" path.
-- [ ] Draft-save detection — prefer the portal's own "Save as draft" over a resume-from-scratch when one exists.
+- [x] Multi-step wizard support — the harvester now reads "Step 2 of 3" out of a heading, which for
+      many portals is the only place it appears, and the step folds into the form fingerprint so a
+      resumed run cannot mistake step 3 for step 1.
+- [x] Session-expiry detection (`looksLikeSessionExpiry`) — a password field on what should be an
+      application form. The run cannot log in for the user (we hold no portal credentials, by
+      design), so the path offered is "log in, then press resume".
+- [x] Draft-save detection (`findDraftControl`) — **surfaced, never pressed.** CLAUDE.md rule 1
+      reserves activating a final-action control to the submit guard, and saving a draft changes
+      state on the user's account. The panel offers it; the user decides.
 
 **Out of scope:** anything that reads, solves, or bypasses a challenge.
 
-**Verify:** build a fixture that (a) resets all field values on a simulated postback, (b) regenerates element
-IDs each load, (c) contains a fake CAPTCHA gate. The run must pause, resume after the user "solves" it, detect
-the reset, refill, and reach `REVIEW` with correct data. Run it 20x — flakiness here is a real defect, not test noise.
+**Verify:** a fixture that (a) resets all field values on a simulated postback, (b) regenerates
+element IDs each load, (c) contains a fake CAPTCHA gate. Run it 20x.
 
----
+*Done* in `fixtures/postback-portal/` and `tests/e2e/resume.spec.ts`. The fixture regenerates every
+element id on each render and wipes every value on a postback — asserted by two tests of their own,
+so the scenario cannot silently stop being adversarial. The 20x gate runs twenty full journeys
+(pause → solve → resume → detect the reset → refill → REVIEW) with `retries: 0`.
+
+### P4, made mechanical rather than intended
+
+`blockers.ts` may notice that a security control exists and say where it is. It may not read one.
+There is no code path in it that touches an input's `value`, rasterises an image, fetches a
+resource, or ships anything from a widget anywhere — and `blockers.test.ts` asserts that **against
+the file's own source text**, failing if a future edit introduces `.value`, `createImageBitmap`,
+`toDataURL`, `getImageData`, `fetch(`, OCR, `.click()`, or `dispatchEvent`. "We intended not to" is
+not a control; a test that reads the file is.
+
+Every sentence the user sees while blocked comes from the frozen `INSTRUCTIONS` table, never from
+page text — a portal that could write the words in our own overlay could tell the user "AutoFill
+will now complete this for you", and the one thing that panel exists to say is the opposite.
+
+Two supporting tests: the run's entire output is checked for the fixture CAPTCHA's answer (`X7KQ9`)
+and for anything typed into an OTP box, and the harvester is re-checked to confirm it never
+described those fields as fillable in the first place.
+
+### Deviation: no `webNavigation`
+
+The plan names `webNavigation` listeners. They are not used, and the reason is permission
+minimisation: `webNavigation` events are filtered by host permissions, and this extension
+deliberately declares none (`host_permissions: []`, injection on an explicit gesture via
+`activeTab`). Asking for it would widen the manifest to buy a signal we already have — a closed tab
+via `chrome.tabs.onRemoved`, and a reload detected by the content script itself, which knows the
+document is new because its `window.__autofillContentReady` marker is gone.
+
+Nothing is written to storage during `pagehide` either. An async write during unload is not
+reliable; the run state was already persisted at its last transition, and the reload is detected on
+the far side instead.
+
+### The refill boundary — the one new attack surface
+
+A postback wipes the form, so the run has to be able to put values back without marching the user to
+the side panel again. That means honouring `fill:refill`, a request that **originates inside the
+page** — the one message that does. It is deliberately not in `PRIVILEGED_TYPES`, because the sender
+check cannot express what is actually wanted here.
+
+What contains it is a run authorisation held by the worker: a refill may only ask for refs that were
+part of a run *the user themselves started on that tab*, and only for ten minutes. The requested
+refs are intersected with that plan — the page asks, the plan decides — and the re-auth gate applies
+again on the way through, because time has passed since the gesture. A compromised content script
+gains the ability to re-request values the user already agreed to put on that form. It does not gain
+the vault. `fill-service.test.ts` asserts each of those.
+
+### Design notes
+
+**Only `FILLING` may write to the page.** One predicate, `mayWritePage`, asked in one place. That is
+the mechanical meaning of "the extension stops touching the page" when a security control appears —
+otherwise it is a habit that five call sites have to remember.
+
+**`BLOCKED` never resumes on a timer** (§5 says so explicitly), and a settle event alone is not
+enough either: `DOM_SETTLED` carries whether the blocker has actually gone. A CAPTCHA widget mutates
+constantly while it is being solved, and resuming on a quiet moment would mean filling over the
+user's hands. Pressing "I have completed this" does not resume the fill either — it moves to
+re-verification, which walks the page as it now stands and blocks again immediately if the gate is
+still up.
+
+**An approval does not survive the page changing.** `ARMED` + churn → `REVERIFYING`, token dropped.
+The user approved a page; a postback means that page is gone, so the approval no longer describes
+anything they agreed to. Likewise a run restored from storage is normalised through the reducer on
+the way in, so a tab reopened two minutes later cannot come back one click from submitting.
+
+**Values are never persisted.** The run state holds keys, selectors and confidences; the map of what
+was actually written lives in memory in the content script and dies with the document. After a
+navigation, re-verification falls back to "is this field empty", which is enough to notice a reset.
+A test walks the persisted object graph and fails on any property named `value`/`bytes`/`filename`,
+or any string shaped like an Aadhaar or PAN.
+
+**Comparison is lenient on purpose.** Portals trim, upper-case a PAN, reformat a date, and strip the
+spaces out of an account number. Treating any of those as "the page reset my value" would refill in
+a loop forever.
+
+### Four bugs the tests caught
+
+1. **A blocker found before the first write did not stop the run.** `READY` did not accept
+   `BLOCKER_SEEN`, so a page whose CAPTCHA was visible from the start got the whole form filled and
+   *then* blocked — the exact opposite of what P4 promises. Caught by the e2e; fixed in the reducer
+   with a unit test naming the case.
+2. **`reverifyNow` called from `FILLING` did its work and had the result thrown away.** The reducer
+   only accepts `REVERIFIED` from `REVERIFYING`, so the refill was requested but the transition was
+   silently refused, leaving the run claiming to be mid-fill forever.
+3. **The OTP regex could not match `txtOTP`.** `[^a-z]` under the `i` flag also excludes uppercase,
+   because case-insensitive matching folds `T` into the excluded range. A bare `/otp/` is no good
+   either — it matches inside `footprint` and `hotpoint` — so identifiers are tokenised first.
+4. **The wizard step was invisible when it lived in an `<h1>`.** Found via this phase's own fixture
+   snapshot; the detector's candidate list did not include headings.
+
+**A test that passed for the wrong reason.** The mutation-storm e2e polled for the refill *event*,
+which is emitted when the refill starts — then read the field values while the run was still writing
+them one at a time. It now polls the values themselves.
+
+### A documented amendment to a locked type
+
+§5 wrote `UNLOCKING` as payload-free. It now carries `plan: FillPlan | null`. A re-auth gate that
+forgets what the user was doing forces them to restart the run, which is a worse outcome than the
+gate prevents.
 
 ## Phase 7 — Review screen & approval
 

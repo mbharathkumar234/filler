@@ -17,7 +17,8 @@ import {
 import { handleVaultRequest, isVaultRequest } from './vault-service';
 import { handleDocumentRequest } from './document-service';
 import { harvestTab } from './harvest-service';
-import { fillTab, undoFillOnTab } from './fill-service';
+import { endRun, fillTab, refillTab, undoFillOnTab } from './fill-service';
+import { clearTab, pruneRuns } from '@/runtime/persistence';
 import { lockVault } from '@/vault/session';
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -33,7 +34,33 @@ chrome.runtime.onSuspend?.addListener(() => {
   lockVault();
 });
 
-async function route(request: ExtensionRequest): Promise<Result<unknown>> {
+/**
+ * Tab lifecycle (§ Phase 6).
+ *
+ * A closed tab's run is over: its state is dropped and its refill
+ * authorisation revoked. §5's "any state → ABORTED on … tab close" is this,
+ * plus the reducer's own ABORT — the state cannot be transitioned once the
+ * document holding it is gone, so the record is removed instead.
+ *
+ * `chrome.tabs.onRemoved` rather than `chrome.webNavigation`: the plan names
+ * webNavigation, but its events are filtered by host permissions and this
+ * extension deliberately declares none (`host_permissions: []`, injection on
+ * an explicit gesture via `activeTab`). Asking for webNavigation would widen
+ * the manifest to buy a signal `tabs.onRemoved` and the content script's own
+ * `pagehide` already give us.
+ */
+chrome.tabs?.onRemoved.addListener((tabId) => {
+  endRun(tabId);
+  void clearTab(tabId).catch(() => {
+    // The tab is gone; a failed cleanup is not worth surfacing.
+  });
+});
+
+chrome.runtime.onStartup?.addListener(() => {
+  void pruneRuns().catch(() => {});
+});
+
+async function route(request: ExtensionRequest, tabId: number | null): Promise<Result<unknown>> {
   if (isVaultRequest(request.type)) {
     return handleVaultRequest(request as Parameters<typeof handleVaultRequest>[0]);
   }
@@ -49,6 +76,24 @@ async function route(request: ExtensionRequest): Promise<Result<unknown>> {
       return fillTab(request.tabId);
     case 'fill:undo:tab':
       return undoFillOnTab(request.tabId);
+    case 'fill:refill':
+      // Content-script originated; `refillTab` is where it is contained.
+      return tabId === null
+        ? { ok: false, error: 'A refill can only come from a tab.' }
+        : refillTab(tabId, request.refs);
+    case 'run:hello':
+      return tabId === null
+        ? { ok: false, error: 'Not in a tab.' }
+        : { ok: true, data: { tabId } };
+    case 'run:state':
+      // The panel subscribes to these; the worker only relays.
+      return { ok: true, data: null };
+    case 'run:abort':
+      if (tabId !== null) {
+        endRun(tabId);
+        void clearTab(tabId).catch(() => {});
+      }
+      return { ok: true, data: null };
     case 'harvest:ready':
       return { ok: true, data: null };
     case 'ping':
@@ -69,7 +114,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  route(message.payload).then(sendResponse, (error: unknown) => {
+  // The tab a content script is speaking from. Chrome sets this; a page
+  // cannot forge it, which is what makes it usable as a run identity.
+  const tabId = sender.tab?.id ?? null;
+
+  route(message.payload, tabId).then(sendResponse, (error: unknown) => {
     sendResponse({
       ok: false,
       error: error instanceof Error ? error.message : 'Unexpected error.',

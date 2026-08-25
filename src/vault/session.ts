@@ -50,6 +50,14 @@ interface UnlockedSession {
   key: CryptoKey;
   kdf: KdfParams;
   lastActivityAt: number;
+  /**
+   * When the passphrase was last actually typed (§ Phase 6 re-auth gate).
+   *
+   * Deliberately separate from `lastActivityAt`: activity defers auto-lock,
+   * but it is not evidence of *who* is at the keyboard. Only entering the
+   * passphrase moves this.
+   */
+  authenticatedAt: number;
 }
 
 /** The single owner of the unlocked key. Module-scoped, never exported. */
@@ -165,8 +173,20 @@ export async function withKey<T>(fn: (db: VaultDb, key: CryptoKey) => Promise<T>
 }
 
 function activate(key: CryptoKey, kdf: KdfParams): void {
-  session = { key, kdf, lastActivityAt: Date.now() };
+  const now = Date.now();
+  session = { key, kdf, lastActivityAt: now, authenticatedAt: now };
   scheduleLock();
+}
+
+/**
+ * When the user last proved they are the user, or null if the vault is locked.
+ *
+ * The Phase 6 re-auth gate reads this. `touch()` does not move it — see the
+ * note on `UnlockedSession.authenticatedAt`.
+ */
+export function lastAuthenticatedAt(): number | null {
+  expireIfIdle();
+  return session?.authenticatedAt ?? null;
 }
 
 function expireIfIdle(): void {

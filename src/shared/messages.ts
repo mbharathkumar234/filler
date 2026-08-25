@@ -45,7 +45,9 @@ export type VaultRequest =
   | { type: 'vault:completeness' }
   | { type: 'vault:export' }
   | { type: 'vault:import'; text: string; passphrase: string }
-  | { type: 'vault:touch' };
+  | { type: 'vault:touch' }
+  /** § Phase 6 re-auth gate: prove it is still the same person at the desk. */
+  | { type: 'vault:reauth'; passphrase: string };
 
 /** Document operations. Privileged, like the vault requests above. */
 export type DocumentRequest =
@@ -68,7 +70,11 @@ export type RuntimeRequest =
   | { type: 'ping' }
   | { type: 'harvest:request' }
   | { type: 'harvest:ready' }
+  /** Content script asking the worker which tab it is in (§ Phase 6 run keys). */
+  | { type: 'run:hello' }
   | { type: 'run:state'; state: RunState }
+  /** The user pressed "I have completed this" — in the panel or the overlay. */
+  | { type: 'run:continue' }
   | { type: 'run:abort'; why: string };
 
 /** Panel-initiated harvest of the active tab. Privileged. */
@@ -77,12 +83,22 @@ export type HarvestRequest = { type: 'harvest:tab'; tabId: number };
 /**
  * Fill operations. `fill:tab` and `fill:undo:tab` are privileged (panel only).
  * `fill:apply`, `fill:undo` and `fill:submit` travel worker -> content script.
+ *
+ * `fill:refill` is the exception, and the one that needed thinking about: it
+ * travels content script -> worker, so a compromised content script could send
+ * it. It is deliberately **not** privileged, because a postback that wipes the
+ * form has to be recoverable without dragging the user back to the panel. What
+ * contains it is not the sender check but the worker's run authorisation — see
+ * `authoriseRun` in `background/fill-service.ts`. The blast radius is "the keys
+ * the user already approved filling on this form, while that run is live",
+ * not "anything in the vault".
  */
 export type FillRequest =
   | { type: 'fill:tab'; tabId: number }
   | { type: 'fill:undo:tab'; tabId: number }
   | { type: 'fill:apply'; writes: WriteInstruction[] }
   | { type: 'fill:undo' }
+  | { type: 'fill:refill'; refs: string[] }
   | { type: 'fill:submit'; token: ApprovalToken };
 
 export type ExtensionRequest =
@@ -106,6 +122,7 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'vault:export',
   'vault:import',
   'vault:touch',
+  'vault:reauth',
   'doc:list',
   'doc:put',
   'doc:delete',
@@ -134,6 +151,8 @@ export interface ResponseMap {
   /** null means a wrong passphrase for the backup file. */
   'vault:import': ImportResult | null;
   'vault:touch': null;
+  /** false means a wrong passphrase — the gate stays shut. */
+  'vault:reauth': boolean;
   'doc:list': DocumentSummary[];
   'doc:put': DocumentSummary;
   'doc:delete': null;
@@ -145,11 +164,14 @@ export interface ResponseMap {
   'fill:undo:tab': { restored: number };
   'fill:apply': { records: FillReport['records']; aborted: boolean; blocked: number };
   'fill:undo': { restored: number };
+  'fill:refill': FillReport;
   'fill:submit': { submitted: boolean };
   ping: 'pong';
   'harvest:request': null;
   'harvest:ready': null;
+  'run:hello': { tabId: number };
   'run:state': null;
+  'run:continue': null;
   'run:abort': null;
 }
 

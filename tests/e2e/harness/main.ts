@@ -13,6 +13,12 @@ import { installSubmitGuard, guardState, setToastHandler, arm, __resetGuardForTe
 import { runFill, type PlannedWrite } from '@/content/fill-run';
 import { parseConstraint } from '@/documents/constraints';
 import { createRasterBackend } from '@/documents/raster';
+import { RunController } from '@/content/run-controller';
+import { primaryBlocker, detectBlockers } from '@/content/blockers';
+import { readValue, resolveRanked } from '@/content/reverify';
+import { setRunStorage, type RunStorage } from '@/runtime/persistence';
+import type { FillPlan, PlannedField } from '@/shared/types';
+import type { FieldKey } from '@/matching/taxonomy';
 
 import type { HarnessResult } from './harness.d';
 
@@ -116,6 +122,233 @@ function guardReport() {
   };
 }
 
+// ---------------------------------------------------------------------------
+// § Phase 6 — pause, resume, drift recovery
+// ---------------------------------------------------------------------------
+
+/**
+ * Run storage backed by `sessionStorage`.
+ *
+ * `chrome.storage.session` does not exist on a plain page, and a Map would not
+ * survive the reload — which is the one thing the rehydration test needs it to
+ * do. `sessionStorage` has both properties: same tab, across reloads, gone
+ * when the tab closes.
+ */
+const sessionArea: RunStorage = {
+  get(keys) {
+    const all: Record<string, unknown> = {};
+    for (let i = 0; i < sessionStorage.length; i += 1) {
+      const key = sessionStorage.key(i);
+      if (key === null) continue;
+      try {
+        all[key] = JSON.parse(sessionStorage.getItem(key) ?? 'null');
+      } catch {
+        /* not ours */
+      }
+    }
+    if (keys === null) return Promise.resolve(all);
+    const wanted = Array.isArray(keys) ? keys : [keys];
+    const out: Record<string, unknown> = {};
+    for (const key of wanted) if (key in all) out[key] = all[key];
+    return Promise.resolve(out);
+  },
+  set(items) {
+    for (const [key, value] of Object.entries(items)) {
+      sessionStorage.setItem(key, JSON.stringify(value));
+    }
+    return Promise.resolve();
+  },
+  remove(keys) {
+    for (const key of Array.isArray(keys) ? keys : [keys]) sessionStorage.removeItem(key);
+    return Promise.resolve();
+  },
+};
+
+setRunStorage(sessionArea);
+
+/**
+ * The harness stands in for the background worker.
+ *
+ * It holds the values the run was started with and re-sends them when the
+ * controller asks — which is exactly the worker's `refillTab` contract, minus
+ * the vault and the authorisation checks (both unit-tested separately). What
+ * is *real* here is everything on the page side: the reducer, the persistence,
+ * the observer, the blocker detection, and the re-verification pass.
+ */
+let plannedValues = new Map<string, string>();
+let controller: RunController | null = null;
+let planned: FillPlan | null = null;
+const events: string[] = [];
+
+/**
+ * Resolve through the *controller's* plan when there is one.
+ *
+ * After a reload the plan comes back from storage before the harness has
+ * rebuilt anything, and re-verification resolves fields during `attach()` —
+ * so the persisted selectors have to be the ones used. That is also the
+ * stronger test: those selectors were captured under element ids that no
+ * longer exist.
+ */
+function activePlan(): FillPlan | null {
+  return controller?.plan ?? planned;
+}
+
+function resolveRef(ref: string): Element | null {
+  const field = activePlan()?.fields.find((f) => f.fieldRef === ref);
+  if (!field) return null;
+  return resolveRanked(field.selectors, document)?.el ?? null;
+}
+
+/**
+ * The values the worker would hold.
+ *
+ * Kept in `sessionStorage` rather than a module variable because a reload
+ * destroys module state — and the real holder of these values, the background
+ * worker, is not destroyed by a page reload either.
+ */
+const VALUE_KEY = 'harness:values';
+
+function loadPlannedValues(): Map<string, string> {
+  if (plannedValues.size > 0) return plannedValues;
+  try {
+    const raw = sessionStorage.getItem(VALUE_KEY);
+    plannedValues = new Map(Object.entries(raw === null ? {} : (JSON.parse(raw) as Record<string, string>)));
+  } catch {
+    plannedValues = new Map();
+  }
+  return plannedValues;
+}
+
+function savePlannedValues(): void {
+  sessionStorage.setItem(VALUE_KEY, JSON.stringify(Object.fromEntries(plannedValues)));
+}
+
+function writesFor(refs: readonly string[]): PlannedWrite[] {
+  const values = loadPlannedValues();
+  const plan = activePlan();
+  const writes: PlannedWrite[] = [];
+  for (const ref of refs) {
+    const value = values.get(ref);
+    const field = plan?.fields.find((f) => f.fieldRef === ref);
+    if (value === undefined || !field) continue;
+    writes.push({ ref, key: field.key, value });
+  }
+  return writes;
+}
+
+async function applyWrites(writes: PlannedWrite[]): Promise<number> {
+  const result = await runFill(writes, {
+    resolve: resolveRef,
+    delay: () => new Promise((r) => setTimeout(r, 5)),
+  });
+  controller?.remember(writes.map((w) => w.ref));
+  return result.records.filter((r) => r.ok).length;
+}
+
+/** The worker's half of a refill, as the controller sees it. */
+async function refillPort(refs: string[]): Promise<{ ok: boolean; error?: string }> {
+  events.push(`refill:${refs.join(',')}`);
+  await applyWrites(writesFor(refs));
+  await controller?.toReview();
+  return { ok: true };
+}
+
+function ensureController(): RunController {
+  controller ??= new RunController({
+    tabId: 1,
+    doc: document,
+    reloaded: true,
+    resolve: resolveRef,
+    requestRefill: refillPort,
+    onState: (state) => events.push(`state:${state.t}`),
+    onPause: (finding) => events.push(`pause:${finding.type}`),
+    onResume: () => events.push('resume'),
+  });
+  return controller;
+}
+
+/**
+ * Build a plan from the fixture's own `data-af` markers and start a run.
+ *
+ * The mapping is given by the test rather than inferred by the matcher: this
+ * spec is about Phase 6's resume behaviour, and letting Phase 4 decide the
+ * keys would make a matching regression look like a resume flake.
+ */
+async function runStart(values: Record<string, string>): Promise<string> {
+  const harvested = harvest(document);
+  const fields: PlannedField[] = [];
+  plannedValues = new Map();
+
+  for (const [name, value] of Object.entries(values)) {
+    const descriptor = harvested.fields.find((field) => {
+      const el = harvested.elements.get(field.ref);
+      return el?.getAttribute('name') === name;
+    });
+    if (!descriptor) continue;
+    fields.push({
+      fieldRef: name,
+      key: `fixture.${name}` as FieldKey,
+      selectors: descriptor.selectors,
+      confidence: 0.95,
+      source: 'rule',
+    });
+    plannedValues.set(name, value);
+  }
+  savePlannedValues();
+
+  planned = {
+    siteId: 'postback-portal',
+    profileVersion: null,
+    formFingerprint: 'fixture-postback-step-2',
+    tabId: 1,
+    fields,
+    documents: [],
+    submit: { selectors: ['#btnFinalSubmit'], label: 'Final Submit' },
+    createdAt: Date.now(),
+  };
+
+  const run = ensureController();
+  await run.attach(planned.formFingerprint);
+  await run.setPlan(planned);
+
+  if (!(await run.beginFill())) return run.state.t;
+
+  await applyWrites(writesFor(fields.map((f) => f.fieldRef)));
+
+  if (!(await run.checkBlockers())) await run.toReview();
+  return run.state.t;
+}
+
+/**
+ * Resume an existing run in a freshly loaded document.
+ *
+ * Nothing is rebuilt from the page. The plan — refs, selectors, confidences —
+ * comes back out of `chrome.storage.session`'s stand-in, which is the whole
+ * claim §5 makes about persistence. The selectors in it were recorded against
+ * element ids the reload has already destroyed, so this only works if the
+ * ranked fallbacks do.
+ */
+async function runResumeAfterReload(): Promise<string> {
+  loadPlannedValues();
+  controller?.detach();
+  controller = null;
+  planned = null;
+
+  const run = ensureController();
+  await run.attach('fixture-postback-step-2');
+  planned = run.plan;
+  return run.state.t;
+}
+
+function currentValues(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const el of document.querySelectorAll('[data-af]')) {
+    const name = el.getAttribute('name');
+    if (name) out[name] = readValue(el);
+  }
+  return out;
+}
+
 window.__derive = run;
 window.__harvest = runHarvest;
 window.__installGuard = installGuard;
@@ -123,4 +356,32 @@ window.__fill = fill;
 window.__guardReport = guardReport;
 window.__arm = (token) => {
   arm(token);
+};
+window.__run = {
+  start: runStart,
+  resume: runResumeAfterReload,
+  state: () => controller?.state.t ?? 'IDLE',
+  planSize: () => controller?.plan?.fields.length ?? 0,
+  blocker: () => primaryBlocker(detectBlockers(document))?.type ?? null,
+  blockerCount: () => detectBlockers(document).length,
+  instruction: () => controller?.blocker?.instruction ?? '',
+  async continue() {
+    await controller?.userContinue();
+    return controller?.state.t ?? 'IDLE';
+  },
+  async reverify() {
+    await controller?.reverifyNow();
+    return controller?.state.t ?? 'IDLE';
+  },
+  checkPage: () => controller?.checkPageNow(),
+  values: currentValues,
+  events: () => [...events],
+  reset: () => {
+    sessionStorage.clear();
+    controller?.detach();
+    controller = null;
+    planned = null;
+    plannedValues = new Map();
+    events.length = 0;
+  },
 };

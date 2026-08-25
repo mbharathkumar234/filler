@@ -14,12 +14,24 @@
  * It writes only into its own container — never into the page's form fields.
  */
 
-export type OverlayStatus = 'idle' | 'filling' | 'paused' | 'review' | 'blocked' | 'done';
+export type OverlayStatus =
+  | 'idle'
+  | 'filling'
+  | 'paused'
+  | 'waiting'
+  | 'checking'
+  | 'review'
+  | 'blocked'
+  | 'done';
 
 const LABELS: Record<OverlayStatus, string> = {
   idle: 'AutoFill ready',
   filling: 'Filling…',
   paused: 'Paused — your turn',
+  /** § Phase 6: a CAPTCHA, OTP, signature or payment. The user acts, not us. */
+  waiting: 'Over to you',
+  /** § Phase 6: re-checking the page after a postback or a pause. */
+  checking: 'Checking the page again…',
   review: 'Ready for your review',
   blocked: 'Submission blocked',
   done: 'Filled — nothing submitted',
@@ -29,6 +41,8 @@ const COLOURS: Record<OverlayStatus, string> = {
   idle: '#334155',
   filling: '#1d4ed8',
   paused: '#b45309',
+  waiting: '#b45309',
+  checking: '#1d4ed8',
   review: '#047857',
   blocked: '#b91c1c',
   done: '#047857',
@@ -44,10 +58,15 @@ interface Overlay {
   progress: HTMLElement;
   toast: HTMLElement;
   abort: HTMLButtonElement;
+  /** § Phase 6: the pause panel shown while a human-only step is pending. */
+  pause: HTMLElement;
+  pauseText: HTMLElement;
+  pauseContinue: HTMLButtonElement;
 }
 
 let overlay: Overlay | null = null;
 let onAbort: (() => void) | null = null;
+let onContinue: (() => void) | null = null;
 
 const STYLE = `
   :host { all: initial; }
@@ -81,6 +100,17 @@ const STYLE = `
     border-radius: 8px; padding: 10px 12px;
     box-shadow: 0 4px 16px rgba(15, 23, 42, .3);
   }
+  .pause {
+    pointer-events: auto;
+    max-width: 340px; background: #fffbeb; color: #0f172a;
+    border: 1px solid #f59e0b; border-left: 4px solid #b45309;
+    border-radius: 8px; padding: 12px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, .2);
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .pause-text { font-size: 12px; }
+  .pause button { background: #b45309; color: #fff; border-color: #92400e; }
+  .pause button:hover { background: #92400e; }
   [hidden] { display: none !important; }
 `;
 
@@ -125,18 +155,59 @@ export function mountOverlay(doc: Document = document): void {
   abort.textContent = 'Abort';
   abort.addEventListener('click', () => onAbort?.());
 
+  const pause = doc.createElement('div');
+  pause.className = 'pause';
+  pause.hidden = true;
+  // Announced, because a run that silently stops is indistinguishable from a
+  // run that crashed — and this one is waiting on the user specifically.
+  pause.setAttribute('role', 'status');
+
+  const pauseText = doc.createElement('div');
+  pauseText.className = 'pause-text';
+
+  const pauseContinue = doc.createElement('button');
+  pauseContinue.type = 'button';
+  pauseContinue.textContent = 'I have completed this — continue';
+  pauseContinue.addEventListener('click', () => onContinue?.());
+
+  pause.append(pauseText, pauseContinue);
+
   text.append(label, progress);
   pill.append(dot, text, abort);
-  wrap.append(toast, pill);
+  wrap.append(toast, pause, pill);
   root.append(style, wrap);
   doc.body.append(host);
 
-  overlay = { host, root, pill, label, progress, toast, abort };
+  overlay = { host, root, pill, label, progress, toast, abort, pause, pauseText, pauseContinue };
   setStatus('idle');
 }
 
 export function setAbortHandler(fn: () => void): void {
   onAbort = fn;
+}
+
+export function setContinueHandler(fn: () => void): void {
+  onContinue = fn;
+}
+
+/**
+ * Hand the page back to the user (§ Phase 6).
+ *
+ * The instruction always comes from `blockers.ts`'s frozen table — never from
+ * the page. A portal that could write the text in our own overlay could tell
+ * the user "AutoFill will now complete this for you", and the one thing this
+ * panel exists to say is the opposite.
+ */
+export function showPause(instruction: string): void {
+  if (!overlay) return;
+  overlay.pauseText.textContent = instruction;
+  overlay.pause.hidden = false;
+  setStatus('waiting', 'Waiting for you. Nothing is being filled.');
+}
+
+export function hidePause(): void {
+  if (!overlay) return;
+  overlay.pause.hidden = true;
 }
 
 export function setStatus(status: OverlayStatus, detail?: string): void {
@@ -167,14 +238,26 @@ export function unmountOverlay(): void {
   overlay?.host.remove();
   overlay = null;
   onAbort = null;
+  onContinue = null;
 }
 
 /** Test seam: read what the user would see. */
-export function __overlayText(): { label: string; progress: string; toast: string } | null {
+export function __overlayText(): {
+  label: string;
+  progress: string;
+  toast: string;
+  pause: string;
+} | null {
   if (!overlay) return null;
   return {
     label: overlay.label.textContent ?? '',
     progress: overlay.progress.textContent ?? '',
     toast: overlay.toast.hidden ? '' : (overlay.toast.textContent ?? ''),
+    pause: overlay.pause.hidden ? '' : (overlay.pauseText.textContent ?? ''),
   };
+}
+
+/** Test seam: press the pause panel's button, as the user would. */
+export function __pressContinue(): void {
+  overlay?.pauseContinue.click();
 }

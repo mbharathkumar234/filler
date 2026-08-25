@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Postback fixture — regenerates ids, wipes values, gates on a CAPTCHA</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 44rem; }
+      .banner { background: #eff6ff; border-left: 4px solid #1d4ed8; padding: .6rem; font-size: .78rem; margin-bottom: 1rem; }
+      table { border-collapse: collapse; width: 100%; }
+      td { padding: .35rem .5rem; vertical-align: middle; }
+      td.lbl { width: 40%; color: #334155; font-size: .9rem; }
+      input, select { width: 100%; padding: .25rem; box-sizing: border-box; }
+      .req { color: #b91c1c; }
+      #capBox { background: #fef3c7; border: 1px solid #f59e0b; padding: .6rem; margin: 1rem 0; }
+      #log { font: 12px/1.5 monospace; background: #f1f5f9; padding: .5rem; margin-top: 1rem; }
+      .actions { margin-top: 1rem; display: flex; gap: .5rem; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>PHASE 6 FIXTURE.</strong> This page behaves like an ASP.NET WebForms portal on a bad
+      day: every element id is regenerated on each render, a &ldquo;postback&rdquo; wipes every value
+      and rebuilds the form, and a CAPTCHA gate sits between the user and the end. Nothing here is
+      a real security control &mdash; it exists so the run can be made to pause and resume without
+      ever reading a challenge.
+    </p>
+
+    <h1>Scholarship Application &mdash; Step 2 of 3</h1>
+
+    <form id="frm" method="post" action="page-1.html">
+      <table>
+        <tr>
+          <td class="lbl"><label>Candidate Name <span class="req">*</span></label></td>
+          <td><input name="txtName" maxlength="60" data-af="name" /></td>
+        </tr>
+        <tr>
+          <td class="lbl"><label>Father&rsquo;s Name</label></td>
+          <td><input name="txtFather" maxlength="60" data-af="father" /></td>
+        </tr>
+        <tr>
+          <td class="lbl"><label>Email ID <span class="req">*</span></label></td>
+          <td><input name="txtEmail" type="email" data-af="email" /></td>
+        </tr>
+        <tr>
+          <td class="lbl"><label>Mobile Number</label></td>
+          <td><input name="txtMobile" maxlength="10" data-af="mobile" /></td>
+        </tr>
+        <tr>
+          <td class="lbl"><label>PIN Code</label></td>
+          <td><input name="txtPin" maxlength="6" data-af="pin" /></td>
+        </tr>
+        <tr>
+          <td class="lbl"><label>State</label></td>
+          <td>
+            <select name="ddlState" data-af="state">
+              <option value="">-- Select --</option>
+              <option value="KA">Karnataka</option>
+              <option value="TN">Tamil Nadu</option>
+              <option value="MH">Maharashtra</option>
+            </select>
+          </td>
+        </tr>
+      </table>
+
+      <div id="capBox">
+        <strong>Security check.</strong> Type the characters shown in the image.
+        <div style="margin-top:.4rem; display:flex; gap:.5rem; align-items:center;">
+          <img id="imgCaptcha" alt="captcha" width="120" height="36"
+               src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxMjAiIGhlaWdodD0iMzYiPjxyZWN0IHdpZHRoPSIxMjAiIGhlaWdodD0iMzYiIGZpbGw9IiNlMmU4ZjAiLz48dGV4dCB4PSIxMCIgeT0iMjUiIGZvbnQtc2l6ZT0iMjAiIGZpbGw9IiMzMzQxNTUiPlg3S1E5PC90ZXh0Pjwvc3ZnPg==" />
+          <input name="txtCaptcha" style="width:10rem" />
+        </div>
+      </div>
+
+      <div class="actions">
+        <!-- type="button": a postback in this fixture must not go through the
+             submit path, so the guard is not what is being tested here. -->
+        <button type="button" id="btnPostback">Save &amp; Continue</button>
+        <button type="button" id="btnSolve">[fixture] mark CAPTCHA as solved</button>
+        <button type="submit" id="btnFinalSubmit">Final Submit</button>
+      </div>
+    </form>
+
+    <div id="log">renders=1 postbacks=0 captcha=present</div>
+
+    <script>
+      (function () {
+        var renders = 0;
+        var postbacks = 0;
+
+        window.__renderCount = function () { return renders; };
+        window.__postbackCount = function () { return postbacks; };
+
+        function render() {
+          document.getElementById('log').textContent =
+            'renders=' + renders +
+            ' postbacks=' + postbacks +
+            ' captcha=' + (document.getElementById('capBox') ? 'present' : 'solved');
+        }
+
+        /**
+         * Regenerate every element id, exactly as a WebForms render does.
+         * Names survive; ids do not. Any selector strategy that relies on the
+         * id alone will be broken by this on every single render.
+         */
+        function regenerateIds() {
+          renders += 1;
+          var nonce = 'ctl' + String(renders).padStart(2, '0') + '_' +
+                      Math.random().toString(36).slice(2, 8);
+          var fields = document.querySelectorAll('[data-af]');
+          for (var i = 0; i < fields.length; i += 1) {
+            fields[i].id = nonce + '_' + fields[i].getAttribute('name');
+          }
+          var cap = document.getElementsByName('txtCaptcha')[0];
+          if (cap) cap.id = nonce + '_txtCaptcha';
+          render();
+        }
+
+        /**
+         * The postback. Wipes every value and replaces the table wholesale, so
+         * the extension sees both a reset and enough DOM churn to notice.
+         */
+        window.__postback = function () {
+          postbacks += 1;
+          var table = document.querySelector('table');
+          var clone = table.cloneNode(true);
+          var inputs = clone.querySelectorAll('input');
+          for (var i = 0; i < inputs.length; i += 1) {
+            inputs[i].value = '';
+            inputs[i].removeAttribute('value');
+          }
+          var selects = clone.querySelectorAll('select');
+          for (var j = 0; j < selects.length; j += 1) selects[j].selectedIndex = 0;
+          table.parentNode.replaceChild(clone, table);
+          regenerateIds();
+        };
+
+        /**
+         * The user "solves" the CAPTCHA. The gate goes away; nothing in the
+         * extension ever looked at it.
+         */
+        window.__solveCaptcha = function () {
+          var box = document.getElementById('capBox');
+          if (box) box.parentNode.removeChild(box);
+          render();
+        };
+
+        document.getElementById('btnPostback').addEventListener('click', window.__postback);
+        document.getElementById('btnSolve').addEventListener('click', window.__solveCaptcha);
+
+        regenerateIds();
+      })();
+    </script>
+  </body>
+</html>

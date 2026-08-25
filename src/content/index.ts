@@ -1,5 +1,5 @@
 /**
- * Content script entry (§ Phase 3 harvest, § Phase 5 fill).
+ * Content script entry (§ Phase 3 harvest, § Phase 5 fill, § Phase 6 resume).
  *
  * Injected on an explicit user gesture via `chrome.scripting.executeScript`,
  * never declared in the manifest — a declared content script auto-injects into
@@ -8,15 +8,30 @@
  *
  * The submit guard is installed the moment this script runs, before any value
  * is written, so no fill of ours can reach a submit unapproved.
+ *
+ * This file is wiring. The Phase 6 behaviour — pause, resume, drift recovery —
+ * lives in `run-controller.ts`, which takes its dependencies as ports so that
+ * the same code can be driven by Playwright against a fixture page. Everything
+ * below connects those ports to the real `chrome.*` and the real overlay.
  */
 
-import { harvest, type HarvestResult } from './harvester';
+import { harvest } from './harvester';
+import type { HarvestResult } from './harvester';
 import { fingerprintForm } from '@/runtime/plan';
-import { envelope, isEnvelope, type ExtensionRequest } from '@/shared/messages';
-import type { FieldDescriptor } from '@/shared/types';
-import { findDependentSelects, runFill, undoFill, type PlannedWrite, type WriteRecord } from './fill-run';
+import { envelope, isEnvelope } from '@/shared/messages';
+import type { ExtensionRequest, Result } from '@/shared/messages';
+import type { FieldDescriptor, RunState } from '@/shared/types';
+import {
+  findDependentSelects,
+  runFill,
+  undoFill,
+} from './fill-run';
+import type { PlannedWrite, WriteRecord } from './fill-run';
 import { isXPath } from './selectors';
 import type { FieldSnapshot } from './filler';
+import { detectBlockers } from './blockers';
+import { isFreshDocument } from './watcher';
+import { RunController } from './run-controller';
 import {
   installSubmitGuard,
   setToastHandler,
@@ -26,10 +41,13 @@ import {
   type ApprovalToken,
 } from './submit-guard';
 import {
+  hidePause,
   mountOverlay,
   setAbortHandler,
+  setContinueHandler,
   setProgress,
   setStatus,
+  showPause,
   showToast,
 } from './overlay';
 
@@ -38,6 +56,11 @@ let current: HarvestResult | null = null;
 /** Pre-fill snapshots for Undo. */
 let lastSnapshots: FieldSnapshot[] = [];
 let abortRequested = false;
+let controller: RunController | null = null;
+let tabId: number | null = null;
+
+/** Set once, before anything else runs: was this document freshly loaded? */
+const documentWasReloaded = isFreshDocument(window);
 
 export interface HarvestReport {
   url: string;
@@ -53,6 +76,10 @@ export interface HarvestReport {
   dependentSelects: string[];
   /** The submit control, recorded so approval can name exactly one element. */
   submit: { selector: string; label: string } | null;
+  /** § Phase 6: human-only steps found on this page. */
+  humanSteps: { type: string; instruction: string }[];
+  /** § Phase 6: the run state, after any rehydration. */
+  runState: RunState['t'];
 }
 
 function formAction(): string | null {
@@ -109,6 +136,9 @@ export async function runHarvest(): Promise<HarvestReport> {
     step: current.wizard?.step ?? null,
   });
 
+  // § Phase 6: adopt (or resume) the run for this form before reporting.
+  await adoptRun(fingerprint);
+
   return {
     url: location.href,
     title: document.title,
@@ -121,6 +151,11 @@ export async function runHarvest(): Promise<HarvestReport> {
     labelledCount: visible.filter((f) => f.labelText.trim() !== '').length,
     dependentSelects: [...findDependentSelects(document)],
     submit: findSubmit(),
+    humanSteps: detectBlockers(document).map((finding) => ({
+      type: finding.type,
+      instruction: finding.instruction,
+    })),
+    runState: controller?.state.t ?? 'IDLE',
   };
 }
 
@@ -150,6 +185,81 @@ function resolveSelector(selector: string): Element | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// § Phase 6 — wiring the controller to chrome and the overlay
+// ---------------------------------------------------------------------------
+
+/**
+ * Which tab are we in?
+ *
+ * Asked of the worker, because the run's storage key is `run:${tabId}:…` and a
+ * content script has no other way to know. The worker reads it from
+ * `sender.tab.id`, which Chrome sets and a page cannot forge.
+ */
+async function whoAmI(): Promise<number | null> {
+  if (tabId !== null) return tabId;
+  try {
+    const response = (await chrome.runtime.sendMessage(envelope({ type: 'run:hello' }))) as
+      | Result<{ tabId: number }>
+      | undefined;
+    tabId = response?.ok ? response.data.tabId : null;
+  } catch {
+    tabId = null;
+  }
+  return tabId;
+}
+
+async function adoptRun(fingerprint: string): Promise<void> {
+  const id = await whoAmI();
+  if (id === null) return;
+
+  controller ??= new RunController({
+    tabId: id,
+    doc: document,
+    reloaded: documentWasReloaded,
+    resolve: elementFor,
+    requestRefill,
+    onState: (state) => {
+      void chrome.runtime.sendMessage(envelope({ type: 'run:state', state })).catch(() => {
+        // The panel may be closed. The state is persisted regardless.
+      });
+    },
+    onStatus: (status, detail) => {
+      mountOverlay();
+      setStatus(status, detail);
+    },
+    onPause: (finding) => {
+      mountOverlay();
+      showPause(finding.instruction);
+    },
+    onResume: hidePause,
+  });
+
+  await controller.attach(fingerprint);
+}
+
+/**
+ * Ask the worker to send the values again.
+ *
+ * The worker decides whether to honour it — see `refillTab`. This side does
+ * not hold the values and cannot re-derive them, which is the point.
+ */
+async function requestRefill(refs: string[]): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const response = (await chrome.runtime.sendMessage(
+      envelope({ type: 'fill:refill', refs }),
+    )) as Result<unknown> | undefined;
+
+    if (response?.ok) return { ok: true };
+    const error = response?.error ?? 'The refill could not be completed.';
+    mountOverlay();
+    showToast(error);
+    return { ok: false, error };
+  } catch {
+    return { ok: false, error: 'Could not reach the extension to restore those fields.' };
+  }
+}
+
 async function performFill(writes: PlannedWrite[]): Promise<{
   records: WriteRecord[];
   aborted: boolean;
@@ -157,22 +267,37 @@ async function performFill(writes: PlannedWrite[]): Promise<{
 }> {
   abortRequested = false;
   mountOverlay();
+
+  if (controller && !(await controller.beginFill())) {
+    const why =
+      controller.blocker?.instruction ?? 'This page is waiting for you before anything is filled.';
+    showToast(why);
+    return { records: [], aborted: true, blocked: guardState().blocked };
+  }
+
   setStatus('filling', `0 of ${writes.length} fields`);
 
   const result = await runFill(writes, {
     resolve: elementFor,
     onProgress: setProgress,
-    aborted: () => abortRequested,
+    aborted: () => abortRequested || (controller?.halted ?? false),
   });
 
   lastSnapshots = result.snapshots;
+  controller?.remember(writes.map((write) => write.ref));
 
-  setStatus(
-    result.aborted ? 'paused' : 'review',
-    result.aborted
-      ? 'Aborted. Nothing was submitted.'
-      : `${result.records.filter((r) => r.ok).length} of ${writes.length} filled — review in the side panel.`,
-  );
+  // A page that raised a security control mid-fill stops the run here rather
+  // than at the next field.
+  const stopped = (await controller?.checkBlockers()) ?? false;
+
+  if (!stopped) {
+    setStatus(
+      result.aborted ? 'paused' : 'review',
+      result.aborted
+        ? 'Aborted. Nothing was submitted.'
+        : `${result.records.filter((r) => r.ok).length} of ${writes.length} filled — review in the side panel.`,
+    );
+  }
 
   return { records: result.records, aborted: result.aborted, blocked: guardState().blocked };
 }
@@ -198,7 +323,13 @@ if (!window.__autofillContentReady) {
   setAbortHandler(() => {
     abortRequested = true;
     setStatus('paused', 'Aborting…');
+    void controller?.abort('user pressed Abort');
     void chrome.runtime.sendMessage(envelope({ type: 'run:abort', why: 'user pressed Abort' }));
+  });
+
+  // § Phase 6: "I have completed this — continue".
+  setContinueHandler(() => {
+    void controller?.userContinue();
   });
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -246,13 +377,23 @@ if (!window.__autofillContentReady) {
     if (request.type === 'fill:undo') {
       const restored = undoFill(lastSnapshots, elementFor);
       lastSnapshots = [];
+      controller?.forget();
       setStatus('idle');
       sendResponse({ ok: true, data: { restored } });
       return true;
     }
 
+    if (request.type === 'run:continue') {
+      (controller?.userContinue() ?? Promise.resolve()).then(
+        () => sendResponse({ ok: true, data: null }),
+        () => sendResponse({ ok: false, error: 'Could not resume.' }),
+      );
+      return true;
+    }
+
     if (request.type === 'run:abort') {
       abortRequested = true;
+      void controller?.abort('user aborted');
       setStatus('paused', 'Aborted. Nothing was submitted.');
       sendResponse({ ok: true, data: null });
       return true;
