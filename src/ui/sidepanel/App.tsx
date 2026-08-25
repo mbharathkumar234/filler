@@ -1,8 +1,11 @@
 /**
  * Side panel root.
  *
- * Phase 1 scope: the vault gate and the vault editor. Harvested fields arrive
- * in Phase 3, the review screen in Phase 7.
+ * The order of the sections is the order of the work: scan and fill, then
+ * review, then the vault you are filling from, then the record of what has
+ * been done. The review screen appears only once there is something filled to
+ * review — an empty approval control sitting on screen all the time would
+ * train people to look past the most important thing here.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -10,11 +13,14 @@ import type { VaultStatus } from '@/vault/session';
 import { errorMessage, send } from '@/ui/lib/client';
 import { VaultGate } from '@/ui/vault-editor/VaultGate';
 import { VaultEditor } from '@/ui/vault-editor/VaultEditor';
+import { ReviewScreen } from '@/ui/review/ReviewScreen';
+import { AuditPanel } from '@/ui/review/AuditPanel';
 import { FieldsPanel } from './FieldsPanel';
 
 export function App() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [reviewTabId, setReviewTabId] = useState<number | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -62,8 +68,12 @@ export function App() {
     <main className="min-h-screen bg-white font-sans text-slate-900">
       {status.unlocked ? (
         <>
-          <FieldsPanel />
+          <FieldsPanel onFilled={setReviewTabId} />
+          {reviewTabId !== null && (
+            <ReviewScreen tabId={reviewTabId} onDone={() => setReviewTabId(null)} />
+          )}
           <VaultEditor onLocked={() => void refresh()} />
+          <AuditPanel />
         </>
       ) : (
         <>

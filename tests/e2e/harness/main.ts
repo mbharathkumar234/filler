@@ -16,6 +16,7 @@ import { createRasterBackend } from '@/documents/raster';
 import { RunController } from '@/content/run-controller';
 import { primaryBlocker, detectBlockers } from '@/content/blockers';
 import { readValue, resolveRanked } from '@/content/reverify';
+import { applyEdit, collectValues, focusField } from '@/content/review-bridge';
 import { setRunStorage, type RunStorage } from '@/runtime/persistence';
 import type { FillPlan, PlannedField } from '@/shared/types';
 import type { FieldKey } from '@/matching/taxonomy';
@@ -349,6 +350,37 @@ function currentValues(): Record<string, string> {
   return out;
 }
 
+/**
+ * § Phase 7 — the review screen's page-side operations.
+ *
+ * Only real in a browser: jsdom has no layout, so it cannot say whether the
+ * highlight actually lands on top of the field it is pointing at.
+ */
+const reviewHarness = {
+  collect: (refs: string[]) => collectValues(refs, (ref) => document.getElementById(ref)),
+  focus(ref: string) {
+    const el = document.getElementById(ref);
+    if (!el) return null;
+    focusField(el, document);
+    const marker = document.getElementById('autofill-assistant-highlight');
+    if (!marker) return null;
+    const a = marker.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    return {
+      marker: { top: a.top, left: a.left, width: a.width, height: a.height },
+      field: { top: b.top, left: b.left, width: b.width, height: b.height },
+      focused: document.activeElement === el,
+      fieldHtml: el.outerHTML,
+    };
+  },
+  edit(ref: string, value: string) {
+    const el = document.getElementById(ref);
+    if (!el) return { ok: false, value: '' };
+    return applyEdit(el, value);
+  },
+};
+
+window.__review = reviewHarness;
 window.__derive = run;
 window.__harvest = runHarvest;
 window.__installGuard = installGuard;

@@ -646,34 +646,134 @@ gate prevents.
 
 **Goal:** the user's last line of defence. Make it genuinely reviewable, not a rubber stamp.
 
+**Status: built; the acceptance test is outstanding.** 903 unit tests + 54 e2e green. The Verify step
+is a user-testing pass that has **not been run** — see below, and do not treat this phase as closed
+until it has.
+
 ### Must Achieve
 
-- [ ] Review UI (side panel) listing every field: **label as shown on the portal**, value filled, source key,
-      confidence, and match rationale.
-- [ ] Visual grouping by form section; click a row → scroll to and highlight the field in the page.
-- [ ] Explicit surfacing of: low-confidence matches, truncated values, fuzzy select matches, `fillFailed` fields,
-      and **fields the portal requires that are still empty**.
-- [ ] Document section: thumbnail of each derived variant, plus its byte size and dimensions vs. the stated requirement.
-- [ ] Inline edit — corrections write back to the page **and** offer "save this correction to my vault".
-- [ ] Approval requires a deliberate gesture (type-to-confirm or hold-to-confirm), not a single stray click.
-      Issues a 90-second single-use `approvalToken`.
-- [ ] After approval: exactly one click on the recorded submit element, then `SUBMITTED`. Token burned before the click.
-- [ ] `runtime/audit.ts`: append-only local log — timestamp, site, fields filled (keys, not values, unless the
-      user opts into value logging), what was flagged, what the user edited, approval time.
+- [x] Review UI listing every field: the **portal's own label** as the primary text, the value in
+      large monospace beneath it, then key, confidence, source and rationale in small print. The
+      user is checking their data against a form they can see, not auditing our matcher.
+- [x] Grouping by the page's own sections (`nearbyText` — a legend, a heading, a caption), in
+      document order, so the review reads in the same order as the form. Click a row → the field is
+      scrolled to, focused, and outlined in the page.
+- [x] Explicit surfacing of low-confidence, truncated, fuzzy-select, `fillFailed`, and
+      required-but-empty — each as a **sentence** saying what to do, not a colour.
+- [x] Document section listing what the form asked for and what would be attached.
+      **Thumbnails are not implemented** — the panel names the requirement and the state; rendering
+      a preview of the derived variant is UI work left for the documents panel.
+- [x] Inline edit writes back to the page through the same filler the run uses, with an opt-in
+      "also save this to my vault" per correction.
+- [x] Approval is a **hold**, 1.5 s, mouse or keyboard. Issues a 128-bit single-use token with a
+      90-second TTL.
+- [x] After approval: exactly one click on the recorded element, then `SUBMITTED`. **Token burned
+      before the click.**
+- [x] `runtime/audit.ts`: append-only local log — what was filled, from where, what was flagged,
+      what the user edited, when they approved. Keys, not values, unless the user opts in.
 
 ### Should Achieve
 
-- [ ] Side-by-side diff against the last submission to the same portal.
-- [ ] Post-submission capture: store the acknowledgement/reference number and a PDF/screenshot of the
-      confirmation page into the vault, linked to the run.
-- [ ] "Explain this match" — show the rationale chain for any field.
+- [ ] Side-by-side diff against the last submission to the same portal. **Not done.**
+- [ ] Post-submission capture of the acknowledgement number and confirmation page. **Not done** —
+      needs a page-capture path that does not exist yet.
+- [x] "Explain this match" — every row carries its rationale, confidence and source inline. There is
+      no separate disclosure because there is nothing left to disclose.
 
 **Out of scope:** LLM matching.
 
-**Verify:** a user-testing pass — hand it to 3 people with one deliberately wrong value planted. All three
-should catch it. If they don't, the review screen has failed its only job; redesign it before proceeding.
+### The Verify step has not been run
 
----
+> "a user-testing pass — hand it to 3 people with one deliberately wrong value planted. All three
+> should catch it. If they don't, the review screen has failed its only job; redesign it before
+> proceeding."
+
+That is a human test and it is outstanding. Nothing automated substitutes for it, and this document
+should not pretend otherwise: the tests below hold the *mechanics* steady, not the outcome.
+
+What is tested: that the model hoists a flagged field out of a list of forty rather than leaving it
+at row 34; that the ordering is by what it costs the user to miss it; that the value shown is what
+the page really holds rather than what we sent; that "show me this field" lands the outline on that
+field, in a real browser, without touching it.
+
+**To run the pass:** plant a wrong value by editing one entry in the vault, fill
+`fixtures/ugly-portal/page-1.html`, and hand the panel to three people who have not seen this code.
+
+### What makes it a review rather than a rubber stamp
+
+**Every flagged field carries its own checkbox, and the approval control stays locked until each one
+is ticked.** This is the single most important thing on the screen. It turns "I looked at it" from an
+assumption into an action, and it puts the cost exactly where the uncertainty is: a form we filled
+with complete confidence approves in one gesture, and a form with four doubtful fields costs four
+deliberate ticks first.
+
+Three supporting decisions:
+
+- **The attention list is above the full list.** A flag half way down forty rows is decoration.
+- **Editing a value cancels a live approval.** What the user approved is not what is on the page any
+  more, so they approve again. Ninety seconds is not long enough for that to be a burden, and the
+  alternative is submitting something nobody signed off.
+- **The submit control names the button.** The user approves "Final Submit" — if that is not the
+  word they expect, something is wrong and it is visible before anything is sent.
+
+### Hold, not type
+
+The plan offers type-to-confirm or hold-to-confirm. Holding for 1.5 s is short enough not to be
+resented and long enough to be impossible by accident — a stray click, a double-click landing on a
+re-rendered layout, a trackpad twitch. Typing a phrase reads as ceremony and mostly trains people to
+type the phrase.
+
+Space or Enter held down does the same thing, and releasing early cancels the same way. A gesture
+only a mouse can perform would put the product's most important control out of reach of some of its
+users. A hold interrupted by the window losing focus is cancelled, so switching apps mid-press
+cannot complete an approval nobody is watching.
+
+### The token never reaches the UI
+
+The panel asks for a grant and later asks to submit; the worker holds the only token and is the only
+thing that can spend it. A React bug cannot leak one and a compromised panel cannot replay one. The
+content script receives it exactly once, as the argument of the single submission it is asked to
+make. `approval-service.test.ts` asserts that no response to the panel contains anything token-shaped.
+
+An approval is not a permission slip — it is a **description of one act**: this tab, this form
+fingerprint, this element, for ninety seconds. The threat is not a forged token (both ends are
+extension contexts); it is a token outliving the page the user looked at. Binding to the fingerprint
+is what makes "approve page A, portal navigates, stale approval submits page B" impossible.
+
+**Approval is refused outright while a CAPTCHA or OTP is outstanding** — approving *through* a
+security gate is the user asking for the one thing P4 says we do not do, so no token is ever minted.
+
+**The token is burned before the click, not after.** A click that throws, a page that navigates
+mid-flight, or a worker suspended between the two lines all leave nothing reusable. A token that
+survives a failed submission is a token available for a second attempt nobody approved — tested by
+making the page throw and asserting the next attempt has no approval.
+
+### The audit log is a privacy feature that could have become the opposite
+
+Keys, never values, by default: `id.aadhaar`, not the number. A log that recorded values would be a
+second, unencrypted copy of the vault sitting in `storage.local` where nothing protects it. Value
+logging exists, is off by default, is the user's choice, and the *setting* decides rather than the
+caller — so a future call site that passes values along cannot opt the user in.
+
+The site is reduced to its origin. A portal URL routinely carries an application number in its query
+string, and a log that kept it would be a record of which application, not merely which site.
+
+"Append-only" is honest about its limits: there is no API to edit or remove a single entry, so
+nothing can rewrite history to hide a fill. `clearAuditLog` deletes everything, visibly, because
+being unable to erase your own history is not a privacy feature. A cleared log restarts its
+sequence — recorded in the tests as a known property, not discovered later.
+
+### One bug the tests caught
+
+The field highlight was 4px wider than the field on the right and bottom: the marker's 2px border
+fell outside the width it was given, because `box-sizing` defaults to `content-box`. Only visible in
+a real browser — jsdom has no layout to measure. The marker is now `border-box`, and every property
+is `!important` so a portal's own stylesheet cannot slide our outline off the field it is pointing
+at.
+
+The marker is a plain element in the page's document, so a page *can* still hide it. That costs the
+user a visual aid and nothing more — unlike the overlay, this is not a control, so it does not earn
+a shadow root.
 
 ## Phase 8 — LLM fallback matcher
 

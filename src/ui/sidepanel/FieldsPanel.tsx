@@ -29,7 +29,7 @@ const SOURCE_LABELS: Record<string, string> = {
   none: 'no label found',
 };
 
-export function FieldsPanel() {
+export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }) {
   const [harvest, setHarvest] = useState<TabHarvest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,12 +64,15 @@ export function FieldsPanel() {
         return;
       }
       setFill(await send({ type: 'fill:tab', tabId: tab.id }));
+      // The review screen is the point of the fill, so it opens as soon as
+      // there is something to review rather than waiting to be asked for.
+      onFilled?.(tab.id);
     } catch (err) {
       setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
-  }, []);
+  }, [onFilled]);
 
   const undo = useCallback(async () => {
     setBusy(true);

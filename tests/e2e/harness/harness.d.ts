@@ -86,8 +86,21 @@ export interface RunHarness {
   reset(): void;
 }
 
+/** § Phase 7: the review screen's page-side operations. */
+export interface ReviewHarness {
+  collect(refs: string[]): Record<string, string>;
+  focus(ref: string): {
+    marker: { top: number; left: number; width: number; height: number };
+    field: { top: number; left: number; width: number; height: number };
+    focused: boolean;
+    fieldHtml: string;
+  } | null;
+  edit(ref: string, value: string): { ok: boolean; value: string; reason?: string };
+}
+
 declare global {
   interface Window {
+    __review: ReviewHarness;
     __run: RunHarness;
     /**
      * Provided by `fixtures/postback-portal/page-1.html` itself, not by the

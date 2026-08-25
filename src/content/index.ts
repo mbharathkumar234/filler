@@ -30,6 +30,7 @@ import type { PlannedWrite, WriteRecord } from './fill-run';
 import { isXPath } from './selectors';
 import type { FieldSnapshot } from './filler';
 import { detectBlockers } from './blockers';
+import { applyEdit, collectValues, focusField } from './review-bridge';
 import { isFreshDocument } from './watcher';
 import { RunController } from './run-controller';
 import {
@@ -371,6 +372,33 @@ if (!window.__autofillContentReady) {
             error: error instanceof Error ? error.message : 'Fill failed.',
           }),
       );
+      return true;
+    }
+
+    // § Phase 7 — the review screen's three page-side operations.
+    if (request.type === 'review:collect') {
+      sendResponse({ ok: true, data: collectValues(request.refs, elementFor) });
+      return true;
+    }
+
+    if (request.type === 'field:focus') {
+      const el = elementFor(request.ref);
+      if (el) focusField(el, document);
+      sendResponse({ ok: true, data: null });
+      return true;
+    }
+
+    if (request.type === 'field:apply-edit') {
+      const el = elementFor(request.ref);
+      if (!el) {
+        sendResponse({ ok: false, error: 'That field is no longer on the page.' });
+        return true;
+      }
+      const outcome = applyEdit(el, request.value);
+      // A correction is a fill: the run must remember it, or re-verification
+      // would decide the page had reset the field and put our value back.
+      controller?.remember([request.ref]);
+      sendResponse({ ok: true, data: { ok: outcome.ok, value: outcome.value } });
       return true;
     }
 

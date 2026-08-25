@@ -27,6 +27,8 @@ import type { DocumentSummary } from '@/vault/document-store';
 import type { DerivedPayload } from '@/background/document-service';
 import type { TabHarvest } from '@/background/harvest-service';
 import type { FillReport, WriteInstruction } from '@/background/fill-service';
+import type { ReviewPayload } from '@/background/review-service';
+import type { AuditEntry, AuditSettings } from '@/runtime/audit';
 import type { ApprovalToken } from '@/content/submit-guard';
 
 // ---------------------------------------------------------------------------
@@ -101,11 +103,52 @@ export type FillRequest =
   | { type: 'fill:refill'; refs: string[] }
   | { type: 'fill:submit'; token: ApprovalToken };
 
+/**
+ * Review and approval (§ Phase 7).
+ *
+ * Everything the panel initiates here is privileged. `review:collect`,
+ * `field:focus` and `field:apply-edit` travel worker -> content script.
+ *
+ * Note what is *not* in this union: any way for the panel to obtain the
+ * approval token. The token never leaves the worker — the panel asks for a
+ * grant and later asks to submit, and the worker is the only holder. A UI
+ * that never sees the token cannot leak one.
+ */
+export type ReviewRequest =
+  | { type: 'review:build'; tabId: number }
+  | { type: 'review:collect'; refs: string[] }
+  | { type: 'field:focus'; ref: string }
+  | { type: 'field:apply-edit'; ref: string; value: string }
+  | { type: 'field:highlight'; tabId: number; ref: string }
+  | {
+      type: 'field:edit';
+      tabId: number;
+      ref: string;
+      value: string;
+      /** Also write the correction back to the vault under this key. */
+      saveKey?: FieldKey;
+    };
+
+export type ApprovalRequest =
+  | { type: 'approval:grant'; tabId: number }
+  | { type: 'approval:submit'; tabId: number }
+  | { type: 'approval:revoke'; tabId: number }
+  | { type: 'approval:status'; tabId: number };
+
+export type AuditRequest =
+  | { type: 'audit:read'; limit?: number }
+  | { type: 'audit:configure'; logValues: boolean }
+  | { type: 'audit:settings' }
+  | { type: 'audit:clear' };
+
 export type ExtensionRequest =
   | VaultRequest
   | DocumentRequest
   | HarvestRequest
   | FillRequest
+  | ReviewRequest
+  | ApprovalRequest
+  | AuditRequest
   | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
 
@@ -131,6 +174,17 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'harvest:tab',
   'fill:tab',
   'fill:undo:tab',
+  'review:build',
+  'field:highlight',
+  'field:edit',
+  'approval:grant',
+  'approval:submit',
+  'approval:revoke',
+  'approval:status',
+  'audit:read',
+  'audit:configure',
+  'audit:settings',
+  'audit:clear',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -166,6 +220,21 @@ export interface ResponseMap {
   'fill:undo': { restored: number };
   'fill:refill': FillReport;
   'fill:submit': { submitted: boolean };
+  'review:build': ReviewPayload;
+  'review:collect': Record<string, string>;
+  'field:focus': null;
+  'field:apply-edit': { ok: boolean; value: string };
+  'field:highlight': null;
+  'field:edit': { ok: boolean; value: string; savedToVault: boolean };
+  /** No token — see the note on ReviewRequest. */
+  'approval:grant': { expiresAt: number; target: string };
+  'approval:submit': { submitted: boolean; why?: string };
+  'approval:revoke': null;
+  'approval:status': { active: boolean; remainingMs: number };
+  'audit:read': AuditEntry[];
+  'audit:configure': null;
+  'audit:settings': AuditSettings;
+  'audit:clear': null;
   ping: 'pong';
   'harvest:request': null;
   'harvest:ready': null;

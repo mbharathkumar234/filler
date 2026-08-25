@@ -19,6 +19,8 @@ import { CONFIDENCE } from '@/shared/types';
 import { bandOf } from '@/matching';
 import { isDocumentKey, isFieldKey, type FieldKey } from '@/matching/taxonomy';
 import { describeReauth, reauthCheck } from '@/runtime/reauth';
+import { appendAudit } from '@/runtime/audit';
+import { rememberRecords } from './review-service';
 import { openVaultDb } from '@/vault/db';
 import { getAllFields } from '@/vault/profile-store';
 import { isUnlocked, lastAuthenticatedAt, VaultLockedError, withKey } from '@/vault/session';
@@ -250,6 +252,30 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
   if (!response?.ok) {
     return { ok: false, error: response?.error ?? 'The page did not respond to the fill request.' };
   }
+
+  // § Phase 7: keep the per-field outcomes for the review screen. `truncated`
+  // and `fuzzy` are facts about what the fill engine did, and the page has no
+  // memory of them — a shortened value is indistinguishable from a short one
+  // once it is sitting in an input.
+  rememberRecords(tabId, response.data.records);
+
+  await appendAudit({
+    site: harvest.url,
+    formFingerprint: harvest.fingerprint,
+    event: {
+      t: 'fill.completed',
+      keys: writes.map((write) => write.key).filter(isFieldKey),
+      filled: response.data.records.filter((record) => record.ok).length,
+      attempted: writes.length,
+    },
+    values: Object.fromEntries(
+      writes
+        .filter((write) => typeof write.value === 'string')
+        .map((write) => [write.key, write.value as string]),
+    ),
+  }).catch(() => {
+    // An audit write that fails must not take the fill down with it.
+  });
 
   return {
     ok: true,

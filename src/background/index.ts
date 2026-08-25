@@ -18,6 +18,25 @@ import { handleVaultRequest, isVaultRequest } from './vault-service';
 import { handleDocumentRequest } from './document-service';
 import { harvestTab } from './harvest-service';
 import { endRun, fillTab, refillTab, undoFillOnTab } from './fill-service';
+import {
+  buildReviewForTab,
+  editFieldOnTab,
+  forgetTabReview,
+  highlightFieldOnTab,
+} from './review-service';
+import {
+  approvalStatus,
+  grantApproval,
+  revokeApproval,
+  submitWithApproval,
+} from './approval-service';
+import {
+  appendAudit,
+  clearAuditLog,
+  getAuditSettings,
+  readAudit,
+  setAuditSettings,
+} from '@/runtime/audit';
 import { clearTab, pruneRuns } from '@/runtime/persistence';
 import { lockVault } from '@/vault/session';
 
@@ -51,6 +70,9 @@ chrome.runtime.onSuspend?.addListener(() => {
  */
 chrome.tabs?.onRemoved.addListener((tabId) => {
   endRun(tabId);
+  // An approval is for one form in one tab. The tab is gone, so is the form.
+  revokeApproval(tabId);
+  forgetTabReview(tabId);
   void clearTab(tabId).catch(() => {
     // The tab is gone; a failed cleanup is not worth surfacing.
   });
@@ -88,10 +110,50 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
     case 'run:state':
       // The panel subscribes to these; the worker only relays.
       return { ok: true, data: null };
+    case 'review:build':
+      return buildReviewForTab(request.tabId);
+    case 'field:highlight':
+      return highlightFieldOnTab(request.tabId, request.ref);
+    case 'field:edit':
+      return editFieldOnTab({
+        tabId: request.tabId,
+        ref: request.ref,
+        value: request.value,
+        ...(request.saveKey === undefined ? {} : { saveKey: request.saveKey }),
+      });
+
+    case 'approval:grant':
+      return grantApproval(request.tabId);
+    case 'approval:submit':
+      return submitWithApproval(request.tabId);
+    case 'approval:revoke':
+      revokeApproval(request.tabId);
+      return { ok: true, data: null };
+    case 'approval:status':
+      return { ok: true, data: approvalStatus(request.tabId) };
+
+    case 'audit:read':
+      return { ok: true, data: await readAudit(request.limit) };
+    case 'audit:settings':
+      return { ok: true, data: await getAuditSettings() };
+    case 'audit:configure':
+      await setAuditSettings({ logValues: request.logValues });
+      return { ok: true, data: null };
+    case 'audit:clear':
+      await clearAuditLog();
+      return { ok: true, data: null };
+
     case 'run:abort':
       if (tabId !== null) {
         endRun(tabId);
+        revokeApproval(tabId);
+        forgetTabReview(tabId);
         void clearTab(tabId).catch(() => {});
+        void appendAudit({
+          site: '',
+          formFingerprint: '',
+          event: { t: 'run.aborted', why: request.why },
+        }).catch(() => {});
       }
       return { ok: true, data: null };
     case 'harvest:ready':
