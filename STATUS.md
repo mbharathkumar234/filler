@@ -512,4 +512,13 @@ split, and the remaining screens are the larger half by line count.
 Portal field labels are deliberately never translated. A review screen showing
 different words from the form behind it is the one thing it must never do.
 
-**Not started (Phase F Should):** the Firefox port.
+**Firefox port — assessed, not built.** `docs/FIREFOX_PORT.md` is the audit:
+what the codebase actually uses, the two real blockers (`chrome.sidePanel` has
+no Firefox equivalent; `background.service_worker` is an event page there), and
+the three things that would need re-verifying rather than re-compiling —
+Argon2id under Firefox's WASM handling, the capture-phase submit guard's event
+ordering, and the optional-permission prompt flow.
+
+Deliberately not shimmed. A compatibility layer would compile and would be
+untestable here, and an extension that has never been loaded into the browser
+it claims to support is not ported. The gap is honest; a shim would not be.
