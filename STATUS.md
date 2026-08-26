@@ -1,7 +1,9 @@
 # STATUS — measured completion
 
 Produced by **Phase A** of `COMPLETION_PLAN.md`. Measured 2026-08-26 against
-commit `820e3cb` (Phase 10).
+commit `820e3cb` (Phase 10), and **re-measured after Phases B–F** — the
+"Phase A said" sections are kept as written so the two pictures can be compared.
+See *After Phases B–F* at the end for what changed and what is still open.
 
 Phase A's rule, applied throughout: **implemented is not evidence.** Every green
 row cites a test file and test name that runs. Every row without one is amber or
@@ -41,6 +43,12 @@ silently excluded** — see the same file's "names the fixtures it cannot measur
 snapshot. Annotating them would widen this number's base and is not done.
 
 ### 2. Coverage on a site never tuned against — **63%** (17/27), 0 mismatches
+
+> **Superseded by Phase E.** This was a sample of one form. The ten-form
+> held-out benchmark now measures **96.6% (115/119), 0 high-confidence
+> mismatches** — see *After Phases B–F* below. The 63% figure stands as the
+> number for `fixtures/fourth-portal/` specifically, which remains the hardest
+> single form in the corpus and is deliberately so.
 
 `fixtures/fourth-portal/` is a municipal trade-licence renewal written in
 register English ("Appellation of the Applicant", "Name of Progenitor", "Natal
@@ -373,3 +381,107 @@ The two highest-value pieces of work, in order:
 - **Run the ≥85% gate** with an API key, and build out the held-out set from one
   form to the ten the plan asks for. Until then, "works on any portal" is a 63%
   claim with a sample size of one.
+
+
+---
+
+# After Phases B–F
+
+Re-measured 2026-08-26 at commit `d345df5`+. Same rule as Phase A: a row is
+green only if a named test asserts it.
+
+## The four numbers, re-measured
+
+| # | Number | Phase A | Now | Evidence |
+|---|--------|---------|-----|----------|
+| 1 | High-confidence mismatches | 0 | **0**, now across 3 corpora | `bench.test.ts` → "never auto-fills a wrong key, on any of the ten"; `eval.test.ts`; `audit-metrics.test.ts` |
+| 2 | Coverage, never tuned against | 63% (1 form) | **96.6%** (115/119, 10 forms) | `bench.test.ts` → "records the total" |
+| 3 | Pause/resume | 20/20 | **20/20** | unchanged |
+| 4 | Leak status | clean | **clean**, plus a filename canary | `value-guard.test.ts` → "THE FILENAME CANARY (§ Phase C-4)" |
+
+Number 2 is the one that moved, and the honest reading of it is narrower than
+the headline. It is a **rules-only** number over ten forms that vary by
+*labelling mechanism* — table cells, aria-label, bare text nodes,
+aria-labelledby, autocomplete, placeholder-only, `<legend>`, Devanagari, `<th>`
+grids, shadow roots. It is not ten portals' worth of vocabulary. The forms and
+the synonym dictionary still share an author, which is the standing caveat from
+Phase A and is not fixed by having ten of them instead of one.
+
+## What Phase E found, which is the part worth keeping
+
+The benchmark's value was not the percentage. On its first run it caught a
+confident mis-map: a Google Form gives every question its own heading, so
+"Current address" labelled the street field while City, PIN and State carried no
+adjective — matched one at a time they split across two address sections and
+assembled a **mixed address at 0.90**.
+
+The first fix was wrong, and the older corpus said so: gating the retarget on a
+form carrying *both* adjectives broke `heldout-exam`, which says "Present
+Address" once and means it. Two of my own fixtures disagreed about what a lone
+"Current address" block means. The rule that replaced it carries a section
+heading forward over the run of address fields beneath it and stops at the first
+field that is not one. Evidence: `deterministic.test.ts` → "address sections
+carry across the block beneath the heading" (6 tests).
+
+## Phase C — closed
+
+| Row | Status | Evidence |
+|-----|--------|----------|
+| C-2 outbound schema validated before send | **green** | `value-guard.test.ts` → "the outbound schema (§ Phase C)" |
+| C-4 document filename unreachable | **green** | `value-guard.test.ts` → "THE FILENAME CANARY (§ Phase C-4)" |
+
+## Phase F — what is now green
+
+| Row | Status | Evidence |
+|-----|--------|----------|
+| Permissions: 4 only, no `<all_urls>` | **green** | `release-gates.test.ts` → "asks for exactly the four permissions the plan allows", "never says `<all_urls>`, anywhere" |
+| Strict CSP, no eval, no remote code | **green** | `release-gates.test.ts` → "permits no JavaScript eval and no remote script" |
+| Dependency audit + licence check | **green** | `npm audit` 0 vulnerabilities; `release-gates.test.ts` → "are all permissive, transitively" (13 packages, MIT/ISC/0BSD/Apache-2.0) |
+| Onboarding walkthrough | **green** | `GettingStarted.test.tsx` (12 tests), `steps.test.ts` (14 tests), `fixtures/practice/first-fill.html` |
+| Document upload quality checks | **green** | `intake.test.ts` (15 tests) |
+| Honest in-product disclosure | **green** | `Disclosure.tsx`, gated before vault creation in `App.tsx` |
+| Privacy policy + store listing | **green** | `docs/PRIVACY.md`, `docs/STORE_LISTING.md`, both covering the optional host permission |
+| Accessibility pass | **green, partial** | `a11y.test.tsx` (28 tests) over 5 screens — see the limit below |
+| Crash safety | **green** | `crash-safety.test.ts` |
+
+Both release-gate families were **proved to bite**, not just observed passing:
+adding `<all_urls>` and swapping `wasm-unsafe-eval` for `unsafe-eval` turns five
+tests red; stripping `aria-hidden`, the screen-reader text and a button's label
+turns three a11y tests red. Both were reverted.
+
+The a11y sweep also carries a guard against itself — "actually rendered — every
+check below is vacuous otherwise" — which immediately caught one screen being
+swept in a state with no controls in it at all.
+
+## Still open, and why
+
+**Human activities, not code.** These cannot be closed from this machine and
+should not be marked green by anyone who has not done them:
+
+- **Real-portal smoke test** — one live run per portal, stopped at review. Also
+  blocked on row 0-4 (which portals), a decision open since the first session.
+- **User test: 3 people, one planted wrong value, all 3 catch it.** The review
+  screen's *logic* is well covered now; whether the screen actually causes a
+  person to notice a wrong value is not something a test can answer. The plan is
+  right that if they miss it, the screen needs redesigning.
+- **External security review** of the isolation boundary.
+- **Portal ToS verdicts** — `docs/portal-notes/` is a template, not a verdict.
+
+**Measurable but not measured:**
+
+- **The ≥85% rules + LLM gate.** Needs `ANTHROPIC_API_KEY`. `eval-llm.test.ts`
+  is written and skips without one. The 96.6% above is rules only, so this gate
+  is not "probably fine" — it is unmeasured, and the LLM tier's contribution to
+  coverage is currently an assumption.
+- **LLM document-constraint extraction** (Phase E Should).
+
+**Accessibility, honestly.** The 28 invariants cover names, heading order, tab
+order, labels, and state not carried by colour alone, across five screens. What
+they cannot cover is what an automated check never can: whether the wording
+makes sense, whether focus order matches reading order on a real screen, and
+whether a screen reader announces the review screen usefully. This is an
+accessibility product for many of its users, and that part still needs a person.
+
+**Not started (Phase F Should):** UI localisation (Hindi + one regional
+language) and the Firefox port. The Devanagari synonyms exist in the matcher;
+the *interface* is English only.
