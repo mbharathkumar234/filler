@@ -22,6 +22,7 @@
 import {
   createVerifier,
   deriveKey,
+  needsRehash,
   newKdfParams,
   verifyPassphrase,
   type KdfParams,
@@ -129,8 +130,77 @@ export async function unlockVault(passphrase: string): Promise<boolean> {
     return false;
   }
 
-  activate(key, meta.kdf);
+  const upgraded = await migrateKdfIfNeeded(db, meta, passphrase, key);
+  activate(upgraded.key, upgraded.kdf);
   return true;
+}
+
+/**
+ * Re-key a vault onto the current KDF (§ Phase 10).
+ *
+ * Runs at unlock because that is the only moment the passphrase exists in
+ * memory. There is no background migration job and there cannot be one — the
+ * whole design is that nothing but the user's own typing can produce the key.
+ *
+ * ## Why the records do not need rewriting
+ *
+ * The KDF produces the AES key; the records are sealed *under* that key. So a
+ * re-key means re-deriving and re-encrypting everything... which would be a
+ * long, interruptible, partially-applied operation on a service worker that
+ * can be suspended at any moment. Instead the migration is deliberately
+ * conservative: **it only happens when the vault is otherwise empty**, or it
+ * does not happen at all.
+ *
+ * A vault with data keeps PBKDF2 at 600k iterations — which is not weak, only
+ * weaker — and says so in the panel, where the user can re-create the vault
+ * from a backup if they want the upgrade. Silently re-encrypting somebody's
+ * entire vault in a context that can be killed mid-write is a worse failure
+ * than a strong-but-older KDF.
+ */
+async function migrateKdfIfNeeded(
+  db: VaultDb,
+  meta: VaultMeta,
+  passphrase: string,
+  currentKey: CryptoKey,
+): Promise<{ key: CryptoKey; kdf: KdfParams }> {
+  if (!needsRehash(meta.kdf)) return { key: currentKey, kdf: meta.kdf };
+  if ((await db.count('profile')) > 0 || (await db.count('documents')) > 0) {
+    return { key: currentKey, kdf: meta.kdf };
+  }
+
+  try {
+    const kdf = newKdfParams();
+    const key = await deriveKey(passphrase, kdf);
+    await writeMeta(db, {
+      ...meta,
+      kdf,
+      verifier: await createVerifier(key),
+      updatedAt: new Date().toISOString(),
+    });
+    return { key, kdf };
+  } catch {
+    // A failed upgrade must not cost the user their unlock.
+    return { key: currentKey, kdf: meta.kdf };
+  }
+}
+
+/**
+ * Can this vault be upgraded to the current KDF, and is it worth telling the
+ * user? Read by the panel so the offer is explicit rather than silent.
+ */
+export async function kdfStatus(): Promise<{
+  name: string;
+  upgradable: boolean;
+  blockedByData: boolean;
+}> {
+  const db = await openVaultDb();
+  const meta = await readMeta(db);
+  if (!meta) return { name: 'none', upgradable: false, blockedByData: false };
+
+  const stale = needsRehash(meta.kdf);
+  const hasData = (await db.count('profile')) > 0 || (await db.count('documents')) > 0;
+
+  return { name: meta.kdf.name, upgradable: stale, blockedByData: stale && hasData };
 }
 
 /** Drop the key. Idempotent — safe to call on a locked vault. */

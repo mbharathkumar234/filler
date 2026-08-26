@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { deleteDB } from 'idb';
 import { DB_NAME, DB_VERSION, closeVaultDb, openVaultDb, type VaultDb } from './db';
-import { deriveKey, newKdfParams, type KdfParams } from './crypto';
+import { deriveKey, newSalt, type KdfParams } from './crypto';
 import {
   clearVariants,
   countVariants,
@@ -17,7 +17,22 @@ import {
 } from './document-store';
 import { parseConstraint } from '@/documents/constraints';
 
-const TEST_ITERATIONS = 1_000;
+/**
+ * Cheap Argon2id parameters for setup.
+ *
+ * Not `{ ...newKdfParams(), iterations: 1_000 }`. That spread was correct while
+ * the default KDF was PBKDF2, where a thousand iterations is fast; when Phase
+ * 10 made Argon2id the default it silently became a thousand passes over
+ * 64 MiB — minutes per key, and enough to kill the test worker. The shipped
+ * parameters are asserted in `kdf-migration.test.ts`; these exist only so the
+ * suite is not itself a proof-of-work.
+ */
+const TEST_KDF = {
+  name: 'Argon2id',
+  memoryKiB: 1_024,
+  iterations: 1,
+  parallelism: 1,
+} as const;
 
 let db: VaultDb;
 let key: CryptoKey;
@@ -30,7 +45,7 @@ beforeEach(async () => {
   await closeVaultDb();
   await deleteDB(DB_NAME);
   db = await openVaultDb();
-  kdf = { ...newKdfParams(), iterations: TEST_ITERATIONS };
+  kdf = { ...TEST_KDF, salt: newSalt() };
   key = await deriveKey('correct horse battery staple', kdf);
 });
 

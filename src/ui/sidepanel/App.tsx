@@ -16,12 +16,15 @@ import { VaultEditor } from '@/ui/vault-editor/VaultEditor';
 import { ReviewScreen } from '@/ui/review/ReviewScreen';
 import { AuditPanel } from '@/ui/review/AuditPanel';
 import { LlmPanel } from '@/ui/review/LlmPanel';
+import { Disclosure, hasSeenDisclosure } from '@/ui/onboarding/Disclosure';
 import { FieldsPanel } from './FieldsPanel';
 
 export function App() {
   const [status, setStatus] = useState<VaultStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewTabId, setReviewTabId] = useState<number | null>(null);
+  /** null while we are still asking; § Phase 10 disclosure gate. */
+  const [disclosed, setDisclosed] = useState<boolean | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -34,6 +37,7 @@ export function App() {
 
   useEffect(() => {
     void refresh();
+    void hasSeenDisclosure().then(setDisclosed);
   }, [refresh]);
 
   // Re-check when the panel regains focus: the vault may have auto-locked while
@@ -77,6 +81,13 @@ export function App() {
           <LlmPanel />
           <AuditPanel />
         </>
+      ) : disclosed === false && !status.exists ? (
+        /*
+         * § Phase 10: the disclosure comes before the vault exists, not after.
+         * Explaining what the software will and will not do *after* someone has
+         * committed their details to it is an explanation nobody reads.
+         */
+        <Disclosure onAccept={() => setDisclosed(true)} />
       ) : (
         <>
           <VaultGate exists={status.exists} onUnlocked={() => void refresh()} />

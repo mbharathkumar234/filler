@@ -15,6 +15,9 @@ import {
   newSalt,
   toBase64,
   verifyPassphrase,
+  ARGON2_MEMORY_KIB,
+  ARGON2_ITERATIONS,
+  legacyKdfParams,
 } from './crypto';
 
 /**
@@ -26,10 +29,29 @@ import {
  * value the product actually ships — is asserted separately.
  */
 
-const TEST_ITERATIONS = 1_000;
+/**
+ * Cheap Argon2id parameters, for the tests that are about *sealing* rather
+ * than about the KDF.
+ *
+ * Written out in full rather than spread over `newKdfParams()`. That spread —
+ * `{ ...newKdfParams(), iterations: 1_000 }` — was correct while the default
+ * was PBKDF2, where a thousand iterations is fast. When Phase 10 switched the
+ * default to Argon2id it silently became "a thousand passes over 64 MiB",
+ * which is minutes per key and killed the test worker outright. A unit changed
+ * underneath a number and nothing said so.
+ *
+ * `kdf-migration.test.ts` asserts the shipped parameters; these are only ever
+ * for speed.
+ */
+const TEST_KDF = {
+  name: 'Argon2id',
+  memoryKiB: 1_024,
+  iterations: 1,
+  parallelism: 1,
+} as const;
 
 async function testKey(passphrase = 'correct horse battery staple') {
-  const params = { ...newKdfParams(), iterations: TEST_ITERATIONS };
+  const params = { ...TEST_KDF, salt: newSalt() };
   return { key: await deriveKey(passphrase, params), params };
 }
 
@@ -46,8 +68,18 @@ describe('KDF parameters', () => {
     expect(toBase64(a)).not.toBe(toBase64(b));
   });
 
-  it('defaults new vaults to the shipping iteration count', () => {
-    expect(newKdfParams().iterations).toBe(KDF_ITERATIONS);
+  it('defaults new vaults to Argon2id at the shipping parameters', () => {
+    // Phase 10 replaced PBKDF2 as the default. `legacyKdfParams` still exists
+    // and `KDF_ITERATIONS` still holds the floor, because vaults created before
+    // that change must keep opening — see kdf-migration.test.ts.
+    const params = newKdfParams();
+
+    expect(params.name).toBe('Argon2id');
+    expect(params).toMatchObject({
+      memoryKiB: ARGON2_MEMORY_KIB,
+      iterations: ARGON2_ITERATIONS,
+    });
+    expect(legacyKdfParams().iterations).toBe(KDF_ITERATIONS);
   });
 
   it('derives a non-extractable key', async () => {
@@ -57,7 +89,7 @@ describe('KDF parameters', () => {
   });
 
   it('derives the same key material from the same passphrase and salt', async () => {
-    const params = { ...newKdfParams(), iterations: TEST_ITERATIONS };
+    const params = { ...TEST_KDF, salt: newSalt() };
     const k1 = await deriveKey('same passphrase', params);
     const k2 = await deriveKey('same passphrase', params);
     const sealed = await encryptText(k1, 'round trip');
@@ -65,8 +97,8 @@ describe('KDF parameters', () => {
   });
 
   it('derives different keys from the same passphrase under different salts', async () => {
-    const p1 = { ...newKdfParams(), iterations: TEST_ITERATIONS };
-    const p2 = { ...newKdfParams(), iterations: TEST_ITERATIONS };
+    const p1 = { ...TEST_KDF, salt: newSalt() };
+    const p2 = { ...TEST_KDF, salt: newSalt() };
     const k1 = await deriveKey('same passphrase', p1);
     const k2 = await deriveKey('same passphrase', p2);
     const sealed = await encryptText(k1, 'secret');
@@ -185,7 +217,7 @@ describe('tamper detection', () => {
 
 describe('passphrase verification', () => {
   it('accepts the correct passphrase', async () => {
-    const params = { ...newKdfParams(), iterations: TEST_ITERATIONS };
+    const params = { ...TEST_KDF, salt: newSalt() };
     const key = await deriveKey('right passphrase', params);
     const verifier = await createVerifier(key);
 
@@ -194,7 +226,7 @@ describe('passphrase verification', () => {
   });
 
   it('rejects a wrong passphrase cleanly rather than throwing', async () => {
-    const params = { ...newKdfParams(), iterations: TEST_ITERATIONS };
+    const params = { ...TEST_KDF, salt: newSalt() };
     const key = await deriveKey('right passphrase', params);
     const verifier = await createVerifier(key);
 
@@ -203,7 +235,7 @@ describe('passphrase verification', () => {
   });
 
   it('rejects a tampered verifier rather than treating it as a match', async () => {
-    const params = { ...newKdfParams(), iterations: TEST_ITERATIONS };
+    const params = { ...TEST_KDF, salt: newSalt() };
     const key = await deriveKey('right passphrase', params);
     const verifier = await createVerifier(key);
 

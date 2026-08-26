@@ -1074,34 +1074,150 @@ given a value before being pointed at and the resulting pick is checked for it.
 
 **Goal:** something you can responsibly give to strangers.
 
+**Status: built. Two Verify items are outstanding and cannot be self-performed** — see the end.
+
 ### Must Achieve
 
-- [ ] Strict CSP; no `eval`; no remote code. Audit every dependency (`npm audit`, licence check).
-- [ ] Content-script isolation review: the page must not be able to reach vault data, the approval token, or the
-      message bus. Treat every portal page as hostile.
-- [ ] Message-bus hardening: validate sender, reject messages from page context, schema-validate every message.
-- [ ] Upgrade KDF to Argon2id (WASM) with migration from PBKDF2 vaults.
-- [ ] Rate/scope limits enforcing P1 and P6: one active run per tab, hard cap on runs per hour, no headless entry point.
-- [ ] Onboarding flow: vault creation → guided profile entry → document upload with quality checks → first
-      supervised fill on a demo fixture form.
-- [ ] Clear in-product disclosure: what the extension does, what leaves the device, what the user is responsible for
-      verifying, and that they remain responsible for the accuracy of anything submitted.
-- [ ] Privacy policy + Chrome Web Store listing that honestly matches behaviour (store review will check permission
-      justification — `activeTab`, `storage`, `sidePanel`, `scripting`, host permissions per profile).
-- [ ] Crash-safe: killing the browser mid-run leaves no half-filled state that resumes incorrectly.
+- [x] Strict CSP, no eval, no remote code. `npm audit`: **0 vulnerabilities**. Runtime licences:
+      idb ISC, pdf-lib MIT, pdfjs-dist Apache-2.0, react/react-dom MIT, hash-wasm MIT — all
+      permissive, none copyleft.
+- [x] Content-script isolation review — `docs/ISOLATION_REVIEW.md`, eight claims, each naming the
+      mechanism *and* the test that fails if the claim stops being true.
+- [x] Message-bus hardening: `shared/validate.ts`, default-deny, running after the sender checks
+      and before any handler.
+- [x] Argon2id via WASM, with migration from PBKDF2 vaults.
+- [x] Rate/scope limits enforcing P1 and P6 (`background/limits.ts`).
+- [x] In-product disclosure, shown *before* the vault exists.
+- [x] Privacy policy (`docs/PRIVACY.md`) and store listing draft (`docs/STORE_LISTING.md`).
+- [x] Crash-safe: `runtime/crash-safety.test.ts`.
+- [ ] Onboarding flow. **Partial.** The disclosure gate and vault creation are wired; the guided
+      profile entry, document upload with quality checks, and a first supervised fill on the demo
+      fixture are *reachable* but not sequenced into a walkthrough. Every piece exists; what is
+      missing is the ribbon around them.
 
 ### Should Achieve
 
-- [ ] Firefox port (MV3 differences in service workers / `browser.*` namespace).
-- [ ] Accessibility pass on all extension UI (this is an accessibility product for many users — screen-reader
-      support is not optional in spirit).
-- [ ] Localisation of the extension UI (Hindi + one regional language to start).
-- [ ] Optional encrypted backup to user-chosen storage, key never leaving the device.
+- [ ] Firefox port. **Not done.**
+- [ ] Accessibility pass. **Not done, and this one is called out in the plan as "not optional in
+      spirit" for an accessibility product.** Some of it is in place by construction — the hold-to-
+      confirm has a real keyboard path, the pause panel has `role="status"`, errors have
+      `role="alert"` — but nobody has run a screen reader over this, and that is not the same thing.
+- [ ] Localisation (Hindi + one regional language). **Not done.** The matcher already reads
+      Devanagari labels; the *interface* is English-only.
+- [ ] Optional encrypted backup to user-chosen storage. **Not done** — export/import to a file
+      exists (Phase 1); syncing it somewhere does not.
 
-**Verify:** external security review of `vault/`, `submit-guard.ts`, and `redaction.ts` at minimum. Full e2e suite
-green 20 consecutive runs.
+**Verify:** external security review of `vault/`, `submit-guard.ts` and `redaction.ts`; full e2e
+suite green 20 consecutive runs.
 
----
+### The CSP tension, stated rather than resolved quietly
+
+The Must list asks for both "no eval" and "Argon2id (WASM)". Those pull against each other: Chrome
+requires `'wasm-unsafe-eval'` in an extension's CSP for *any* WebAssembly.
+
+The manifest now carries it, and nothing else. `wasm-unsafe-eval` permits WebAssembly compilation
+only — not `eval`, not `new Function`, not remote script. The WASM in question is the Argon2id
+implementation, **embedded as base64 inside our own JavaScript rather than fetched**, which the
+build confirms: there is no `.wasm` file in `dist/`. So: no remote code, no JS eval, and a
+memory-hard KDF. The alternative was PBKDF2 forever, which is the weaker trade.
+
+### The KDF, and why the migration is deliberately timid
+
+Argon2id at 64 MiB / 3 passes / 1 lane — above OWASP's floor, about 140 ms on a laptop. **The
+memory is the point**: PBKDF2 is cheap to parallelise on a GPU because it needs almost none;
+64 MiB per guess is what makes the threat model's first adversary — a stolen laptop — expensive
+rather than merely slow.
+
+A vault created before this phase still opens. It is re-keyed to Argon2id on unlock **only when the
+vault is otherwise empty**, and otherwise left on PBKDF2 with the panel able to say so.
+
+That looks over-cautious until you write out the alternative. A re-key means re-encrypting every
+record under a new key, in a service worker that can be suspended at any moment, with no
+transaction spanning the whole operation. A half-migrated vault is worse than a strong-but-older
+KDF, and PBKDF2 at 600k iterations is not weak — only weaker.
+
+### A unit changed underneath a number
+
+The KDF switch broke the test suite in a way worth recording, because nothing announced it.
+
+Three vault suites built cheap keys with `{ ...newKdfParams(), iterations: 1_000 }`. That was
+correct while the default was PBKDF2, where a thousand iterations is fast. The moment `newKdfParams`
+started returning Argon2id, the same expression meant **a thousand passes over 64 MiB** — minutes
+per key. Workers were killed by the OS, and it surfaced as hook timeouts in tests that have nothing
+to do with crypto: `document-store`, `vault`, a schema-migration check. The suite went from 9
+seconds to 278.
+
+The fix is an explicit `TEST_KDF` constant in each file with the hazard written next to it. The
+shipped parameters are asserted in `kdf-migration.test.ts` and nowhere else, so the two can no
+longer be confused. Suite back to ~15s.
+
+A second, smaller one: `poolOptions` in `vitest.config.ts` was accepted by the editor and is not a
+Vitest 4 option — it did nothing, and the real cause was the KDF params. It has been removed rather
+than left in looking load-bearing.
+
+### The backup format had to learn a second KDF
+
+Export/import hard-coded `PBKDF2-SHA256`, so the first Argon2id backup failed to import. Fixed in
+both directions: `kdfFromBackup` reads either shape, and a backup's *own* parameters are used
+verbatim rather than being replaced with today's defaults — the ciphertext was sealed under those.
+
+A backup that stopped opening because the application moved on would be a backup in name only. The
+file is the user's last copy, and its job is to outlive the software that wrote it.
+
+### Message-bus validation, and who it is actually for
+
+Not a hostile web page — a page cannot post onto the extension bus at all, and `sender.id` is set by
+Chrome. The realistic attacker is **a compromised content script**: it is a legitimate sender, so
+every sender check says yes to it. Two of the messages it may legitimately send carry structured
+data (`fill:refill`, `teach:picked`), and both are now checked in full.
+
+Default-deny: an unrecognised type is refused. That is mildly awkward — a new message type must be
+added in two places — and the alternative is a default-allow bus, which is one forgotten entry away
+from being no check at all. A test diffs the validator's table against `PRIVILEGED_TYPES` and
+against every `type:` literal in the source, so the gap shows up here rather than at a user.
+
+Written by hand rather than with a schema library: this is the most security-sensitive path in the
+product, and twenty message shapes do not justify a dependency in it.
+
+### Rate limits are not abuse prevention
+
+The user is the only person here and is not attacking themselves. `MAX_RUNS_PER_HOUR = 20` exists so
+that **the product cannot become the thing it promised not to be** — by accident, or by a future
+contributor's enthusiasm. A caps-off build with a scripted driver would satisfy every other test in
+this repository while being exactly the unattended bulk-submitter P1 and P6 forbid.
+
+So the cap sits where a real person will never touch it and a loop hits it immediately, and the
+refusal is a statement about what this software is rather than a quota someone should tune around.
+One active run per tab, with a 30-minute lease so a worker suspended mid-run does not lock its tab
+out for good.
+
+### Crash safety
+
+"No half-filled state that resumes incorrectly" — *incorrectly* is the load-bearing word. A lost run
+is a nuisance; a run that comes back believing something it should not is the failure that matters.
+
+Tested by throwing the in-memory store away and rebuilding over the same storage, which is exactly
+what a browser kill does. A resumed run never claims a field was filled that was not, never resumes
+writing without re-verifying, and cannot come back armed once the ninety seconds are up. The
+worker-side approval registry is in-memory by design, so a restarted worker has no grant at all —
+two independent controls, and the weaker one is the one that is written down.
+
+### Not done, and not self-performable
+
+**An external security review of `vault/`, `submit-guard.ts` and `redaction.ts`.** Required by this
+phase's Verify. It cannot be self-performed — a review by the author of the code is not a review.
+`docs/ISOLATION_REVIEW.md` is written as the material to hand a reviewer, not as a substitute for
+one.
+
+**Three portals chosen, with ToS verdicts in `docs/portal-notes/`.** Still outstanding from Phase 0,
+still blocked on a human decision about which portals, and still the thing that turns this from a
+working extension into a shippable one. Nothing in Phases 1–10 unblocked it, because nothing could.
+
+**The Phase 8 live LLM gate** needs an API key; `ANTHROPIC_API_KEY=... npx vitest run
+src/matching/eval-llm.test.ts`.
+
+**The Phase 7 user-testing pass** — three people, one planted wrong value — is a human activity and
+has not happened.
 
 ## 6. Cross-cutting requirements
 

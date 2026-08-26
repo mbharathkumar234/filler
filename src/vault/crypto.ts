@@ -17,8 +17,24 @@
  *    pure function library so it can be unit-tested without a browser.
  */
 
-/** Shipping iteration count. The plan's floor is 600k; do not lower it. */
+/** Legacy PBKDF2 iteration count. The plan's floor is 600k; do not lower it. */
 export const KDF_ITERATIONS = 600_000;
+
+/**
+ * Argon2id parameters (§ Phase 10).
+ *
+ * 64 MiB, 3 passes, 1 lane. Above OWASP's floor (19 MiB / 2 passes) and about
+ * 140 ms on a laptop — slow enough to hurt an attacker, fast enough that a
+ * user unlocking their vault does not notice.
+ *
+ * The *memory* is the point. PBKDF2 is cheap to parallelise on a GPU because
+ * it needs almost none; Argon2id's 64 MiB per guess is what makes a stolen
+ * laptop expensive to attack rather than merely slow. That is the threat model's
+ * first adversary, so it is the one the KDF is chosen for.
+ */
+export const ARGON2_MEMORY_KIB = 65_536;
+export const ARGON2_ITERATIONS = 3;
+export const ARGON2_PARALLELISM = 1;
 
 /** Per-vault salt length in bytes. */
 export const SALT_BYTES = 16;
@@ -32,9 +48,26 @@ export const RECORD_VERSION = 1;
 /** Known plaintext used to check a passphrase without decrypting real data. */
 const VERIFIER_PLAINTEXT = 'autofill-assistant/vault/v1';
 
-export interface KdfParams {
+/**
+ * How a vault's key is derived.
+ *
+ * Two shapes, because a vault created before Phase 10 is still a vault its
+ * owner needs to open. `deriveKey` reads whichever the vault records, and
+ * `needsRehash` reports when it is worth upgrading on the next unlock.
+ */
+export type KdfParams = Pbkdf2Params | Argon2Params;
+
+export interface Pbkdf2Params {
   readonly name: 'PBKDF2-SHA256';
   readonly iterations: number;
+  readonly salt: Uint8Array;
+}
+
+export interface Argon2Params {
+  readonly name: 'Argon2id';
+  readonly memoryKiB: number;
+  readonly iterations: number;
+  readonly parallelism: number;
   readonly salt: Uint8Array;
 }
 
@@ -68,9 +101,37 @@ export function newSalt(): Uint8Array {
   return crypto.getRandomValues(new Uint8Array(SALT_BYTES));
 }
 
-/** KDF parameters for a brand-new vault. */
+/** KDF parameters for a brand-new vault. Argon2id since Phase 10. */
 export function newKdfParams(): KdfParams {
+  return {
+    name: 'Argon2id',
+    memoryKiB: ARGON2_MEMORY_KIB,
+    iterations: ARGON2_ITERATIONS,
+    parallelism: ARGON2_PARALLELISM,
+    salt: newSalt(),
+  };
+}
+
+/** Legacy parameters, for opening a vault created before Phase 10. */
+export function legacyKdfParams(): Pbkdf2Params {
   return { name: 'PBKDF2-SHA256', iterations: KDF_ITERATIONS, salt: newSalt() };
+}
+
+/**
+ * Should this vault be re-keyed on the next successful unlock?
+ *
+ * True for a PBKDF2 vault, and for an Argon2id vault whose parameters are
+ * weaker than what we now ship. Migration happens at unlock because that is the
+ * only moment the passphrase exists in memory — there is no background job that
+ * could do it, by design.
+ */
+export function needsRehash(params: KdfParams): boolean {
+  if (params.name === 'PBKDF2-SHA256') return true;
+  return (
+    params.memoryKiB < ARGON2_MEMORY_KIB ||
+    params.iterations < ARGON2_ITERATIONS ||
+    params.parallelism < ARGON2_PARALLELISM
+  );
 }
 
 /**
@@ -81,6 +142,47 @@ export function newKdfParams(): KdfParams {
  * memory, never persisted").
  */
 export async function deriveKey(passphrase: string, params: KdfParams): Promise<CryptoKey> {
+  if (params.name === 'Argon2id') return deriveArgon2Key(passphrase, params);
+  return derivePbkdf2Key(passphrase, params);
+}
+
+/**
+ * Argon2id, via WASM.
+ *
+ * `hash-wasm` is imported dynamically so its module is only fetched when a
+ * vault is actually opened — it is dead weight in every other code path, and
+ * the content script must never carry it.
+ *
+ * The raw 32 bytes are imported as a non-extractable `CryptoKey` and the
+ * intermediate array is zeroed. That zeroing is best-effort and worth naming as
+ * such: JavaScript strings are immutable and the engine may have copied the
+ * buffer already. It closes the obvious window, not every window.
+ */
+async function deriveArgon2Key(passphrase: string, params: Argon2Params): Promise<CryptoKey> {
+  const { argon2id } = await import('hash-wasm');
+
+  const raw = (await argon2id({
+    password: passphrase,
+    salt: params.salt,
+    parallelism: params.parallelism,
+    iterations: params.iterations,
+    memorySize: params.memoryKiB,
+    hashLength: 32,
+    outputType: 'binary',
+  })) as Uint8Array;
+
+  try {
+    return await crypto.subtle.importKey('raw', bufferSource(raw), { name: 'AES-GCM' }, false, [
+      'encrypt',
+      'decrypt',
+    ]);
+  } finally {
+    raw.fill(0);
+  }
+}
+
+/** PBKDF2, kept only to open vaults created before Phase 10. */
+async function derivePbkdf2Key(passphrase: string, params: Pbkdf2Params): Promise<CryptoKey> {
   const material = await crypto.subtle.importKey(
     'raw',
     new TextEncoder().encode(passphrase),

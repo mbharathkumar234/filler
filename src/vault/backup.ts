@@ -14,7 +14,14 @@
  * warning text in `backup-format.ts` says so in as many words.
  */
 
-import { fromBase64, toBase64, verifyPassphrase, deriveKey, type SealedRecord } from './crypto';
+import {
+  fromBase64,
+  toBase64,
+  verifyPassphrase,
+  deriveKey,
+  type KdfParams,
+  type SealedRecord,
+} from './crypto';
 import { isFieldKey, type FieldKey } from '@/matching/taxonomy';
 import {
   clearVault,
@@ -58,6 +65,9 @@ export async function exportVault(db: VaultDb, meta: VaultMeta): Promise<string>
       name: meta.kdf.name,
       iterations: meta.kdf.iterations,
       salt: toBase64(meta.kdf.salt),
+      ...(meta.kdf.name === 'Argon2id'
+        ? { memoryKiB: meta.kdf.memoryKiB, parallelism: meta.kdf.parallelism }
+        : {}),
     },
     verifier: seal(meta.verifier),
     records: records.map((r) => ({
@@ -69,6 +79,43 @@ export async function exportVault(db: VaultDb, meta: VaultMeta): Promise<string>
   };
 
   return JSON.stringify(file, null, 2);
+}
+
+/**
+ * Read the KDF a backup was sealed under.
+ *
+ * Both shapes are accepted, and that is the whole point: a backup written by a
+ * build before Phase 10 uses PBKDF2, and one written after uses Argon2id. A
+ * backup that stopped opening because the *application* moved on would be a
+ * backup in name only — the file is the user's last copy, and its job is to
+ * outlive the software that wrote it.
+ *
+ * Returns null for anything else, so an unknown KDF is refused rather than
+ * guessed at.
+ */
+export function kdfFromBackup(kdf: BackupFile['kdf']): KdfParams | null {
+  if (kdf.name === 'PBKDF2-SHA256') {
+    return {
+      name: 'PBKDF2-SHA256',
+      iterations: kdf.iterations,
+      salt: fromBase64(kdf.salt),
+    };
+  }
+
+  if (kdf.name === 'Argon2id') {
+    // Written by an older or newer build; the file's own parameters are what
+    // the ciphertext was sealed under, so they are used verbatim rather than
+    // being replaced with today's defaults.
+    return {
+      name: 'Argon2id',
+      iterations: kdf.iterations,
+      memoryKiB: kdf.memoryKiB ?? 0,
+      parallelism: kdf.parallelism ?? 1,
+      salt: fromBase64(kdf.salt),
+    };
+  }
+
+  return null;
 }
 
 export function parseBackup(text: string): BackupFile {
@@ -107,15 +154,10 @@ export async function importVault(
 ): Promise<ImportResult | null> {
   const file = parseBackup(text);
 
-  if (file.kdf.name !== 'PBKDF2-SHA256') {
+  const kdf = kdfFromBackup(file.kdf);
+  if (!kdf) {
     throw new BackupFormatError(`Unsupported key derivation: ${file.kdf.name}.`);
   }
-
-  const kdf = {
-    name: 'PBKDF2-SHA256',
-    iterations: file.kdf.iterations,
-    salt: fromBase64(file.kdf.salt),
-  } as const;
 
   const verifier = unseal(file.verifier);
   const key = await deriveKey(passphrase, kdf);

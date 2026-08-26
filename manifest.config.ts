@@ -35,11 +35,22 @@ export default defineManifest({
   // Nothing is declared here on purpose.
 
   content_security_policy: {
-    // `connect-src` names the one host this extension talks to, so the CSP is
-    // itself a statement of the egress boundary: a reviewer can read the
-    // manifest and see there is exactly one. 'self' covers the extension's own
-    // bundled assets.
+    /*
+     * `connect-src` names the one host this extension talks to, so the CSP is
+     * itself a statement of the egress boundary: a reviewer can read the
+     * manifest and see there is exactly one. 'self' covers the extension's own
+     * bundled assets.
+     *
+     * `wasm-unsafe-eval` is the one relaxation, and it is worth naming plainly
+     * because the plan asks for both "no eval" and "Argon2id (WASM)" and those
+     * pull against each other. It permits **WebAssembly compilation only** —
+     * not `eval`, not `new Function`, not remote script. Chrome requires it for
+     * any WASM in an extension page, and the WASM in question is the Argon2id
+     * implementation, bundled as base64 inside our own JavaScript rather than
+     * fetched. So: no remote code, no JS eval, and a memory-hard KDF. The
+     * alternative was PBKDF2 forever, which is the weaker trade.
+     */
     extension_pages:
-      "script-src 'self'; object-src 'self'; connect-src 'self' https://api.anthropic.com",
+      "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' https://api.anthropic.com",
   },
 });

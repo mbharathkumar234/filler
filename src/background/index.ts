@@ -54,6 +54,8 @@ import {
   teachSession,
   versionsFor,
 } from './teach-service';
+import { beginRun, endRunLimit, mayStartRun } from './limits';
+import { validateRequest } from '@/shared/validate';
 import { clearTab, pruneRuns } from '@/runtime/persistence';
 import { lockVault } from '@/vault/session';
 
@@ -87,6 +89,7 @@ chrome.runtime.onSuspend?.addListener(() => {
  */
 chrome.tabs?.onRemoved.addListener((tabId) => {
   endRun(tabId);
+  endRunLimit(tabId);
   cancelTeaching(tabId);
   // An approval is for one form in one tab. The tab is gone, so is the form.
   revokeApproval(tabId);
@@ -112,8 +115,24 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
   switch (request.type) {
     case 'harvest:tab':
       return harvestTab(request.tabId);
-    case 'fill:tab':
-      return fillTab(request.tabId);
+    case 'fill:tab': {
+      // § Phase 10 — P1/P6. Checked before any value leaves the worker, so a
+      // refusal costs nothing and reveals nothing.
+      const allowed = mayStartRun(request.tabId);
+      if (!allowed.allowed) {
+        return {
+          ok: false,
+          error: allowed.message ?? 'Refused.',
+          ...(allowed.why === undefined ? {} : { code: allowed.why }),
+        };
+      }
+      beginRun(request.tabId);
+      try {
+        return await fillTab(request.tabId);
+      } finally {
+        endRunLimit(request.tabId);
+      }
+    }
     case 'fill:undo:tab':
       return undoFillOnTab(request.tabId);
     case 'fill:refill':
@@ -250,6 +269,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     assertSenderMayRequest(message.payload.type, sender);
   } catch (error) {
     console.warn('[autofill] rejected message', error);
+    sendResponse({ ok: false, error: 'Rejected.' } satisfies Result<never>);
+    return true;
+  }
+
+  // § Phase 10 — schema validation, after the sender checks and before any
+  // handler. The realistic attacker is a compromised content script: it is a
+  // legitimate sender, so the sender check says yes to everything it sends.
+  const shape = validateRequest(message.payload);
+  if (!shape.ok) {
+    console.warn('[autofill] malformed message:', shape.reason);
     sendResponse({ ok: false, error: 'Rejected.' } satisfies Result<never>);
     return true;
   }

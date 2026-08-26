@@ -22,6 +22,17 @@
 - Prefer small, pure functions in `matching/` and `documents/` — they must be unit-testable
   without a browser.
 
+## Release gates (Phase 10)
+- `npm audit` clean; runtime licences permissive.
+- Bus messages are schema-validated in `shared/validate.ts` — **default-deny**, so a new
+  message type must be added there too or it is refused.
+- New vaults use Argon2id; PBKDF2 vaults still open. Tests that need a key must use a cheap
+  explicit `TEST_KDF`, never `{ ...newKdfParams(), iterations: n }` — under Argon2id that
+  means n passes over 64 MiB.
+- P1/P6 caps live in `background/limits.ts`. They are not tuning knobs.
+- Disclosure, privacy policy and permission justifications: `docs/PRIVACY.md`,
+  `docs/STORE_LISTING.md`, `docs/ISOLATION_REVIEW.md`.
+
 ## Commands
 - `npm run dev` — extension dev build
 - `npm test` — vitest

@@ -44,7 +44,20 @@ export interface BackupFile {
   format: typeof BACKUP_FORMAT;
   version: number;
   exportedAt: string;
-  kdf: { name: string; iterations: number; salt: string };
+  /**
+   * The KDF the backup was sealed under.
+   *
+   * `memoryKiB`/`parallelism` are present for an Argon2id backup and absent
+   * for a PBKDF2 one written before Phase 10 — both must keep importing, in
+   * both directions, or a backup becomes a thing that expires.
+   */
+  kdf: {
+    name: string;
+    iterations: number;
+    salt: string;
+    memoryKiB?: number;
+    parallelism?: number;
+  };
   verifier: SerializedSealed;
   records: SerializedRecord[];
 }
