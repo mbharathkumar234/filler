@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Practice form — AutoFill Assistant</title>
+<style>
+  body { font: 15px/1.5 system-ui, sans-serif; margin: 0; background: #f8fafc; color: #0f172a; }
+  .wrap { max-width: 640px; margin: 0 auto; padding: 24px 16px 64px; }
+  .banner { background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 12px 14px; margin-bottom: 20px; }
+  .banner h1 { font-size: 16px; margin: 0 0 4px; }
+  .banner p { margin: 4px 0 0; font-size: 13px; color: #065f46; }
+  fieldset { border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; padding: 14px 16px; margin: 0 0 16px; }
+  legend { font-weight: 600; font-size: 13px; padding: 0 6px; }
+  .fld { margin: 10px 0; }
+  label { display: block; font-size: 13px; margin-bottom: 3px; }
+  input, select { width: 100%; box-sizing: border-box; padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 5px; font: inherit; }
+  .req { color: #dc2626; }
+  button { background: #1d4ed8; color: #fff; border: 0; border-radius: 6px; padding: 9px 18px; font: inherit; cursor: pointer; }
+  .note { font-size: 12px; color: #64748b; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!--
+    The practice form (§ Phase F onboarding).
+
+    A real first fill, on a page that goes nowhere. Two things it has to do:
+    show what a filled form and the review screen actually look like, and let
+    somebody press the approval control once without consequences — the first
+    time anyone uses that control should not be on their own application.
+
+    So the submit button posts to this same file and the page says so. Nothing
+    is transmitted, and nothing here is a real portal.
+
+    Field labels are drawn from the same vocabulary real portals use, and the
+    layout is deliberately ordinary: a well-built form, not a hostile one. The
+    hostile ones are in `fixtures/` for the test suite, not for a first run.
+  -->
+  <div class="banner">
+    <h1>This is a practice form</h1>
+    <p>Nothing here is sent anywhere. Fill it, check the review screen, and approve it once so you know what that looks like before you do it for real.</p>
+  </div>
+
+  <form method="post" action="first-fill.html" id="practice">
+    <fieldset>
+      <legend>Personal details</legend>
+      <div class="fld">
+        <label for="p-name">Full Name <span class="req">*</span></label>
+        <input id="p-name" name="applicantName" autocomplete="name" maxlength="75" required />
+      </div>
+      <div class="fld">
+        <label for="p-dob">Date of Birth</label>
+        <input id="p-dob" name="dob" type="date" autocomplete="bday" />
+      </div>
+      <div class="fld">
+        <label for="p-gender">Gender</label>
+        <select id="p-gender" name="gender">
+          <option value="">-- Select --</option>
+          <option>Male</option><option>Female</option><option>Other</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label for="p-father">Father's Name</label>
+        <input id="p-father" name="fatherName" maxlength="75" />
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Contact</legend>
+      <div class="fld">
+        <label for="p-email">Email Address <span class="req">*</span></label>
+        <input id="p-email" name="email" type="email" autocomplete="email" required />
+      </div>
+      <div class="fld">
+        <label for="p-mobile">Mobile Number <span class="req">*</span></label>
+        <input id="p-mobile" name="mobile" inputmode="numeric" maxlength="10" autocomplete="tel-national" required />
+      </div>
+    </fieldset>
+
+    <fieldset>
+      <legend>Permanent Address</legend>
+      <div class="fld">
+        <label for="p-addr1">Address Line 1</label>
+        <input id="p-addr1" name="addr1" autocomplete="address-line1" maxlength="120" />
+      </div>
+      <div class="fld">
+        <label for="p-city">City / Town</label>
+        <input id="p-city" name="city" autocomplete="address-level2" maxlength="40" />
+      </div>
+      <div class="fld">
+        <label for="p-state">State</label>
+        <select id="p-state" name="state" autocomplete="address-level1">
+          <option value="">-- Select --</option>
+          <option>Andhra Pradesh</option><option>Assam</option><option>Bihar</option>
+          <option>Delhi</option><option>Gujarat</option><option>Karnataka</option>
+          <option>Kerala</option><option>Madhya Pradesh</option><option>Maharashtra</option>
+          <option>Punjab</option><option>Rajasthan</option><option>Tamil Nadu</option>
+          <option>Telangana</option><option>Uttar Pradesh</option><option>West Bengal</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label for="p-pin">PIN Code</label>
+        <input id="p-pin" name="pincode" inputmode="numeric" maxlength="6" autocomplete="postal-code" />
+      </div>
+    </fieldset>
+
+    <!--
+      An unmappable field, on purpose. A first run where everything fills
+      teaches that everything always fills. This one stays blank and appears in
+      review as unmapped, which is the honest picture.
+    -->
+    <fieldset>
+      <legend>Office use</legend>
+      <div class="fld">
+        <label for="p-ref">Counter Receipt No.</label>
+        <input id="p-ref" name="counterReceipt" maxlength="12" />
+      </div>
+    </fieldset>
+
+    <button type="submit" id="p-submit">Submit Application</button>
+  </form>
+
+  <p class="note">A real portal would send your details when you press Submit. This page does not.</p>
+</div>
+</body>
+</html>

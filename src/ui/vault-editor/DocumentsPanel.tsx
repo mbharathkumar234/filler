@@ -15,6 +15,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FieldKey } from '@/matching/taxonomy';
 import type { DocumentSummary } from '@/vault/document-store';
 import { describeConstraint, parseConstraint } from '@/documents/constraints';
+import { assessMaster, roleFor } from '@/documents/intake';
 import { errorMessage, isLockedError, send } from '@/ui/lib/client';
 import { DOCUMENT_KEYS, labelFor } from '@/ui/lib/field-groups';
 
@@ -189,6 +190,10 @@ export function DocumentsPanel({ onLocked }: Props) {
           const master = byKey.get(key);
           const shown = previews.get(key);
           const busy = busyKey === key;
+          // Read off the stored metadata rather than remembering what upload
+          // found. Same answer, and it also covers documents added before this
+          // check existed — which is most of them, for an existing user.
+          const findings = master ? assessMaster(master.meta, roleFor(key)) : [];
 
           return (
             <li key={key} className="rounded border border-slate-200 p-2">
@@ -239,6 +244,25 @@ export function DocumentsPanel({ onLocked }: Props) {
                   </>
                 )}
               </div>
+
+              {findings.length > 0 && (
+                <ul className="mt-1.5 space-y-1">
+                  {findings.map((finding) => (
+                    <li
+                      key={finding.message}
+                      role={finding.severity === 'blocker' ? 'alert' : 'status'}
+                      className={
+                        finding.severity === 'blocker'
+                          ? 'rounded border border-red-300 bg-red-50 p-1.5 text-[11px] text-red-800'
+                          : 'rounded border border-amber-300 bg-amber-50 p-1.5 text-[11px] text-amber-900'
+                      }
+                    >
+                      <span className="font-medium">{finding.message}</span>{' '}
+                      <span className="opacity-90">{finding.remedy}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
               {shown && 'failed' in shown && (
                 <p className="mt-1.5 rounded border border-red-300 bg-red-50 p-1.5 text-[11px] text-red-700">

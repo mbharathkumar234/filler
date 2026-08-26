@@ -17,6 +17,7 @@ import { ReviewScreen } from '@/ui/review/ReviewScreen';
 import { AuditPanel } from '@/ui/review/AuditPanel';
 import { LlmPanel } from '@/ui/review/LlmPanel';
 import { Disclosure, hasSeenDisclosure } from '@/ui/onboarding/Disclosure';
+import { GettingStarted } from '@/ui/onboarding/GettingStarted';
 import { FieldsPanel } from './FieldsPanel';
 
 export function App() {
@@ -25,6 +26,17 @@ export function App() {
   const [reviewTabId, setReviewTabId] = useState<number | null>(null);
   /** null while we are still asking; § Phase 10 disclosure gate. */
   const [disclosed, setDisclosed] = useState<boolean | null>(null);
+
+  /**
+   * The checklist's buttons point at the vault editor further down the panel
+   * rather than opening a separate screen. Scrolling to the thing being talked
+   * about keeps one panel; a modal would hide the checklist that sent you.
+   */
+  const focusVaultEditor = useCallback(() => {
+    const target = document.getElementById('vault-editor');
+    target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target?.querySelector<HTMLElement>('input, select, button')?.focus();
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
@@ -73,6 +85,7 @@ export function App() {
     <main className="min-h-screen bg-white font-sans text-slate-900">
       {status.unlocked ? (
         <>
+          <GettingStarted onOpenVault={focusVaultEditor} />
           <FieldsPanel onFilled={setReviewTabId} />
           {reviewTabId !== null && (
             <ReviewScreen tabId={reviewTabId} onDone={() => setReviewTabId(null)} />

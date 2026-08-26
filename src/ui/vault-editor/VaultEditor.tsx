@@ -83,7 +83,7 @@ export function VaultEditor({ onLocked }: Props) {
   }
 
   return (
-    <div className="pb-8">
+    <div id="vault-editor" className="pb-8">
       <header className="sticky top-0 z-10 border-b border-slate-200 bg-white p-4">
         <div className="flex items-baseline justify-between">
           <h1 className="text-base font-semibold text-slate-900">Your details</h1>

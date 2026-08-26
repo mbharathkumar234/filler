@@ -1,0 +1,19 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the dependency licences (§ Phase F) > records what ships, so a new one is visible in the diff 1`] = `
+[
+  "@pdf-lib/standard-fonts",
+  "@pdf-lib/upng",
+  "hash-wasm",
+  "idb",
+  "js-tokens",
+  "loose-envify",
+  "pako",
+  "pdf-lib",
+  "pdfjs-dist",
+  "react",
+  "react-dom",
+  "scheduler",
+  "tslib",
+]
+`;

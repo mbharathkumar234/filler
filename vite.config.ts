@@ -3,10 +3,34 @@ import react from '@vitejs/plugin-react';
 import tailwind from '@tailwindcss/vite';
 import { crx } from '@crxjs/vite-plugin';
 import { fileURLToPath, URL } from 'node:url';
+import { readFileSync } from 'node:fs';
 import manifest from './manifest.config.ts';
 
+/**
+ * Ship the practice form inside the extension (§ Phase F onboarding).
+ *
+ * It lives in `fixtures/` because that is where the fixture-corpus test and
+ * the e2e server both look for it, and one copy that both the product and the
+ * tests use is the only version that cannot drift. This emits that same file
+ * into the bundle so `chrome.runtime.getURL('practice/first-fill.html')`
+ * resolves — a first run must not depend on a dev server being up.
+ */
+function practiceForm() {
+  const source = fileURLToPath(new URL('./fixtures/practice/first-fill.html', import.meta.url));
+  return {
+    name: 'autofill:practice-form',
+    generateBundle(this: { emitFile: (f: { type: 'asset'; fileName: string; source: string }) => void }) {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'practice/first-fill.html',
+        source: readFileSync(source, 'utf8'),
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwind(), crx({ manifest })],
+  plugins: [react(), tailwind(), crx({ manifest }), practiceForm()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
