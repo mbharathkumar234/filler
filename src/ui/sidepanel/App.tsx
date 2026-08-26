@@ -18,6 +18,7 @@ import { AuditPanel } from '@/ui/review/AuditPanel';
 import { LlmPanel } from '@/ui/review/LlmPanel';
 import { Disclosure, hasSeenDisclosure } from '@/ui/onboarding/Disclosure';
 import { GettingStarted } from '@/ui/onboarding/GettingStarted';
+import { LanguagePicker } from '@/ui/lib/LanguagePicker';
 import { FieldsPanel } from './FieldsPanel';
 
 export function App() {
@@ -83,6 +84,7 @@ export function App() {
 
   return (
     <main className="min-h-screen bg-white font-sans text-slate-900">
+      <LanguagePicker />
       {status.unlocked ? (
         <>
           <GettingStarted onOpenVault={focusVaultEditor} />

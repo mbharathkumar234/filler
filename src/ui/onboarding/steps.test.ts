@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { CORE_KEYS, CORE_THRESHOLD, currentStep, shouldShowChecklist, stepsFor, type SetupFacts } from './steps';
+import { MESSAGES } from '@/ui/lib/i18n';
 
 function facts(overrides: Partial<SetupFacts> = {}): SetupFacts {
   return {
@@ -91,8 +92,16 @@ describe('the steps themselves', () => {
 
   it('describe what the user gets, and say it without jargon', () => {
     for (const step of stepsFor(facts())) {
-      expect(step.detail).not.toMatch(/vault:|taxonomy|selector|fingerprint|reducer/i);
-      expect(step.title.length).toBeGreaterThan(4);
+      const detail = MESSAGES[step.detailKey];
+      expect(detail).not.toMatch(/vault:|taxonomy|selector|fingerprint|reducer/i);
+      expect(MESSAGES[step.titleKey].length).toBeGreaterThan(4);
+    }
+  });
+
+  it('name message keys that exist, so no step renders blank', () => {
+    for (const step of stepsFor(facts())) {
+      expect(MESSAGES[step.titleKey], step.titleKey).toBeTruthy();
+      expect(MESSAGES[step.detailKey], step.detailKey).toBeTruthy();
     }
   });
 

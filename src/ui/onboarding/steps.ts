@@ -18,6 +18,7 @@
  */
 
 import type { FieldKey } from '@/matching/taxonomy';
+import type { MessageKey } from '@/ui/lib/i18n';
 
 /**
  * The details essentially every Indian portal asks for.
@@ -50,9 +51,16 @@ export type StepId = 'vault' | 'profile' | 'documents' | 'first-fill';
 
 export interface StepState {
   id: StepId;
-  title: string;
+  /**
+   * Message keys rather than words (§ Phase F localisation).
+   *
+   * These rules decide *what* is outstanding; the panel decides what language
+   * to say it in. Keeping English literals here would put half the checklist's
+   * copy outside the catalogue, where the completeness tests cannot see it.
+   */
+  titleKey: MessageKey;
   /** What the user gets out of it — not what the software does. */
-  detail: string;
+  detailKey: MessageKey;
   done: boolean;
   /** Progress within the step, when it has any. */
   progress?: { at: number; of: number };
@@ -79,28 +87,28 @@ export function stepsFor(facts: SetupFacts): StepState[] {
   return [
     {
       id: 'vault',
-      title: 'Create your vault',
-      detail: 'One passphrase, encrypted on this device. Nobody can reset it for you.',
+      titleKey: 'step.vault.title',
+      detailKey: 'step.vault.detail',
       done: facts.vaultReady,
     },
     {
       id: 'profile',
-      title: 'Add your details',
-      detail: 'Name, date of birth, contact and address — the ones every portal asks for.',
+      titleKey: 'step.profile.title',
+      detailKey: 'step.profile.detail',
       done: core >= CORE_THRESHOLD,
       progress: { at: core, of: CORE_KEYS.length },
     },
     {
       id: 'documents',
-      title: 'Upload your photo and signature',
-      detail: 'Checked for size and dimensions now, so a portal does not reject them later.',
+      titleKey: 'step.documents.title',
+      detailKey: 'step.documents.detail',
       done: facts.usableDocuments > 0,
       progress: { at: facts.usableDocuments, of: 2 },
     },
     {
       id: 'first-fill',
-      title: 'Try a fill on the practice form',
-      detail: 'A local page, so nothing is submitted anywhere. See what review looks like first.',
+      titleKey: 'step.firstFill.title',
+      detailKey: 'step.firstFill.detail',
       done: facts.hasReviewedFill,
     },
   ];

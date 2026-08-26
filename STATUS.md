@@ -482,6 +482,34 @@ makes sense, whether focus order matches reading order on a real screen, and
 whether a screen reader announces the review screen usefully. This is an
 accessibility product for many of its users, and that part still needs a person.
 
-**Not started (Phase F Should):** UI localisation (Hindi + one regional
-language) and the Firefox port. The Devanagari synonyms exist in the matcher;
-the *interface* is English only.
+**Localisation — shipped, and needing a native reviewer.** English, Hindi and
+Tamil, chosen with a labelled picker at the top of the panel rather than hidden
+in a settings screen (somebody who cannot read the panel cannot find the
+settings screen). Deliberately *not* `chrome.i18n`, which resolves against the
+browser's UI language — for most of this product's users that is English
+regardless of what they read most comfortably.
+
+| Row | Status | Evidence |
+|-----|--------|----------|
+| Catalogues complete, no blanks, no stray keys | **green** | `i18n.test.ts` → "every locale is complete" (6 tests) |
+| Placeholders survive translation, and may reorder | **green** | `i18n.test.ts` → "placeholders survive translation" |
+| A missing key degrades to English, never to a blank control | **green** | `i18n.test.ts` → "falling back" |
+| Every control keeps its accessible name in hi and ta | **green** | `a11y.test.tsx` → "in hi / in ta … keeps every control named" |
+| Screens do not silently fall back wholesale | **green** | `a11y.test.tsx` → "is actually in that language" |
+
+**The honest limit: these translations have not been reviewed by a native
+speaker.** They were produced during development. A consent screen or an
+approval button that reads oddly is worse than one in a language the reader
+merely finds harder, so this is a real caveat and not a formality — the
+`i18n.ts` header says the same thing where a future editor will see it.
+
+Screens translated: disclosure, vault gate, getting-started checklist, language
+picker. **Still English:** the vault editor, documents panel, backup panel,
+audit panel, LLM panel, teach panel and fields panel. The split is principled —
+consent, setup and the review path first, administration after — but it is a
+split, and the remaining screens are the larger half by line count.
+
+Portal field labels are deliberately never translated. A review screen showing
+different words from the form behind it is the one thing it must never do.
+
+**Not started (Phase F Should):** the Firefox port.

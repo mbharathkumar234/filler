@@ -9,6 +9,9 @@ import type { FieldDescriptor, MatchResult } from '@/shared/types';
 import type { FieldKey } from '@/matching/taxonomy';
 import { GettingStarted } from '@/ui/onboarding/GettingStarted';
 import { VaultGate } from '@/ui/vault-editor/VaultGate';
+import { LanguagePicker } from '@/ui/lib/LanguagePicker';
+import { LocaleProvider } from '@/ui/lib/LocaleProvider';
+import { LOCALES, MESSAGES, type Locale } from '@/ui/lib/i18n';
 
 /**
  * The accessibility floor (§ COMPLETION_PLAN Phase F, Should Achieve).
@@ -155,7 +158,12 @@ function accessibleName(el: Element): string {
   }
 
   if (el.id) {
-    const label = el.ownerDocument.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+    // Compared rather than selected: `CSS.escape` is absent in this jsdom, and
+    // an unescaped id in an attribute selector is a syntax error waiting for
+    // the first component that generates one.
+    const label = [...el.ownerDocument.querySelectorAll('label[for]')].find(
+      (candidate) => candidate.getAttribute('for') === el.id,
+    );
     if (label?.textContent?.trim()) return label.textContent.trim();
   }
 
@@ -190,7 +198,13 @@ async function settle(): Promise<void> {
 
 // ---------------------------------------------------------------------------
 
-const SCREENS: Array<{ name: string; mount: () => RenderResult }> = [
+/**
+ * `minText` is the vacuity floor for that screen: how much text it must render
+ * before the checks below mean anything. A full screen is 40+ characters; a
+ * single labelled control is not, and lowering the floor for everything to
+ * accommodate it would let a half-rendered screen through.
+ */
+const SCREENS: Array<{ name: string; mount: () => RenderResult; minText?: number }> = [
   // With `onAccept`, which is how the panel renders it — without one it has no
   // controls at all, and the control checks below would test nothing.
   { name: 'disclosure', mount: () => render(<Disclosure onAccept={() => {}} />) },
@@ -204,9 +218,10 @@ const SCREENS: Array<{ name: string; mount: () => RenderResult }> = [
     mount: () => render(<VaultGate exists onUnlocked={() => {}} />),
   },
   { name: 'review screen', mount: () => render(<ReviewScreen tabId={7} onDone={() => {}} />) },
+  { name: 'language picker', mount: () => render(<LanguagePicker />), minText: 20 },
 ];
 
-describe.each(SCREENS)('$name', ({ mount }) => {
+describe.each(SCREENS)('$name', ({ mount, minText }) => {
   it('actually rendered — every check below is vacuous otherwise', async () => {
     // The sweep asserts that *nothing* is wrong. A screen still waiting on an
     // effect has nothing wrong with it and nothing right either, and would
@@ -214,7 +229,7 @@ describe.each(SCREENS)('$name', ({ mount }) => {
     const view = mount();
     await settle();
     expect(view.container.querySelectorAll(INTERACTIVE).length).toBeGreaterThan(0);
-    expect((view.container.textContent ?? '').length).toBeGreaterThan(40);
+    expect((view.container.textContent ?? '').length).toBeGreaterThan(minText ?? 40);
   });
 
   it('gives every control a name a screen reader can announce', async () => {
@@ -292,5 +307,104 @@ describe('regions announce what they are', () => {
     const labelledBy = region.getAttribute('aria-labelledby');
     expect(labelledBy).toBeTruthy();
     expect(view.container.querySelector('#' + labelledBy)?.textContent).toBe('Getting set up');
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// The same invariants, in every language (§ Phase F localisation)
+// ---------------------------------------------------------------------------
+
+/**
+ * Accessibility and localisation fail together, and quietly.
+ *
+ * Most of a control's accessible name in this panel *is* its translated text.
+ * A key missing from the Tamil catalogue does not throw and does not render a
+ * visible placeholder — it renders an empty button, which is invisible to a
+ * sighted reviewer skimming for missing words and completely opaque to the
+ * screen-reader user it strands. So the sweep runs in every locale rather than
+ * only in the one whoever wrote the strings was reading.
+ */
+const LOCALISED: Array<{ name: string; mount: (locale: Locale) => RenderResult }> = [
+  {
+    name: 'disclosure',
+    mount: (locale) =>
+      render(
+        <LocaleProvider initial={locale}>
+          <Disclosure onAccept={() => {}} />
+        </LocaleProvider>,
+      ),
+  },
+  {
+    name: 'getting started',
+    mount: (locale) =>
+      render(
+        <LocaleProvider initial={locale}>
+          <GettingStarted />
+        </LocaleProvider>,
+      ),
+  },
+  {
+    name: 'language picker',
+    mount: (locale) =>
+      render(
+        <LocaleProvider initial={locale}>
+          <LanguagePicker />
+        </LocaleProvider>,
+      ),
+  },
+];
+
+const NON_ENGLISH = LOCALES.filter((locale) => locale !== 'en');
+
+describe.each(NON_ENGLISH)('in %s', (locale) => {
+  it.each(LOCALISED)('$name keeps every control named', async ({ mount }) => {
+    const view = mount(locale);
+    await settle();
+    expect(view.container.querySelectorAll(INTERACTIVE).length).toBeGreaterThan(0);
+    expect(unnamedControls(view)).toEqual([]);
+  });
+
+  it.each(LOCALISED)('$name is actually in that language', async ({ mount }) => {
+    // Guards the other direction: a screen that silently fell back to English
+    // everywhere would pass every check above while being untranslated.
+    const view = mount(locale);
+    await settle();
+    expect(view.container.textContent).not.toMatch(/Getting set up|Before you start/);
+  });
+
+  it('renders no untranslated placeholder braces', async () => {
+    for (const { mount } of LOCALISED) {
+      const view = mount(locale);
+      await settle();
+      // `{count}` printed literally means a placeholder the translation
+      // dropped or renamed — readable English would be better than this.
+      expect(view.container.textContent ?? '').not.toMatch(/\{\w+\}/);
+      cleanup();
+    }
+  });
+});
+
+describe('choosing a language', () => {
+  it('lets somebody pick a script they can read, from a labelled control', async () => {
+    const view = render(
+      <LocaleProvider initial="en">
+        <LanguagePicker />
+      </LocaleProvider>,
+    );
+    const select = await view.findByLabelText(MESSAGES['language.label']);
+    expect((select as HTMLSelectElement).options.length).toBe(LOCALES.length);
+  });
+
+  it('writes each option in its own script', async () => {
+    const view = render(
+      <LocaleProvider initial="en">
+        <LanguagePicker />
+      </LocaleProvider>,
+    );
+    await settle();
+    const text = view.container.textContent ?? '';
+    expect(text).toContain('हिन्दी');
+    expect(text).toContain('தமிழ்');
   });
 });

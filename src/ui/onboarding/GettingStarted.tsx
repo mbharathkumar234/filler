@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { send } from '@/ui/lib/client';
+import { useT, type Translate } from '@/ui/lib/LocaleProvider';
 import { isUsable } from '@/documents/intake';
 import { CORE_KEYS, currentStep, shouldShowChecklist, stepsFor, type SetupFacts, type StepState } from './steps';
 
@@ -60,6 +61,7 @@ export async function readSetupFacts(): Promise<SetupFacts> {
 }
 
 export function GettingStarted({ onOpenVault }: { onOpenVault?: () => void }) {
+  const t = useT();
   const [steps, setSteps] = useState<StepState[] | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
@@ -96,9 +98,11 @@ export function GettingStarted({ onOpenVault }: { onOpenVault?: () => void }) {
     <section aria-labelledby="gs-heading" className="border-b border-slate-200 bg-slate-50 p-4">
       <div className="flex items-baseline justify-between gap-2">
         <h2 id="gs-heading" className="text-sm font-semibold">
-          Getting set up
+          {t('onboarding.heading')}
         </h2>
-        <span className="text-xs text-slate-500">{done} of {steps.length} done</span>
+        <span className="text-xs text-slate-500">
+          {t('onboarding.progress', { done, total: steps.length })}
+        </span>
       </div>
 
       <ol className="mt-3 space-y-2">
@@ -109,17 +113,19 @@ export function GettingStarted({ onOpenVault }: { onOpenVault?: () => void }) {
             </span>
             <div className="min-w-0">
               <p className={step.done ? 'font-medium text-slate-400 line-through' : 'font-medium text-slate-900'}>
-                {step.title}
-                <span className="sr-only">{step.done ? ' — done' : ' — not done yet'}</span>
+                {t(step.titleKey)}
+                <span className="sr-only">
+                  {step.done ? t('onboarding.step.done') : t('onboarding.step.todo')}
+                </span>
               </p>
               {!step.done && (
                 <>
-                  <p className="mt-0.5 text-slate-600">{step.detail}</p>
+                  <p className="mt-0.5 text-slate-600">{t(step.detailKey)}</p>
                   {step.progress && step.progress.at > 0 && (
                     <p className="mt-0.5 text-slate-500">
                       {step.id === 'profile'
-                        ? `${step.progress.at} of ${CORE_KEYS.length} details saved`
-                        : `${step.progress.at} uploaded`}
+                        ? t('onboarding.detailsSaved', { at: step.progress.at, of: CORE_KEYS.length })
+                        : t('onboarding.uploaded', { at: step.progress.at })}
                     </p>
                   )}
                 </>
@@ -137,7 +143,7 @@ export function GettingStarted({ onOpenVault }: { onOpenVault?: () => void }) {
               onClick={openPracticeForm}
               className="rounded bg-blue-700 px-3 py-1.5 text-xs font-medium text-white"
             >
-              Open the practice form
+              {t('onboarding.openPractice')}
             </button>
           ) : next.id === 'vault' ? null : (
             <button
@@ -145,18 +151,16 @@ export function GettingStarted({ onOpenVault }: { onOpenVault?: () => void }) {
               onClick={onOpenVault}
               className="rounded bg-blue-700 px-3 py-1.5 text-xs font-medium text-white"
             >
-              {next.id === 'documents' ? 'Upload a photo' : 'Add my details'}
+              {next.id === 'documents' ? t('onboarding.uploadPhoto') : t('onboarding.addDetails')}
             </button>
           )}
           <button type="button" onClick={dismiss} className="text-xs text-slate-500 underline">
-            Hide this
+            {t('onboarding.hide')}
           </button>
         </div>
       )}
 
-      {steps.find((s) => s.id === 'documents')?.done === false && (
-        <UnusableNotice />
-      )}
+      {steps.find((s) => s.id === 'documents')?.done === false && <UnusableNotice t={t} />}
     </section>
   );
 }
@@ -165,7 +169,7 @@ export function GettingStarted({ onOpenVault }: { onOpenVault?: () => void }) {
  * Named separately because it is the one message here that is not encouragement.
  * A stored-but-unusable document looks like progress in every other view.
  */
-function UnusableNotice() {
+function UnusableNotice({ t }: { t: Translate }) {
   const [count, setCount] = useState(0);
 
   useEffect(() => {
@@ -176,9 +180,7 @@ function UnusableNotice() {
 
   return (
     <p role="status" className="mt-3 rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900">
-      {count === 1
-        ? 'One uploaded file is too small or the wrong shape for a portal to accept. Open your documents to see what to change.'
-        : `${count} uploaded files are too small or the wrong shape for a portal to accept. Open your documents to see what to change.`}
+      {count === 1 ? t('onboarding.unusable.one') : t('onboarding.unusable.many', { count })}
     </p>
   );
 }
