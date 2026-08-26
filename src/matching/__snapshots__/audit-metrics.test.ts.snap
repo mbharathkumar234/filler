@@ -1,0 +1,58 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > names the fixtures it cannot measure, rather than omitting them 1`] = `
+[
+  "demo-portal",
+  "hostile-portal",
+  "postback-portal",
+  "ugly-portal",
+]
+`;
+
+exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > reports per-fixture numbers, for the record 1`] = `
+[
+  {
+    "autoFilledCorrectly": 5,
+    "correctAtAnyConfidence": 17,
+    "fields": 30,
+    "fixture": "fourth-portal",
+    "highConfidenceMisMatches": 0,
+    "mappable": 27,
+  },
+  {
+    "autoFilledCorrectly": 23,
+    "correctAtAnyConfidence": 23,
+    "fields": 27,
+    "fixture": "heldout-exam",
+    "highConfidenceMisMatches": 0,
+    "mappable": 23,
+  },
+  {
+    "autoFilledCorrectly": 28,
+    "correctAtAnyConfidence": 29,
+    "fields": 32,
+    "fixture": "heldout-scholarship",
+    "highConfidenceMisMatches": 0,
+    "mappable": 29,
+  },
+]
+`;
+
+exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > reports the totals, for the record 1`] = `
+{
+  "autoFilledCorrectly": 56,
+  "correctAtAnyConfidence": 69,
+  "fields": 89,
+  "highConfidenceMisMatches": 0,
+  "mappable": 79,
+}
+`;
+
+exports[`A.2.2 — coverage on a site never tuned against > reports the fourth portal on its own, which is the universal-coverage estimate 1`] = `
+{
+  "highConfidenceMisMatches": 0,
+  "mappedCorrectly": 17,
+  "of": 27,
+  "percent": 63,
+}
+`;
