@@ -439,3 +439,150 @@ describe('serialisability — this state is written to chrome.storage.session', 
     expect(serialised).not.toMatch(/value/i);
   });
 });
+
+// ---------------------------------------------------------------------------
+// The fail-closed convention, tested exhaustively (found by mutation testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Convention 1 in this module's header says:
+ *
+ *   "An illegal event returns the state object unchanged, by identity.
+ *    Fail-closed: an event nobody anticipated cannot advance the run."
+ *
+ * That was asserted in prose and tested by example, which is not the same
+ * thing. Mutation testing found it: flipping `event.t === 'UNMAPPED'` to
+ * `!==` inside `case 'PLANNING'` — so that *every* unexpected event drove
+ * PLANNING into NEEDS_TEACHING — broke nothing, because no test had ever sent
+ * PLANNING an event it did not expect. The same held for NEEDS_TEACHING.
+ *
+ * A reducer's fail-closed rule is a property over the whole state × event
+ * grid, so this tests the grid rather than a corner of it. Every cell is
+ * either a transition somebody deliberately allowed, or identity.
+ */
+
+/** One well-formed instance of every event, so the grid can be walked. */
+function everyEvent(): RunEvent[] {
+  return [
+    { t: 'DETECT' },
+    { t: 'FIELDS_FOUND', fields: [descriptor('f1')] },
+    { t: 'NO_FORM' },
+    { t: 'PLAN_READY', plan: plan() },
+    { t: 'UNMAPPED', unmapped: [descriptor('f9')] },
+    { t: 'REAUTH_REQUIRED' },
+    { t: 'UNLOCKED' },
+    { t: 'FILL_START' },
+    { t: 'FIELD_FILLED', fieldRef: 'f1', at: NOW },
+    { t: 'FIELD_FAILED', fieldRef: 'f1' },
+    { t: 'BLOCKER_SEEN', reason: 'captcha' },
+    { t: 'USER_CONTINUE' },
+    { t: 'DOM_SETTLED', blockerGone: true },
+    { t: 'TIMER_TICK' },
+    { t: 'DOM_CHURN', kind: 'mutation', ratio: DRIFT_MUTATION_THRESHOLD + 0.1 },
+    { t: 'REVERIFIED', plan: plan(), needsRefill: [], diff: emptyDiff() },
+    { t: 'DRIFT', lost: ['f2'] },
+    { t: 'TEACH', unmapped: [descriptor('f9')] },
+    { t: 'TAUGHT', plan: plan() },
+    { t: 'REVIEW_READY', diff: emptyDiff() },
+    { t: 'APPROVE', token: TOKEN },
+    { t: 'SUBMIT_DONE', at: NOW },
+    { t: 'ABORT', why: 'user closed the panel' },
+    { t: 'FAIL', err: { name: 'Error', message: 'boom' } },
+  ];
+}
+
+const REACHABLE: RunState['t'][] = [
+  'READY',
+  'FILLING',
+  'BLOCKED',
+  'REVERIFYING',
+  'REVIEW',
+  'DRIFTED',
+  'ARMED',
+];
+
+describe('fail-closed: the whole state × event grid', () => {
+  it('either transitions deliberately or returns the very same object', () => {
+    // Not `toEqual` — *identity*. A reducer that rebuilds an identical state
+    // for an unhandled event still tells every caller "something happened",
+    // and `reduce(s, e) === s` is the check the rest of the runtime relies on.
+    const offenders: string[] = [];
+
+    for (const tag of REACHABLE) {
+      for (const event of everyEvent()) {
+        const before = at(tag);
+        const after = reduce(before, event, NOW);
+        if (after !== before && after.t === before.t && after === before) continue;
+        // A same-tag result that is a *different object* is the suspicious
+        // case: either a real in-place-style update (FIELD_FILLED on FILLING)
+        // or an accident. Record it for the snapshot below rather than judging
+        // it here.
+        if (after !== before && after.t === before.t) {
+          offenders.push(`${tag} + ${event.t} -> new object, same tag`);
+        }
+      }
+    }
+
+    // These are the legitimate same-tag transitions. Anything else appearing
+    // here means a state started rebuilding itself for events it ignores.
+    expect(offenders.sort()).toMatchSnapshot();
+  });
+
+  it('records the full grid, so a changed transition shows up in review', () => {
+    const grid: string[] = [];
+    for (const tag of REACHABLE) {
+      for (const event of everyEvent()) {
+        const before = at(tag);
+        const after = reduce(before, event, NOW);
+        grid.push(`${tag} + ${event.t} -> ${after === before ? '(unchanged)' : after.t}`);
+      }
+    }
+    expect(grid).toMatchSnapshot();
+  });
+
+  it('never leaves a state on an event that state does not name', () => {
+    // The sharpest form: for each state, the set of events that change its tag
+    // must be exactly the set the reducer's own case block handles.
+    const escapes: string[] = [];
+    for (const tag of REACHABLE) {
+      for (const event of everyEvent()) {
+        const before = at(tag);
+        const after = reduce(before, event, NOW);
+        if (after.t !== before.t) escapes.push(`${tag} --${event.t}--> ${after.t}`);
+      }
+    }
+    expect(escapes.sort()).toMatchSnapshot();
+  });
+});
+
+describe('states that were never sent an unexpected event', () => {
+  // The two the mutation tester found by name.
+  it('PLANNING ignores everything except PLAN_READY and UNMAPPED', () => {
+    const planning = reduce(reduce(initial(), { t: 'DETECT' }, NOW), {
+      t: 'FIELDS_FOUND',
+      fields: [descriptor('f1')],
+    }, NOW);
+    expect(planning.t).toBe('PLANNING');
+
+    for (const event of everyEvent()) {
+      if (event.t === 'PLAN_READY' || event.t === 'UNMAPPED') continue;
+      if (event.t === 'ABORT' || event.t === 'FAIL') continue; // Handled globally.
+      expect(reduce(planning, event, NOW), event.t).toBe(planning);
+    }
+  });
+
+  it('NEEDS_TEACHING ignores everything except TAUGHT', () => {
+    const needs = reduce(
+      reduce(reduce(initial(), { t: 'DETECT' }, NOW), { t: 'FIELDS_FOUND', fields: [descriptor('f1')] }, NOW),
+      { t: 'UNMAPPED', unmapped: [descriptor('f1')] },
+      NOW,
+    );
+    expect(needs.t).toBe('NEEDS_TEACHING');
+
+    for (const event of everyEvent()) {
+      if (event.t === 'TAUGHT') continue;
+      if (event.t === 'ABORT' || event.t === 'FAIL') continue;
+      expect(reduce(needs, event, NOW), event.t).toBe(needs);
+    }
+  });
+});

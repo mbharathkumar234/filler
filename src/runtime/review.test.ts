@@ -390,3 +390,170 @@ describe('masking a sensitive value', () => {
     expect(masked).not.toContain('6789');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Flags and masking, at their boundaries (§ mutation-testing gap)
+// ---------------------------------------------------------------------------
+
+describe('masking, at the length where it changes shape', () => {
+  /**
+   * `maskValue` shows the last four characters and dots the rest — except for
+   * a value of four characters or fewer, which is dotted entirely, because
+   * "show the last four" of a four-character value shows all of it.
+   *
+   * Mutation testing loosened `trimmed.length <= 4` to `< 4` and nothing
+   * failed. Under that mutation a four-character value renders **in clear** on
+   * the review screen. Four characters is not an unusual length for the things
+   * this masks.
+   */
+  it('dots a four-character value completely', () => {
+    expect(maskValue('1234')).toBe('••••');
+    expect(maskValue('abcd')).toBe('••••');
+  });
+
+  it('shows only the last four of a five-character value', () => {
+    const masked = maskValue('12345');
+    expect(masked).toBe('•2345');
+    expect(masked).not.toBe('12345');
+  });
+
+  it.each([0, 1, 2, 3, 4])('reveals nothing at all from a value of length %i', (length) => {
+    const value = 'x'.repeat(length);
+    expect(maskValue(value)).toBe('•'.repeat(length));
+  });
+
+  it('never returns the original for anything longer than four', () => {
+    for (let length = 5; length <= 40; length += 1) {
+      const value = 'abcdefghij0123456789ABCDEFGHIJ0123456789'.slice(0, length);
+      const masked = maskValue(value);
+      expect(masked, `length ${length}`).not.toBe(value);
+      expect(masked.startsWith('•'), `length ${length}`).toBe(true);
+    }
+  });
+
+  it('caps the dots, so a long value does not reveal its length', () => {
+    const short = maskValue('x'.repeat(20));
+    const long = maskValue('x'.repeat(2000));
+    expect(long.length).toBe(short.length);
+  });
+
+  it('masks by the trimmed value, not the padded one', () => {
+    expect(maskValue('  1234  ')).toBe('••••');
+  });
+});
+
+describe('flags fire for their own reason and no other', () => {
+  /**
+   * Each of these was a surviving mutant: flipping the `&&` in a flag
+   * condition to `||` broke nothing, because every test asserted a flag was
+   * *present* when it should be and none asserted it was *absent* when it
+   * should not be. A review screen that flags everything trains people to tick
+   * past flags, which is the same failure as flagging nothing.
+   */
+  function flagsFor(over: {
+    field?: Partial<FieldDescriptor>;
+    match?: Partial<MatchResult> | null;
+    record?: { ref: string; ok: boolean; fuzzy?: boolean; truncated?: boolean; fillFailed?: boolean };
+    value?: string;
+  }) {
+    const field: FieldDescriptor = {
+      ref: 'f1',
+      selectors: ['#f1'],
+      tag: 'input',
+      labelText: 'A field',
+      nearbyText: '',
+      required: false,
+      frameId: 0,
+      visible: true,
+      enabled: true,
+      ...over.field,
+    };
+    const match =
+      over.match === null
+        ? undefined
+        : ({
+            fieldRef: 'f1',
+            key: 'identity.full_name',
+            confidence: 0.95,
+            rationale: 'rule',
+            source: 'rule',
+            ...over.match,
+          } as MatchResult);
+
+    const model = buildReview({
+      fields: [field],
+      matches: match ? [match] : [],
+      records: over.record ? [over.record] : [{ ref: 'f1', ok: true }],
+      values: new Map([['f1', over.value ?? 'Ravi Kumar']]),
+    });
+    return model.rows[0]?.flags ?? [];
+  }
+
+  it('does not flag required-empty on a field that is not required', () => {
+    expect(flagsFor({ field: { required: false }, value: '' })).not.toContain('required-empty');
+  });
+
+  it('does not flag required-empty on a required field that was filled', () => {
+    expect(flagsFor({ field: { required: true }, value: 'Ravi Kumar' })).not.toContain('required-empty');
+  });
+
+  it('does flag required-empty when both halves are true', () => {
+    expect(flagsFor({ field: { required: true }, value: '   ' })).toContain('required-empty');
+  });
+
+  it('does not flag high-sensitivity on an ordinary key', () => {
+    // Under the mutation every matched field is flagged high-sensitivity, so
+    // every value on the screen is masked and the distinction stops meaning
+    // anything.
+    expect(flagsFor({ match: { key: 'identity.full_name' } })).not.toContain('high-sensitivity');
+  });
+
+  it('does flag high-sensitivity on a key that is one', () => {
+    expect(flagsFor({ match: { key: 'id.aadhaar' } })).toContain('high-sensitivity');
+  });
+
+  it('raises no confidence flag when there is no match at all', () => {
+    const flags = flagsFor({ match: null });
+    expect(flags).not.toContain('low-confidence');
+    expect(flags).not.toContain('llm-matched');
+    expect(flags).not.toContain('high-sensitivity');
+  });
+
+  it('raises no confidence flag for a match whose key is not a real one', () => {
+    // `key` is null when the match came back `unknown`. The mutation makes the
+    // confidence block run anyway, and it then reads sensitivity for a key
+    // that is not in the taxonomy. Distinct from the no-match case above: here
+    // there *is* a match object.
+    const flags = flagsFor({ match: { key: 'unknown' as never, confidence: 0.4 } });
+    expect(flags).not.toContain('low-confidence');
+    expect(flags).not.toContain('skipped-low-confidence');
+    expect(flags).not.toContain('high-sensitivity');
+  });
+
+  it('carries maxLength only when the field has one', () => {
+    // A row that reports `maxLength: undefined` reads, everywhere downstream,
+    // as a field with a length limit nobody can name.
+    const withLimit = buildReview({
+      fields: [{ ref: 'f1', selectors: ['#f1'], tag: 'input', labelText: 'L', nearbyText: '', required: false, frameId: 0, visible: true, enabled: true, maxLength: 10 }],
+      matches: [],
+      records: [{ ref: 'f1', ok: true }],
+      values: new Map([['f1', 'v']]),
+    });
+    const without = buildReview({
+      fields: [{ ref: 'f1', selectors: ['#f1'], tag: 'input', labelText: 'L', nearbyText: '', required: false, frameId: 0, visible: true, enabled: true }],
+      matches: [],
+      records: [{ ref: 'f1', ok: true }],
+      values: new Map([['f1', 'v']]),
+    });
+
+    expect(withLimit.rows[0]).toMatchObject({ maxLength: 10 });
+    expect('maxLength' in (without.rows[0] as object)).toBe(false);
+  });
+
+  it('does not flag fuzzy-select or truncated on a clean record', () => {
+    const flags = flagsFor({ record: { ref: 'f1', ok: true } });
+    expect(flags).not.toContain('fuzzy-select');
+    expect(flags).not.toContain('truncated');
+    expect(flags).not.toContain('fill-failed');
+  });
+});

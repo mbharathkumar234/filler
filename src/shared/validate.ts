@@ -224,7 +224,21 @@ export function validateRequest(request: unknown): ValidationResult {
     return bad('not an object');
   }
 
-  const record = request as Record<string, unknown>;
+  /*
+   * Own enumerable properties only.
+   *
+   * Found by an adversarial test: `Object.create({ type: 'vault:status' })`
+   * validated, because every predicate here reads `r.field` and that walks the
+   * prototype chain. A message cannot reach the bus that way — `sendMessage`
+   * structured-clones, which drops the prototype — so this was never
+   * exploitable. But a validator whose correctness depends on how its caller
+   * happened to serialise the input is a validator holding an assumption it
+   * does not state, and this is the module whose entire job is not doing that.
+   *
+   * The spread also means a field hidden on the prototype cannot stand in for
+   * a required own property, which is the same bug in its more useful form.
+   */
+  const record = { ...(request as Record<string, unknown>) };
   const type = record.type;
   if (typeof type !== 'string') return bad('no type');
 

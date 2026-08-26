@@ -2779,6 +2779,51 @@ exports[`fixture corpus > 'hostile-portal/submitted.html' — harvest output sna
 }
 `;
 
+exports[`fixture corpus > 'hostile-portal/two-submits.html' — harvest output snapshot 1`] = `
+{
+  "blockers": [],
+  "fields": [
+    {
+      "enabled": true,
+      "labelText": "Candidate Name",
+      "maxLength": 60,
+      "nearbyText": "Application — draft or final",
+      "optionCount": undefined,
+      "ref": "f0",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Email ID",
+      "maxLength": undefined,
+      "nearbyText": "Application — draft or final",
+      "optionCount": undefined,
+      "ref": "f1",
+      "required": false,
+      "tag": "input",
+      "type": "email",
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Something Else",
+      "maxLength": undefined,
+      "nearbyText": "Application — draft or final",
+      "optionCount": undefined,
+      "ref": "f2",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+  ],
+  "wizard": null,
+}
+`;
+
 exports[`fixture corpus > 'postback-portal/page-1.html' — harvest output snapshot 1`] = `
 {
   "blockers": [

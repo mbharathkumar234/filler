@@ -139,6 +139,10 @@ declare global {
     __fill: (writes: HarnessWrite[]) => Promise<{ records: FillRecord[]; aborted: boolean }>;
     __guardReport: () => GuardReport;
     __arm: (token: { value: string; expiresAt: number; targetSelector: string }) => void;
+    /** Set by `fixtures/hostile-portal/two-submits.html`: which button submitted. */
+    __lastSubmitter?: string;
+    __submitOtherFormFromScript?: () => void;
+    __submitOwnFormFromScript?: () => void;
     __harvest: () => HarvestSnapshot;
     __derive: (
       url: string,

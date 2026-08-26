@@ -230,3 +230,64 @@ describe('what the panel shows while the clock runs', () => {
     expect(registry.active(7, NOW + APPROVAL_TOKEN_TTL_MS)).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Wrong-length tokens (found by mutation testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Every "wrong token" test above hands `check` another `mintToken()` — a
+ * correctly formed token of exactly the right length that simply is not the
+ * one issued. Not one of them supplies a token of a *different* length, and
+ * mutation testing found the consequence: deleting the length guard from
+ * `constantTimeEquals` (`if (a.length !== b.length) return false`) broke
+ * nothing at all.
+ *
+ * That guard is the first line of the comparison and the first thing an
+ * attacker probes. An empty string is what a compromised content script sends
+ * when it is guessing, not a well-formed 32-character hex token — so the
+ * shapes least covered were exactly the shapes most likely to arrive.
+ */
+describe('tokens of the wrong length (§ mutation-testing gap)', () => {
+  const WRONG_LENGTHS: Array<[string, string]> = [
+    ['empty', ''],
+    ['one character', 'a'],
+    ['a prefix of the real one', 'a1b2c3d4'],
+    ['one character short', 'a1b2c3d4e5f60718293a4b5c6d7e8f9'],
+    ['one character long', 'a1b2c3d4e5f60718293a4b5c6d7e8f900'],
+    ['far too long', 'a'.repeat(4096)],
+  ];
+
+  it.each(WRONG_LENGTHS)('refuses a token that is %s', (_label, token) => {
+    issue();
+    expect(registry.check({ tabId: 7, token }, NOW)).toEqual({ ok: false, why: 'wrong-token' });
+  });
+
+  it.each(WRONG_LENGTHS)('a token that is %s cannot consume the real grant', (_label, token) => {
+    // The dangerous half. Refusing the check but consuming the grant would let
+    // anybody burn a live approval, and the user would be told their form
+    // changed when it had not.
+    const grant = issue();
+    registry.consume({ tabId: 7, token }, NOW);
+    expect(registry.check({ tabId: 7, token: grant.token }, NOW).ok).toBe(true);
+  });
+
+  it('refuses a token that shares the real prefix but is truncated', () => {
+    const grant = issue();
+    expect(registry.check({ tabId: 7, token: grant.token.slice(0, -1) }, NOW).ok).toBe(false);
+  });
+
+  it('refuses the real token with anything appended', () => {
+    const grant = issue();
+    expect(registry.check({ tabId: 7, token: `${grant.token}0` }, NOW).ok).toBe(false);
+  });
+
+  it('refuses a token differing only in case', () => {
+    // The tokens are lower-case hex. A comparison that normalised case would
+    // halve the search space for no reason.
+    const grant = issue();
+    const upper = grant.token.toUpperCase();
+    if (upper === grant.token) return; // No letters in this one; nothing to test.
+    expect(registry.check({ tabId: 7, token: upper }, NOW).ok).toBe(false);
+  });
+});

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Two submit controls</title></head>
+<body>
+<!--
+  A form with more than one submit control (§ found by mutation testing).
+
+  Every existing guard fixture has exactly one submit button, so "the token
+  names *this* button" and "the token names *a* button" behaved identically and
+  no test could tell them apart. Mutation testing found the consequence:
+  `if (!intended) return false` in `isPermitted`, and the whole of
+  `matchesTarget`/`containsTarget`, could be made to permit anything without a
+  single e2e failure.
+
+  Two submit controls in one form is not a contrived shape — "Save Draft" and
+  "Final Submit" side by side is the normal layout on the portals this targets,
+  and they do very different things. An approval the user gave for one must not
+  arm the other.
+
+  The page reports what it saw rather than navigating, so a permitted
+  submission is observable without losing the harness.
+-->
+<h2>Application — draft or final</h2>
+
+<form id="frm" action="/submit" method="post">
+  <div><label for="a">Candidate Name</label>
+    <input id="a" name="candidateName" maxlength="60" /></div>
+  <div><label for="b">Email ID</label>
+    <input id="b" name="email" type="email" /></div>
+
+  <p>
+    <button type="submit" id="btnSaveDraft" name="action" value="draft">Save Draft</button>
+    <button type="submit" id="btnFinalSubmit" name="action" value="final">Final Submit</button>
+  </p>
+</form>
+
+<!-- Outside the form, and therefore outside the token's reach entirely. -->
+<p><button type="button" id="btnUnrelated">Print</button></p>
+
+<!--
+  A second form, and a way for the page to submit it on its own.
+
+  This is the attack the token's *target* check exists for and which no fixture
+  could express while every page had one form: the page waits for the user to
+  approve something, then fires a submit of its own choosing while the token is
+  live. An approval for a button in `#frm` must not carry `#frmOther`.
+-->
+<form id="frmOther" action="/other" method="post">
+  <input id="z" name="somethingElse" value="not what the user approved" />
+  <button type="submit" id="btnOther">Other Submit</button>
+</form>
+
+<div id="log">submitAttempts=0 submitEventsSeen=0 lastSubmitter=none</div>
+
+<script>
+  window.__submitAttempts = 0;
+  window.__submitEventsSeen = 0;
+  window.__lastSubmitter = 'none';
+
+  function render() {
+    document.getElementById('log').textContent =
+      'submitAttempts=' + window.__submitAttempts +
+      ' submitEventsSeen=' + window.__submitEventsSeen +
+      ' lastSubmitter=' + window.__lastSubmitter;
+  }
+
+  window.__submitOtherFormFromScript = function () {
+    // `requestSubmit` fires a real submit event, which is what the guard sees.
+    document.getElementById('frmOther').requestSubmit();
+  };
+
+  window.__submitOwnFormFromScript = function () {
+    document.getElementById('frm').requestSubmit();
+  };
+
+  document.getElementById('frmOther').addEventListener('submit', function (event) {
+    window.__submitEventsSeen += 1;
+    window.__lastSubmitter = 'frmOther';
+    event.preventDefault();
+    render();
+  });
+
+  document.getElementById('frm').addEventListener('submit', function (event) {
+    window.__submitEventsSeen += 1;
+    window.__lastSubmitter = (event.submitter && event.submitter.id) || 'unknown';
+    // Never actually navigate: the point is to observe that the guard let it
+    // through, not to leave the page.
+    event.preventDefault();
+    render();
+  });
+
+  for (const id of ['btnSaveDraft', 'btnFinalSubmit']) {
+    document.getElementById(id).addEventListener('click', function () {
+      window.__submitAttempts += 1;
+      render();
+    });
+  }
+
+  render();
+</script>
+</body>
+</html>

@@ -359,3 +359,162 @@ describe('identifierOf', () => {
     expect(identifierOf(field({ ref: 'f1', selectors }))).toBe(expected);
   });
 });
+
+describe('the token-wise sweep, which is the only thing catching some ids (§ mutation-testing gap)', () => {
+  /**
+   * `scrub` redacts numbers twice: token by token, then a final `\d{4,}` sweep
+   * for digit runs buried inside a word. Mutation testing showed the first
+   * pass could be disabled entirely without a test failing — every case the
+   * suite covered was also caught by the second.
+   *
+   * The first pass is not redundant. `LONG_TOKEN` is
+   * `/^(?=.*\d)[A-Za-z0-9]{4,}$/`, so it catches an identifier whose digits
+   * are *interleaved* — `AB12CD34` never has four digits in a row, and the
+   * final sweep walks straight past it. Application numbers look exactly like
+   * that, and this is the P3 boundary.
+   */
+  const interleaved = [
+    'AB12CD34',
+    'PN20A24',
+    'X9Y8Z7',
+    'A1B2',
+    'REG1A2B3C',
+    'M4H5N6',
+  ];
+
+  it.each(interleaved)('redacts %s, which has no run of four digits', (identifier) => {
+    expect(/\d{4,}/.test(identifier), `${identifier} would be caught by the other sweep`).toBe(false);
+
+    const { fields } = redactFields([
+      {
+        ref: 'f1',
+        selectors: ['#f1'],
+        tag: 'input',
+        labelText: `Application No: ${identifier}`,
+        nearbyText: '',
+        required: false,
+        frameId: 0,
+        visible: true,
+        enabled: true,
+      },
+    ]);
+
+    expect(fields[0]!.label).not.toContain(identifier);
+    expect(fields[0]!.label).toContain('[number]');
+  });
+
+  it('still leaves ordinary prose with small numbers alone', () => {
+    // The other half. Over-redacting destroys the matching signal: "Step 2 of
+    // 3" and "(6 digits)" are instructions, not values.
+    const { fields } = redactFields([
+      {
+        ref: 'f1',
+        selectors: ['#f1'],
+        tag: 'input',
+        labelText: 'Step 2 of 3 — PIN Code (6 digits)',
+        nearbyText: '',
+        required: false,
+        frameId: 0,
+        visible: true,
+        enabled: true,
+      },
+    ]);
+    expect(fields[0]!.label).toContain('2');
+    expect(fields[0]!.label).toContain('6 digits');
+    expect(fields[0]!.label).not.toContain('[number]');
+  });
+});
+
+describe('a field is kept when it has a label but no name (§ mutation-testing gap)', () => {
+  it('does not drop a React field whose only identity is its label', () => {
+    // `if (labelText === '' && identifier === '') continue` — flipping that to
+    // `||` silently drops every field missing either one, and a React SPA with
+    // no `name` attributes anywhere is the common case, not the exotic one.
+    // A dropped field is one the model never sees and the user never gets
+    // filled, with nothing anywhere saying why.
+    const { fields } = redactFields([
+      {
+        ref: 'f1',
+        selectors: [],
+        tag: 'input',
+        labelText: 'Full name of candidate',
+        nearbyText: '',
+        required: false,
+        frameId: 0,
+        visible: true,
+        enabled: true,
+      },
+      {
+        ref: 'f2',
+        selectors: ['#txtEmail'],
+        tag: 'input',
+        labelText: '',
+        nearbyText: '',
+        required: false,
+        frameId: 0,
+        visible: true,
+        enabled: true,
+      },
+    ]);
+
+    expect(fields.map((f) => f.ref)).toEqual(['f1', 'f2']);
+  });
+
+  it('drops only a field with neither a label nor an identifier', () => {
+    const { fields } = redactFields([
+      {
+        ref: 'ghost',
+        selectors: [],
+        tag: 'input',
+        labelText: '   ',
+        nearbyText: '',
+        required: false,
+        frameId: 0,
+        visible: true,
+        enabled: true,
+      },
+    ]);
+    expect(fields).toEqual([]);
+  });
+});
+
+describe('clipping, at the length where it starts (§ mutation-testing gap)', () => {
+  /**
+   * `clip` is what keeps an outbound payload bounded when a portal puts a
+   * paragraph in a label. Its boundary was untested in both directions, and
+   * both directions matter: clipping one character early corrupts a label that
+   * was legal, and clipping one late means the cap is not the cap.
+   */
+  const field = (labelText: string) => ({
+    ref: 'f1',
+    selectors: ['#f1'],
+    tag: 'input' as const,
+    labelText,
+    nearbyText: '',
+    required: false,
+    frameId: 0,
+    visible: true,
+    enabled: true,
+  });
+
+  const MAX_LABEL = 120;
+
+  it('leaves a label of exactly the maximum length untouched', () => {
+    const exact = 'a'.repeat(MAX_LABEL);
+    const { fields } = redactFields([field(exact)]);
+    expect(fields[0]!.label).toBe(exact);
+    expect(fields[0]!.label).not.toContain('…');
+  });
+
+  it('clips a label one character over, and marks that it did', () => {
+    const over = 'a'.repeat(MAX_LABEL + 1);
+    const { fields } = redactFields([field(over)]);
+    expect(fields[0]!.label.length).toBe(MAX_LABEL);
+    expect(fields[0]!.label.endsWith('…')).toBe(true);
+  });
+
+  it('never emits a label longer than the cap, however long the page text', () => {
+    const { fields } = redactFields([field('a'.repeat(50_000))]);
+    expect(fields[0]!.label.length).toBeLessThanOrEqual(MAX_LABEL);
+  });
+});

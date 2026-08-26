@@ -1,7 +1,15 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest';
 
-import { denyListFrom, guardPayload, isCategorical, payloadFields, protectedKeys, REDACTED } from './value-guard';
+import {
+  checkPayloadSchema,
+  denyListFrom,
+  guardPayload,
+  isCategorical,
+  payloadFields,
+  protectedKeys,
+  REDACTED,
+} from './value-guard';
 import { redactFields } from './redaction';
 import { harvest } from '@/content/harvester';
 import { FIELD_KEYS, type FieldKey } from '@/matching/taxonomy';
@@ -365,5 +373,61 @@ describe('the branded payload', () => {
     )[0]?.default;
 
     expect(source).toContain('declare const guarded: unique symbol');
+  });
+});
+
+describe('a nested object under a permitted name (§ mutation-testing gap)', () => {
+  /**
+   * The Phase C schema check has two halves: the property *name* must be on
+   * the allow-list, and its value must not be an object. Every existing test
+   * exercised the first half — a rogue property called `filename` or `bytes`.
+   * None exercised the second, and mutation testing found it: flipping
+   * `value !== null` to `value === null` in `checkPayloadSchema` broke nothing.
+   *
+   * That half is the one that matters more. `filename` is refused because
+   * somebody thought of the name `filename`. A nested object hidden under
+   * `label` — a name nobody would think to deny — is how something rides along
+   * that nobody thought of.
+   */
+  const nest = (over: Record<string, unknown>) =>
+    checkPayloadSchema([{ ref: 'f1', label: 'Name', ...over } as never]);
+
+  it('refuses an object where a string belongs', () => {
+    for (const name of ['label', 'name', 'type', 'nearby', 'pattern']) {
+      const result = nest({ [name]: { toString: () => 'Name', secret: 'AADHAAR' } });
+      expect(result.ok, name).toBe(false);
+      expect(result.offender, name).toBe(name);
+    }
+  });
+
+  it('refuses an array where a string belongs', () => {
+    expect(nest({ label: ['Name'] }).ok).toBe(false);
+    expect(nest({ nearby: [] }).ok).toBe(false);
+  });
+
+  it('refuses a nested object even on a numeric field', () => {
+    expect(nest({ maxLength: { valueOf: () => 10 } }).ok).toBe(false);
+  });
+
+  it('refuses options that are objects rather than strings', () => {
+    expect(checkPayloadSchema([{ ref: 'f1', label: 'S', options: [{ v: 'x' }] } as never]).ok).toBe(false);
+    expect(checkPayloadSchema([{ ref: 'f1', label: 'S', options: 'not an array' } as never]).ok).toBe(false);
+  });
+
+  it('still accepts the shapes a real redacted field has', () => {
+    // The check must not have become "refuse everything", which would pass
+    // every test above and send nothing ever again.
+    expect(
+      checkPayloadSchema([
+        { ref: 'f1', label: 'Name', name: 'txtName', type: 'text', maxLength: 75, required: true },
+        { ref: 'f2', label: 'State', options: ['Karnataka', 'Kerala'], nearby: 'Address' },
+      ] as never),
+    ).toEqual({ ok: true });
+  });
+
+  it('accepts null where a value is simply absent', () => {
+    // `null` is not an object smuggling anything; refusing it would break a
+    // legitimate field that carries no pattern.
+    expect(checkPayloadSchema([{ ref: 'f1', label: 'N', pattern: null } as never]).ok).toBe(true);
   });
 });

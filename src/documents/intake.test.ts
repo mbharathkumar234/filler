@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { assessMaster, blockersIn, ROLE_TARGETS, type IntakeRole } from './intake';
+import { assessMaster, blockersIn, isUsable, roleFor, ROLE_TARGETS, type IntakeRole } from './intake';
 import type { DocumentMeta } from '@/shared/types';
 
 function meta(overrides: Partial<DocumentMeta> = {}): DocumentMeta {
@@ -114,5 +114,85 @@ describe('the advice itself', () => {
 
   it('has a target for every role it accepts', () => {
     for (const role of roles) expect(ROLE_TARGETS[role]).toBeDefined();
+  });
+});
+
+describe('choosing the rules for a key (§ mutation-testing gap)', () => {
+  /**
+   * Every test above passes `role` in by hand, so `roleFor` — the function
+   * that decides which rules a real upload is held to — was never called.
+   * Mutation testing found it: both of its comparisons could be inverted
+   * without a failure, which would have held photos to the signature rules and
+   * signatures to neither.
+   *
+   * `isUsable` was in the same position, and it is what the onboarding
+   * checklist counts with. An inverted `roleFor` would tell somebody their
+   * blurry photo is fine.
+   */
+  it('holds a photo to the photo rules', () => {
+    expect(roleFor('doc.photo')).toBe('photo');
+  });
+
+  it('holds a signature to the signature rules', () => {
+    expect(roleFor('doc.signature')).toBe('signature');
+  });
+
+  it('treats every other document as a document', () => {
+    for (const key of ['doc.marksheet_10', 'doc.marksheet_12', 'doc.aadhaar_card', 'doc.caste_certificate'] as const) {
+      expect(roleFor(key), key).toBe('document');
+    }
+  });
+
+  it('routes each key to rules that actually differ', () => {
+    // The mutation is only dangerous because the rule sets disagree. If they
+    // ever converged, `roleFor` would stop mattering and so would this test —
+    // so assert the disagreement directly.
+    expect(ROLE_TARGETS.photo.aspect).not.toEqual(ROLE_TARGETS.signature.aspect);
+    expect(ROLE_TARGETS.document.aspect).toBeNull();
+  });
+});
+
+describe('isUsable, which the checklist counts with', () => {
+  const good = (over: Partial<DocumentMeta> = {}): DocumentMeta => meta({ ...over });
+
+  it('accepts a good photo and a good signature', () => {
+    expect(isUsable(good())).toBe(true);
+    expect(isUsable(good({ key: 'doc.signature', width: 600, height: 200 }))).toBe(true);
+  });
+
+  it('rejects a photo that is too small', () => {
+    expect(isUsable(good({ width: 100, height: 115 }))).toBe(false);
+  });
+
+  it('rejects a photo held to photo rules that would pass as a signature', () => {
+    // The exact swap an inverted `roleFor` would cause: 600x200 is a fine
+    // signature and a badly shaped photo.
+    expect(isUsable(good({ key: 'doc.photo', width: 600, height: 200 }))).toBe(false);
+    expect(isUsable(good({ key: 'doc.signature', width: 600, height: 200 }))).toBe(true);
+  });
+
+  it('is not swayed by a warning alone', () => {
+    // Over-compressed but big enough: advice, not a blocker, and it still
+    // counts as an uploaded document.
+    expect(isUsable(good({ width: 900, height: 1035, bytes: 6_000 }))).toBe(true);
+  });
+});
+
+describe('the remedy matches the role, not just the problem', () => {
+  it('tells a photo owner to crop to a passport shape', () => {
+    const found = assessMaster(meta({ width: 1600, height: 900 }), 'photo');
+    expect(found.some((f) => /passport/i.test(f.remedy))).toBe(true);
+  });
+
+  it('tells a signature owner to crop away the paper, not to take a passport photo', () => {
+    const found = assessMaster(meta({ key: 'doc.signature', width: 200, height: 600 }), 'signature');
+    expect(found.some((f) => /wide and short|above and below/i.test(f.remedy))).toBe(true);
+    expect(found.some((f) => /passport/i.test(f.remedy))).toBe(false);
+  });
+
+  it('gives a portrait-shaped complaint a different remedy from a landscape one', () => {
+    const wide = assessMaster(meta({ width: 1600, height: 900 }), 'photo');
+    const tall = assessMaster(meta({ key: 'doc.signature', width: 200, height: 600 }), 'signature');
+    expect(wide[0]!.remedy).not.toBe(tall[0]!.remedy);
   });
 });

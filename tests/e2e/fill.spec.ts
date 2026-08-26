@@ -13,6 +13,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const UGLY = '/ugly-portal/page-1.html';
 const HOSTILE = '/hostile-portal/page-1.html';
+const TWO_SUBMITS = '/hostile-portal/two-submits.html';
 
 async function withHarness(page: Page, url: string) {
   await page.goto(url);
@@ -231,5 +232,132 @@ test.describe('the submit guard, against a page that fights back', () => {
 
     expect(afterSecond.submitEventsSeen).toBe(1);
     expect(afterSecond.blocked).toBeGreaterThan(blockedBefore);
+  });
+});
+
+test.describe('the token names one control, not "a" control (§ mutation-testing gap)', () => {
+  /**
+   * Phase B, Must Achieve: *"Exactly one programmatic click per armed run, on
+   * exactly the element recorded in the plan."*
+   *
+   * Every guard fixture until now had a single submit button, so "the recorded
+   * element" and "any element" were the same set and no test could separate
+   * them. Mutation testing showed what that cost: `if (!intended) return false`
+   * and the whole of `matchesTarget`/`containsTarget` could each be made to
+   * permit anything, and all eighteen guard specs still passed.
+   *
+   * "Save Draft" beside "Final Submit" is the ordinary layout on these portals,
+   * and the two do very different things. Approving one must not arm the other.
+   */
+  const TOKEN = 'deadbeefdeadbeefdeadbeefdeadbeef';
+
+  async function armFor(page: Page, targetSelector: string) {
+    await page.evaluate(
+      ({ token, targetSelector: selector }) => {
+        window.__arm({ value: token, expiresAt: Date.now() + 90_000, targetSelector: selector });
+      },
+      { token: TOKEN, targetSelector },
+    );
+  }
+
+  test('an approval for Final Submit does not permit Save Draft', async ({ page }) => {
+    await withHarness(page, TWO_SUBMITS);
+    await page.evaluate(() => window.__installGuard());
+    await armFor(page, '#btnFinalSubmit');
+
+    await page.locator('#btnSaveDraft').click();
+
+    const report = await page.evaluate(() => window.__guardReport());
+    expect(report.submitEventsSeen, 'the draft button submitted on the final token').toBe(0);
+    expect(report.blocked).toBeGreaterThan(0);
+    // And the token must survive: blocking the wrong button must not silently
+    // spend the approval the user actually gave.
+    expect(report.armed).toBe(true);
+  });
+
+  test('an approval for Save Draft does not permit Final Submit', async ({ page }) => {
+    // The direction that matters most — the user approved the reversible one.
+    await withHarness(page, TWO_SUBMITS);
+    await page.evaluate(() => window.__installGuard());
+    await armFor(page, '#btnSaveDraft');
+
+    await page.locator('#btnFinalSubmit').click();
+
+    const report = await page.evaluate(() => window.__guardReport());
+    expect(report.submitEventsSeen).toBe(0);
+    expect(report.blocked).toBeGreaterThan(0);
+    expect(report.armed).toBe(true);
+  });
+
+  test('the approved control still works, so the guard is not simply refusing everything', async ({ page }) => {
+    await withHarness(page, TWO_SUBMITS);
+    await page.evaluate(() => window.__installGuard());
+    await armFor(page, '#btnFinalSubmit');
+
+    await page.locator('#btnFinalSubmit').click();
+
+    const report = await page.evaluate(() => window.__guardReport());
+    expect(report.submitEventsSeen).toBe(1);
+    expect(report.armed).toBe(false);
+    expect(await page.evaluate(() => window.__lastSubmitter)).toBe('btnFinalSubmit');
+  });
+
+  test('a selector that matches nothing on the page permits nothing', async ({ page }) => {
+    // A drifted profile, or a plan built against a page that has since changed.
+    // Failing open here would mean any submit goes through whenever the
+    // recorded button has been renamed.
+    await withHarness(page, TWO_SUBMITS);
+    await page.evaluate(() => window.__installGuard());
+    await armFor(page, '#btnThatNoLongerExists');
+
+    await page.locator('#btnFinalSubmit').click();
+    await page.locator('#btnSaveDraft').click();
+
+    const report = await page.evaluate(() => window.__guardReport());
+    expect(report.submitEventsSeen).toBe(0);
+    expect(report.blocked).toBeGreaterThan(0);
+  });
+
+  test('an empty selector permits nothing', async ({ page }) => {
+    await withHarness(page, TWO_SUBMITS);
+    await page.evaluate(() => window.__installGuard());
+    await armFor(page, '');
+
+    await page.locator('#btnFinalSubmit').click();
+
+    const report = await page.evaluate(() => window.__guardReport());
+    expect(report.submitEventsSeen).toBe(0);
+  });
+
+  test('a live approval does not carry a form the user never approved', async ({ page }) => {
+    // The attack the target check exists for, and which no fixture could
+    // express while every page had a single form: the page waits until the
+    // user has approved something, then fires a submit of its own choosing
+    // while the token is live.
+    await withHarness(page, TWO_SUBMITS);
+    await page.evaluate(() => window.__installGuard());
+    await armFor(page, '#btnFinalSubmit');
+
+    await page.evaluate(() => window.__submitOtherFormFromScript!());
+
+    const report = await page.evaluate(() => window.__guardReport());
+    expect(report.submitEventsSeen, 'a second form submitted on the first form’s token').toBe(0);
+    expect(report.blocked).toBeGreaterThan(0);
+    expect(report.armed, 'the approval the user actually gave was spent by an attack').toBe(true);
+  });
+
+  test('a malformed selector permits nothing rather than throwing', async ({ page }) => {
+    // `querySelector` throws on invalid syntax, and the catch around it returns
+    // false. A catch that returned true would be a bypass reachable by putting
+    // a stray bracket in a taught profile.
+    await withHarness(page, TWO_SUBMITS);
+    await page.evaluate(() => window.__installGuard());
+    await armFor(page, '#btn[[[unclosed');
+
+    await page.locator('#btnFinalSubmit').click();
+
+    const report = await page.evaluate(() => window.__guardReport());
+    expect(report.submitEventsSeen).toBe(0);
+    expect(report.blocked).toBeGreaterThan(0);
   });
 });

@@ -246,3 +246,33 @@ describe('session expiry and draft saves (§Phase 6 Should)', () => {
     expect(findDraftControl(page('<button id="btnGo">Submit</button>'))).toBeNull();
   });
 });
+
+describe('cross-origin frames report what they are, not what we fear (§ mutation-testing gap)', () => {
+  it('calls an unreadable frame an unknown widget, never an OTP', () => {
+    // The distinction matters for P4. Calling every unreadable frame an OTP
+    // would put the OTP instruction in front of a user looking at a chat
+    // widget, and instructions nobody needs are instructions people learn to
+    // dismiss.
+    page('<iframe src="https://widget.example.com/chat"></iframe>');
+    const found = detectBlockers(document);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.type).toBe('unknown_widget');
+  });
+
+  it('still calls a CAPTCHA frame a CAPTCHA', () => {
+    page('<iframe src="https://www.google.com/recaptcha/api2/anchor?k=abc"></iframe>');
+    expect(detectBlockers(document)[0]!.type).toBe('captcha');
+  });
+
+  it('never reports an OTP from a frame at all, whatever the frame says', () => {
+    // We cannot read inside a cross-origin frame, so we cannot know. Guessing
+    // "otp" from a URL would be the first step toward reading one.
+    page(`
+      <iframe src="https://otp.example.com/enter-otp" title="Enter OTP"></iframe>
+      <iframe src="https://bank.example.com/verify?otp=1" title="one time password"></iframe>
+    `);
+    for (const blocker of detectBlockers(document)) {
+      expect(blocker.type).not.toBe('otp');
+    }
+  });
+});

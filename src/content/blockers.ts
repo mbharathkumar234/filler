@@ -176,7 +176,14 @@ export function detectBlockers(root: Document | ShadowRoot = document): BlockerF
   // 5. Frames we cannot read at all. The harvester already works this out
   //    while mapping the page; reusing it keeps one owner for the question.
   for (const candidate of findFrameBlockers(root)) {
-    const type: BlockReason = candidate.type === 'otp' ? 'otp' : candidate.type;
+    // `findFrameBlockers` reports only 'captcha' or 'unknown_widget' — it
+    // cannot see inside a cross-origin frame, so it can never conclude 'otp'.
+    // This used to read `candidate.type === 'otp' ? 'otp' : candidate.type`,
+    // which is the identity function wearing a disguise; mutation testing
+    // found it because inverting the comparison changed nothing any test
+    // could see. Dead code in the file that enforces P4 is worse than dead
+    // code elsewhere: it implies a case a reader then has to disprove.
+    const type: BlockReason = candidate.type;
     const dedupe = `${type}|${candidate.selector}`;
     if (seen.has(dedupe)) continue;
     seen.add(dedupe);

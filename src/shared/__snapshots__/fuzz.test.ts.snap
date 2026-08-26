@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`the matcher, on text no portal would sensibly produce > never claims a confident match on random text 1`] = `[]`;
