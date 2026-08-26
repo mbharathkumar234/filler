@@ -14,11 +14,14 @@ import { runFill, type PlannedWrite } from '@/content/fill-run';
 import { parseConstraint } from '@/documents/constraints';
 import { createRasterBackend } from '@/documents/raster';
 import { RunController } from '@/content/run-controller';
+import { describeElement } from '@/content/picker';
+import { buildTaughtProfile, profileHealth } from '@/matching/teach';
+import { locateBySelector } from '@/matching/profile-cache';
 import { primaryBlocker, detectBlockers } from '@/content/blockers';
 import { readValue, resolveRanked } from '@/content/reverify';
 import { applyEdit, collectValues, focusField } from '@/content/review-bridge';
 import { setRunStorage, type RunStorage } from '@/runtime/persistence';
-import type { FillPlan, PlannedField } from '@/shared/types';
+import type { FillPlan, PlannedField, SiteProfile } from '@/shared/types';
 import type { FieldKey } from '@/matching/taxonomy';
 
 import type { HarnessResult } from './harness.d';
@@ -389,6 +392,155 @@ window.__guardReport = guardReport;
 window.__arm = (token) => {
   arm(token);
 };
+// ---------------------------------------------------------------------------
+// § Phase 9 — teach mode and profile repair
+// ---------------------------------------------------------------------------
+
+/**
+ * The drift-and-repair cycle, driven from a spec.
+ *
+ * Real modules throughout: the real picker's `describeElement`, the real
+ * `profileHealth`, the real `buildTaughtProfile` with its measured `survives`
+ * probe, and the real `locateBySelector` the extension matches with. What the
+ * harness supplies is only the "user" — which field they point at, and what
+ * they say it is.
+ */
+const PROFILE_KEY = 'harness:profile';
+
+function loadProfile(): SiteProfile | null {
+  try {
+    const raw = sessionStorage.getItem(PROFILE_KEY);
+    return raw === null ? null : (JSON.parse(raw) as SiteProfile);
+  } catch {
+    return null;
+  }
+}
+
+function storeProfile(profile: SiteProfile): void {
+  sessionStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+}
+
+/** Resolve a profile's selectors against what is on the page right now. */
+function resolvesNow(selectors: string[]): boolean {
+  return locateBySelector(selectors, harvest(document).fields) !== null;
+}
+
+/**
+ * Record a profile using *only* the current element ids.
+ *
+ * Stands in for a profile captured before a portal redesign: id-only, and
+ * therefore about to break. Nothing in the extension records profiles this
+ * badly — that is the point, and the repair path is what is under test.
+ */
+function recordIdOnlyProfile(mapping: Record<string, string>): SiteProfile {
+  const result = harvest(document);
+  const fields: SiteProfile['fields'] = [];
+
+  for (const [name, key] of Object.entries(mapping)) {
+    const descriptor = result.fields.find((field) => {
+      const el = result.elements.get(field.ref);
+      return el?.getAttribute('name') === name;
+    });
+    const el = descriptor ? result.elements.get(descriptor.ref) : null;
+    const id = el?.getAttribute('id');
+    if (!id) continue;
+    fields.push({ key: key as FieldKey, selectors: [`#${id}`], confidence: 1, source: 'taught' });
+  }
+
+  const profile: SiteProfile = {
+    siteId: 'harness:drift',
+    version: 1,
+    matchUrl: `${location.origin}/*`,
+    formFingerprint: 'fixture-postback-step-2',
+    createdAt: new Date().toISOString(),
+    lastVerifiedAt: new Date().toISOString(),
+    fields,
+    documents: [],
+    submit: { selectors: ['#btnFinalSubmit'], label: 'Final Submit' },
+    blockers: [],
+  };
+
+  storeProfile(profile);
+  return profile;
+}
+
+/** Point at a field by its `name`, as a user would point at it on screen. */
+function pickByName(name: string) {
+  const el = document.getElementsByName(name)[0];
+  if (!el) return null;
+  return describeElement(el, document);
+}
+
+/**
+ * Teach every mapping in one pass and save a new version.
+ *
+ * `survives` is measured, not guessed: the page has been re-rendered since the
+ * ids were recorded, so a selector that still finds its field has demonstrated
+ * the property the ranking is trying to reward.
+ */
+function teachAndSave(mapping: Record<string, string>): SiteProfile {
+  const picks = [];
+  for (const [name, key] of Object.entries(mapping)) {
+    const picked = pickByName(name);
+    if (!picked || picked.refused) continue;
+    picks.push({ ref: picked.ref ?? '', key: key as FieldKey, selectors: picked.selectors, label: picked.label });
+  }
+
+  const next = buildTaughtProfile({
+    siteId: 'harness:drift',
+    url: location.href,
+    fingerprint: 'fixture-postback-step-2',
+    picks,
+    previous: loadProfile(),
+    survives: (selector) => resolvesNow([selector]),
+  });
+
+  storeProfile(next);
+  return next;
+}
+
+/** Fill the page from a profile, the way a profile-matched run would. */
+async function fillFromProfile(values: Record<string, string>): Promise<number> {
+  const profile = loadProfile();
+  if (!profile) return 0;
+
+  const result = harvest(document);
+  const writes: PlannedWrite[] = [];
+
+  for (const field of profile.fields) {
+    const located = locateBySelector(field.selectors, result.fields);
+    if (!located) continue;
+    const value = values[field.key];
+    if (value === undefined) continue;
+    writes.push({ ref: located.ref, key: field.key, value });
+  }
+
+  const run = await runFill(writes, {
+    resolve: (ref) => result.elements.get(ref) ?? null,
+    delay: () => new Promise((r) => setTimeout(r, 2)),
+  });
+
+  return run.records.filter((record) => record.ok).length;
+}
+
+window.__teach = {
+  recordIdOnlyProfile,
+  health: () => {
+    const profile = loadProfile();
+    return profile ? profileHealth(profile, resolvesNow) : null;
+  },
+  pick: (name: string) => pickByName(name),
+  teachAndSave: (mapping: Record<string, string>) => {
+    const profile = teachAndSave(mapping);
+    return { version: profile.version, fields: profile.fields.length };
+  },
+  profileVersion: () => loadProfile()?.version ?? 0,
+  selectorsFor: (key: string) =>
+    loadProfile()?.fields.find((field) => field.key === key)?.selectors ?? [],
+  fill: fillFromProfile,
+  resetProfile: () => sessionStorage.removeItem(PROFILE_KEY),
+};
+
 window.__run = {
   start: runStart,
   resume: runResumeAfterReload,

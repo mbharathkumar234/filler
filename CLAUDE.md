@@ -43,6 +43,9 @@ If a requested feature conflicts with these, stop and flag it rather than implem
 ## Where things live
 - Canonical field keys: `src/matching/taxonomy.ts` (append-only — see §4 of the plan).
 - Locked type contracts: `src/shared/types.ts`.
+- Site profiles: `src/matching/profile-cache.ts` (lookup), `learned-profiles.ts` (versioned
+  storage + rollback), `teach.ts` (building one from user picks), `profile-transfer.ts` (an
+  imported profile is untrusted input and never enters as `taught`).
 - Run state machine: `src/runtime/machine.ts` (pure reducer) + `store.ts` + `persistence.ts`.
   The behaviour that uses them — pause, resume, drift recovery — is `content/run-controller.ts`,
   which takes ports rather than reaching for `chrome.*` so it can be driven against a fixture.

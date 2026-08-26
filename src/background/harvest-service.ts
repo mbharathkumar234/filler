@@ -11,7 +11,8 @@ import type { Result } from '@/shared/messages';
 import { envelope } from '@/shared/messages';
 import type { HarvestReport } from '@/content/index';
 import type { MatchResult } from '@/shared/types';
-import { bundledProfiles } from '@/matching/profile-cache';
+import { bundledProfiles, locateBySelector } from '@/matching/profile-cache';
+import { profileHealth, type ProfileHealth } from '@/matching/teach';
 import { loadLearned } from '@/matching/learned-profiles';
 import { matchFormWithContext } from '@/matching';
 import { enrichWithLlm, recordUsage } from './llm-service';
@@ -47,6 +48,8 @@ export interface TabHarvest {
   llmNotice: string | null;
   /** True when a suggestion from the model is in `matches`. */
   llmUsed: boolean;
+  /** § Phase 9: how much of the applicable profile still resolves, if any. */
+  profileHealth: ProfileHealth | null;
 }
 
 /**
@@ -100,14 +103,25 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
   // "once per form, ever" true rather than aspirational.
   const learned = await loadLearned().catch(() => []);
 
+  // § Phase 9: a profile's selectors are checked against what was actually
+  // harvested. Until this phase that check was `() => true`, which meant the
+  // staleness threshold could never fire and a half-broken profile would be
+  // used to fill a form — the exact outcome §Phase 9 exists to prevent.
+  const resolvesOnPage = (selectors: string[]): boolean =>
+    locateBySelector(selectors, fields) !== null;
+
+  const profiles = [...bundledProfiles(), ...learned];
   const matched = matchFormWithContext(fields, {
     url,
     fingerprint: top.fingerprint,
-    profiles: [...bundledProfiles(), ...learned],
-    // Selector resolution against the live page belongs to Phase 5's filler;
-    // until then a shipped profile is trusted to resolve.
-    resolve: () => true,
+    profiles,
+    resolve: resolvesOnPage,
   });
+
+  // Health of whichever profile applied, stale or not — the panel needs to be
+  // able to say "9 of 20 selectors still work" and name the broken keys.
+  const applicable = matched.profile?.profile ?? matched.staleProfile?.profile ?? null;
+  const health = applicable ? profileHealth(applicable, resolvesOnPage) : null;
 
   // § Phase 8 — the LLM sees only what the rules could not place, and only
   // after redaction and the value guard. It never throws: a failure comes back
@@ -154,6 +168,7 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
       sameAsPermanent: matched.sameAsPermanent,
       llmNotice: enriched.notice ?? null,
       llmUsed: enriched.called && enriched.results.some((r) => r.source === 'llm'),
+      profileHealth: health,
     },
   };
 }

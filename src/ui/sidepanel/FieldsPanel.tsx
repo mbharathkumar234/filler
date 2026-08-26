@@ -14,6 +14,7 @@ import type { FillReport } from '@/background/fill-service';
 import type { FieldDescriptor, MatchResult } from '@/shared/types';
 import { bandOf, type MatchBand } from '@/matching';
 import { errorMessage, send } from '@/ui/lib/client';
+import { TeachPanel } from '@/ui/review/TeachPanel';
 
 const SOURCE_LABELS: Record<string, string> = {
   'label-for': 'label',
@@ -254,6 +255,12 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
             </div>
           )}
 
+          {harvest.llmNotice && (
+            <p className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-600">
+              {harvest.llmNotice}
+            </p>
+          )}
+
           <label className="mt-2 flex items-center gap-1.5 text-xs text-slate-600">
             <input
               type="checkbox"
@@ -277,6 +284,21 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
           {shown.length === 0 && (
             <p className="mt-2 text-xs text-slate-500">No fillable fields found on this page.</p>
           )}
+
+          {/*
+            § Phase 9. Offered on every scanned page rather than only when
+            something is broken: a user who spots a wrong mapping should not
+            have to wait for the extension to agree that it is wrong.
+          */}
+          <div className="-mx-4 mt-3">
+            <TeachPanel
+              tabId={harvest.tabId}
+              fingerprint={harvest.fingerprint}
+              health={harvest.profileHealth}
+              unmappedCount={harvest.matches.filter((m) => m.key === 'unknown').length}
+              onTaught={() => void scan()}
+            />
+          </div>
         </>
       )}
     </section>

@@ -32,6 +32,9 @@ export const LEARNED_SCHEMA_VERSION = 1;
 /** Bound on how many forms we remember, oldest evicted first. */
 export const MAX_LEARNED = 100;
 
+/** Bound on retained versions per form. Enough to undo a bad afternoon. */
+export const MAX_VERSIONS = 10;
+
 export interface LearnedStorage {
   get(keys: string | string[] | null): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;
@@ -141,15 +144,16 @@ export async function loadLearned(): Promise<SiteProfile[]> {
 }
 
 /**
- * Remember a profile, replacing any earlier one for the same form.
+ * Remember a profile learned by the model.
  *
- * Replacing rather than appending is what makes "once per form, ever" true
- * across re-learns: a form whose layout changed enough to be re-learned gets
- * one entry, not a growing pile of near-duplicates.
+ * Replaces the previous *learned* entry for the same form rather than piling
+ * up near-duplicates. Teach-mode versions go through `saveVersion` instead,
+ * which keeps history — a machine re-deriving the same answer is not worth
+ * remembering twice, a human's successive corrections are.
  */
 export async function saveLearned(profile: SiteProfile): Promise<void> {
   const existing = await loadLearned();
-  const previous = existing.find((p) => p.formFingerprint === profile.formFingerprint);
+  const previous = newestFor(existing, profile.formFingerprint);
   const kept = existing.filter((p) => p.formFingerprint !== profile.formFingerprint);
 
   const next: SiteProfile = previous
@@ -164,8 +168,75 @@ export async function saveLearned(profile: SiteProfile): Promise<void> {
   });
 }
 
+/**
+ * Store a new *version*, keeping the ones before it (§ Phase 9).
+ *
+ * "Old versions retained for rollback" is the plan's wording, and the reason is
+ * concrete: a user who mis-clicks and teaches "Father's Name" onto the mother's
+ * box has no other record of what changed. Bounded at `MAX_VERSIONS` per form,
+ * newest kept — the alternative is unbounded growth on a form somebody repairs
+ * every week.
+ */
+export async function saveVersion(profile: SiteProfile): Promise<void> {
+  const existing = await loadLearned();
+  const mine = existing
+    .filter((p) => p.formFingerprint === profile.formFingerprint)
+    .sort((a, b) => a.version - b.version);
+  const others = existing.filter((p) => p.formFingerprint !== profile.formFingerprint);
+
+  const history = [...mine.filter((p) => p.version !== profile.version), profile].slice(
+    -MAX_VERSIONS,
+  );
+
+  await area().set({
+    [LEARNED_KEY]: {
+      v: LEARNED_SCHEMA_VERSION,
+      profiles: [...others, ...history].slice(-MAX_LEARNED),
+    } satisfies LearnedRecord,
+  });
+}
+
+/** Every stored version of one form, newest first. */
+export async function profileHistory(fingerprint: string): Promise<SiteProfile[]> {
+  return (await loadLearned())
+    .filter((p) => p.formFingerprint === fingerprint)
+    .sort((a, b) => b.version - a.version);
+}
+
+/**
+ * Undo the most recent teach, returning the version now in force.
+ *
+ * Removing rather than re-adding an older copy: the version numbers stay
+ * meaningful, and "roll back twice" lands where the user expects.
+ */
+export async function rollbackProfile(fingerprint: string): Promise<SiteProfile | null> {
+  const history = await profileHistory(fingerprint);
+  if (history.length <= 1) return null;
+
+  const [newest, ...rest] = history;
+  void newest;
+  const others = (await loadLearned()).filter((p) => p.formFingerprint !== fingerprint);
+
+  await area().set({
+    [LEARNED_KEY]: {
+      v: LEARNED_SCHEMA_VERSION,
+      profiles: [...others, ...rest],
+    } satisfies LearnedRecord,
+  });
+
+  return rest[0] ?? null;
+}
+
 export async function findLearned(fingerprint: string): Promise<SiteProfile | null> {
-  return (await loadLearned()).find((p) => p.formFingerprint === fingerprint) ?? null;
+  return newestFor(await loadLearned(), fingerprint);
+}
+
+function newestFor(profiles: readonly SiteProfile[], fingerprint: string): SiteProfile | null {
+  return (
+    profiles
+      .filter((p) => p.formFingerprint === fingerprint)
+      .sort((a, b) => b.version - a.version)[0] ?? null
+  );
 }
 
 /** Forget everything learned. Offered in settings; the user owns this. */

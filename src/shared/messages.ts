@@ -30,6 +30,12 @@ import type { FillReport, WriteInstruction } from '@/background/fill-service';
 import type { ReviewPayload } from '@/background/review-service';
 import type { AuditEntry, AuditSettings } from '@/runtime/audit';
 import type { LlmStatus } from '@/background/llm-service';
+import type {
+  ProfileVersionSummary,
+  SavedProfile,
+  TeachSession,
+} from '@/background/teach-service';
+import type { ProfileHealth } from '@/matching/teach';
 import type { ApprovalToken } from '@/content/submit-guard';
 
 // ---------------------------------------------------------------------------
@@ -150,6 +156,46 @@ export type LlmRequest =
   | { type: 'llm:reset-usage' }
   | { type: 'llm:forget-learned' };
 
+/**
+ * Teach mode (§ Phase 9).
+ *
+ * `teach:pick-start` and `teach:pick-stop` travel worker -> content script;
+ * `teach:picked` travels content -> worker and carries **selectors and a
+ * label, never a value**. Everything else is panel-initiated and privileged.
+ */
+export type TeachRequest =
+  | { type: 'teach:start'; tabId: number }
+  | { type: 'teach:stop'; tabId: number }
+  | { type: 'teach:cancel'; tabId: number }
+  | { type: 'teach:pick-start' }
+  | { type: 'teach:pick-stop' }
+  | {
+      type: 'teach:picked';
+      ref: string | null;
+      selectors: string[];
+      label: string;
+      tag: string;
+      refused?: string;
+    }
+  | { type: 'teach:assign'; tabId: number; key: FieldKey; ref: string | null; selectors: string[]; label: string }
+  | {
+      type: 'teach:assign-document';
+      tabId: number;
+      key: FieldKey;
+      ref: string | null;
+      selectors: string[];
+      label: string;
+      constraint: DocConstraint;
+    }
+  | { type: 'teach:forget'; tabId: number; key: FieldKey }
+  | { type: 'teach:save'; tabId: number }
+  | { type: 'teach:session'; tabId: number }
+  | { type: 'profile:health'; tabId: number }
+  | { type: 'profile:versions'; fingerprint: string }
+  | { type: 'profile:rollback'; fingerprint: string }
+  | { type: 'profile:export' }
+  | { type: 'profile:import'; text: string };
+
 export type AuditRequest =
   | { type: 'audit:read'; limit?: number }
   | { type: 'audit:configure'; logValues: boolean }
@@ -165,6 +211,7 @@ export type ExtensionRequest =
   | ApprovalRequest
   | AuditRequest
   | LlmRequest
+  | TeachRequest
   | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
 
@@ -206,6 +253,19 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'llm:set-model',
   'llm:reset-usage',
   'llm:forget-learned',
+  'teach:start',
+  'teach:stop',
+  'teach:cancel',
+  'teach:assign',
+  'teach:assign-document',
+  'teach:forget',
+  'teach:save',
+  'teach:session',
+  'profile:health',
+  'profile:versions',
+  'profile:rollback',
+  'profile:export',
+  'profile:import',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -261,6 +321,22 @@ export interface ResponseMap {
   'llm:set-model': null;
   'llm:reset-usage': null;
   'llm:forget-learned': null;
+  'teach:start': TeachSession;
+  'teach:stop': null;
+  'teach:cancel': null;
+  'teach:pick-start': null;
+  'teach:pick-stop': null;
+  'teach:picked': null;
+  'teach:assign': TeachSession;
+  'teach:assign-document': TeachSession;
+  'teach:forget': TeachSession;
+  'teach:save': SavedProfile;
+  'teach:session': TeachSession | null;
+  'profile:health': ProfileHealth | null;
+  'profile:versions': ProfileVersionSummary[];
+  'profile:rollback': ProfileVersionSummary | null;
+  'profile:export': string;
+  'profile:import': { imported: number; rejected: string[] };
   ping: 'pong';
   'harvest:request': null;
   'harvest:ready': null;

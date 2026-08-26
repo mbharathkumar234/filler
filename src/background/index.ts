@@ -39,6 +39,21 @@ import {
 } from '@/runtime/audit';
 import { llmStatus, resetUsage, setApiKey, setModel } from './llm-service';
 import { forgetLearned } from '@/matching/learned-profiles';
+import {
+  cancelTeaching,
+  exportLearned,
+  forgetPick,
+  importLearned,
+  healthFor,
+  recordDocumentPick,
+  recordPick,
+  rollback,
+  saveTeaching,
+  startTeaching,
+  stopTeaching,
+  teachSession,
+  versionsFor,
+} from './teach-service';
 import { clearTab, pruneRuns } from '@/runtime/persistence';
 import { lockVault } from '@/vault/session';
 
@@ -72,6 +87,7 @@ chrome.runtime.onSuspend?.addListener(() => {
  */
 chrome.tabs?.onRemoved.addListener((tabId) => {
   endRun(tabId);
+  cancelTeaching(tabId);
   // An approval is for one form in one tab. The tab is gone, so is the form.
   revokeApproval(tabId);
   forgetTabReview(tabId);
@@ -159,6 +175,51 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
     case 'llm:forget-learned':
       await forgetLearned();
       return { ok: true, data: null };
+
+    // § Phase 9 — teach mode.
+    case 'teach:start':
+      return startTeaching(request.tabId);
+    case 'teach:stop':
+      return stopTeaching(request.tabId);
+    case 'teach:cancel':
+      cancelTeaching(request.tabId);
+      void stopTeaching(request.tabId);
+      return { ok: true, data: null };
+    case 'teach:session':
+      return { ok: true, data: teachSession(request.tabId) };
+    case 'teach:picked':
+      // Broadcast from the content script; the panel is the real listener.
+      // Acknowledged here so it does not fall through to "unhandled".
+      return { ok: true, data: null };
+    case 'teach:assign':
+      return recordPick(request.tabId, {
+        ref: request.ref,
+        key: request.key,
+        selectors: request.selectors,
+        label: request.label,
+      });
+    case 'teach:assign-document':
+      return recordDocumentPick(request.tabId, {
+        ref: request.ref,
+        key: request.key,
+        selectors: request.selectors,
+        label: request.label,
+        constraint: request.constraint,
+      });
+    case 'teach:forget':
+      return forgetPick(request.tabId, request.key);
+    case 'teach:save':
+      return saveTeaching(request.tabId);
+    case 'profile:health':
+      return healthFor(request.tabId);
+    case 'profile:versions':
+      return { ok: true, data: await versionsFor(request.fingerprint) };
+    case 'profile:rollback':
+      return rollback(request.fingerprint);
+    case 'profile:export':
+      return { ok: true, data: await exportLearned() };
+    case 'profile:import':
+      return importLearned(request.text);
 
     case 'run:abort':
       if (tabId !== null) {

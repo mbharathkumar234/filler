@@ -31,6 +31,7 @@ import { isXPath } from './selectors';
 import type { FieldSnapshot } from './filler';
 import { detectBlockers } from './blockers';
 import { applyEdit, collectValues, focusField } from './review-bridge';
+import { startPicker, type PickerHandle } from './picker';
 import { isFreshDocument } from './watcher';
 import { RunController } from './run-controller';
 import {
@@ -59,6 +60,8 @@ let lastSnapshots: FieldSnapshot[] = [];
 let abortRequested = false;
 let controller: RunController | null = null;
 let tabId: number | null = null;
+/** § Phase 9: the teach-mode picker, while one is running. */
+let picker: PickerHandle | null = null;
 
 /** Set once, before anything else runs: was this document freshly loaded? */
 const documentWasReloaded = isFreshDocument(window);
@@ -372,6 +375,47 @@ if (!window.__autofillContentReady) {
             error: error instanceof Error ? error.message : 'Fill failed.',
           }),
       );
+      return true;
+    }
+
+    // § Phase 9 — the teach-mode picker.
+    if (request.type === 'teach:pick-start') {
+      picker?.stop();
+      picker = startPicker(document, {
+        known: current?.fields ?? [],
+        resolve: elementFor,
+        onPick: (picked) => {
+          // Selectors and a label only. A pick never carries a value — there
+          // is no reason for the panel to learn what is in the box the user
+          // is pointing at.
+          void chrome.runtime
+            .sendMessage(
+              envelope({
+                type: 'teach:picked',
+                ref: picked.ref,
+                selectors: picked.selectors,
+                label: picked.label,
+                tag: picked.tag,
+                ...(picked.refused === undefined ? {} : { refused: picked.refused }),
+              }),
+            )
+            .catch(() => {
+              // The panel closed mid-teach. Nothing to do.
+            });
+        },
+        onCancel: () => {
+          picker = null;
+          void chrome.runtime.sendMessage(envelope({ type: 'teach:pick-stop' })).catch(() => {});
+        },
+      });
+      sendResponse({ ok: true, data: null });
+      return true;
+    }
+
+    if (request.type === 'teach:pick-stop') {
+      picker?.stop();
+      picker = null;
+      sendResponse({ ok: true, data: null });
       return true;
     }
 

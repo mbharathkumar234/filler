@@ -947,32 +947,128 @@ cannot either.
 
 **Goal:** turn your maintenance burden into a user-driven feature. This is what makes the product survive portal redesigns.
 
+**Status: complete.** 1090 unit tests + 63 e2e green.
+
 ### Must Achieve
 
-- [ ] `content/picker.ts`: element picker overlay — user clicks a field, chooses a `FieldKey` from a searchable
-      list, mapping is recorded.
-- [ ] Entered from two places: `NEEDS_TEACHING` (unmapped fields) and `DRIFTED` (broken selectors).
-- [ ] Taught mappings write a new site-profile **version**; old versions retained for rollback.
-- [ ] Selector recording generates a ranked, resilient list (id → name → label-anchored XPath → structural path),
-      and prefers selectors that survive across your fixture's regenerated-ID variants.
-- [ ] Health check: on load, if <60% of a profile's selectors resolve, mark it stale and prompt for repair rather
-      than filling a half-broken form.
-- [ ] Document-slot teaching: user points at a file input, picks a document key, and either types the constraint
-      or lets the parser read it from the page.
+- [x] `content/picker.ts`: capture-phase element picker. The user points, then names the field from
+      a searchable list.
+- [x] Entered from both doors: unmapped fields (`NEEDS_TEACHING`) and a stale profile (`DRIFTED`).
+      Also offered unconditionally on any scanned page — a user who spots a wrong mapping should not
+      have to wait for the extension to agree that it is wrong.
+- [x] Taught mappings write a new profile **version**; `MAX_VERSIONS` (10) retained per form, with
+      "Undo the last teach" in the panel.
+- [x] Ranked, resilient selector recording — with the survival probe *measured*, not guessed. See
+      below.
+- [x] Health check: below 60% resolution the profile is marked stale and the panel prompts for
+      repair instead of filling. **This check was inert before this phase**; see below.
+- [x] Document-slot teaching: `teach:assign-document` records a `doc.*` key with its constraint
+      alongside the field mappings.
 
 ### Should Achieve
 
-- [ ] Export/import site profiles as JSON so users can share them (community profile repo).
-- [ ] If you ever host a shared profile registry: profiles contain **selectors only, never values**; review
-      submissions before publishing; sign them. Treat an untrusted profile as untrusted input.
-- [ ] Telemetry (strictly opt-in, aggregate only): which profiles are drifting, so you know what to fix.
+- [x] Export/import profiles as JSON (`matching/profile-transfer.ts`), with the untrusted-input
+      handling the plan makes a condition of ever sharing them.
+- [ ] A hosted registry with signing and review. **Not built** — the plan makes it conditional
+      ("if you ever host…"), and there is nothing to sign against. What *is* built is the part that
+      matters without it: an imported profile is treated as untrusted.
+- [ ] Opt-in aggregate telemetry. **Not built.** It would be the first thing in this codebase that
+      phones home, and the drift signal it would carry (which portals a user visits, and when they
+      break) is exactly the shape of data P3 exists to keep on the device. Worth doing only with a
+      design that survives that argument, which this is not yet.
 
 **Out of scope:** automatic profile publishing without review.
 
-**Verify:** take a fixture, rename every `id`, reload. The extension must detect drift, enter teach mode, and after
-~2 minutes of user clicking, fill correctly again — with a bumped profile version.
+**Verify:** rename every id, reload, detect drift, teach, fill correctly again with a bumped version.
 
----
+*Done* in `tests/e2e/teach.spec.ts` against `fixtures/postback-portal/`, which renames every element
+id on every render by itself — so "rename every id" is the fixture's own behaviour rather than a
+test-only mutation it could quietly stop doing. The spec asserts that premise first (no id survives
+a reload), then walks the whole journey: healthy profile → reload → 0/5 resolving and stale → refuse
+to fill → teach → v2 → **reload again** → still 5/5 → fills correctly.
+
+That second reload is the one that matters. A repair that only worked until the next postback would
+not be a repair.
+
+### The health check was inert until this phase
+
+`selectProfile` has computed a resolve rate since Phase 4, but `harvest-service` passed
+`resolve: () => true`. Every profile therefore scored 100%, the 60% threshold could never fire, and
+a half-broken profile would have been used to fill a form — the precise outcome this phase exists to
+prevent. It now resolves against the harvested fields, and `TabHarvest` carries a `profileHealth`
+so the panel can say "9 of 20 fields still match" and name the ones that are lost.
+
+### A defect the Verify exposed in the harvester
+
+The first run of the drift spec found a freshly-recorded profile reporting 0/5 resolved *before*
+anything had drifted. The cause: `buildSelectors` **dropped a generated id entirely** unless there
+was almost nothing else, so a profile holding one could never be matched — and health and matching
+could therefore disagree about the same page.
+
+Generated ids are now always recorded, ranked last. Two things need them: `elementFor` re-resolving
+after an in-place postback, where the id is still the one this render emitted; and profile
+resolution, where a profile captured elsewhere — shipped, imported, or recorded under a different
+render — may legitimately hold an id the harvester would never *prefer*. Refusing to record it made
+a working profile look broken, which is the one answer a staleness check must not give.
+
+### Selector resilience, measured rather than guessed
+
+The plan asks for a ranking that "prefers selectors that survive across your fixture's
+regenerated-ID variants". That is two different claims and `rankSelectors` treats them as such:
+
+- **Static.** `#ctl00_x_txtName` is generated and will differ next render; `input[name="txtName"]`
+  is authored and usually will not. `looksUnstable` already encoded what those look like.
+- **Measured.** `saveTeaching` re-harvests at save time — which on a portal like this is a
+  *different render* from the one the user picked on — and probes each selector. Measured evidence
+  outranks the heuristic in both directions: a selector that demonstrably survived is promoted above
+  one that merely looks stable, and one that demonstrably died is demoted below everything.
+
+A dead selector is ranked last, not discarded. It may come back on another render, and keeping it
+costs one failed lookup against losing information.
+
+### Two rules that make repair worth doing
+
+**A repair never loses prior work.** Re-teaching three fields on a twenty-field profile keeps the
+other seventeen. Anything else would make fixing one field a reason to re-do the whole form.
+
+**A teach outranks everything.** A human pointing at a field is the strongest signal this system
+has — stronger than a rule, a model, or an older teach — so `source: 'taught'` fills at confidence 1
+without flagging. That is also why the Phase 8 hand-off matters: an `llm` entry becomes `taught` the
+moment a human confirms it, and stops being capped.
+
+### An imported profile is not a taught one
+
+This is the sharp edge of the export/import feature, and it took the most care.
+
+An imported profile is a file from a stranger that tells this extension **where to type the user's
+Aadhaar**. A bundle claiming `source: 'taught'` would be claiming a trust level the recipient never
+granted — taught mappings fill at confidence 1, silently. So `importProfiles` rebuilds every field
+from scratch, drops `source` and `confidence`, and re-enters each mapping at rule level, below
+`AUTO_FILL`. An imported mapping is filled *and shown*, and reaches the user on the review screen.
+
+Also stripped: any property nobody asked for, blockers (a profile that could declare "there is no
+CAPTCHA here" would be a profile that could switch off a P4 control), oversized selectors, and
+anything beyond the per-file caps.
+
+There is no signing and no registry. The plan lists both as conditional on hosting one; until that
+exists, "treat it as untrusted input" is the whole of the defence, and the code says so rather than
+implying more.
+
+### P4 reaches teach mode too
+
+A CAPTCHA answer box or a one-time-code field cannot be taught, because there is no key in the
+taxonomy to teach it *to* — by design. The picker refuses with a sentence rather than doing nothing,
+because a user who clicks and gets no response will click again.
+
+The picker also swallows the page's own events in the capture phase — `click`, `pointerdown`,
+`mousedown` — because a portal is full of labels that focus, anchors that navigate and buttons that
+submit. A picker that let one through would take the user off a form they had already filled, which
+is worse than having no picker.
+
+### What a pick carries
+
+Selectors and a label. Never a value. Asserted in both the unit suite and the e2e, where a field is
+given a value before being pointed at and the resulting pick is checked for it.
 
 ## Phase 10 — Hardening, packaging, release
 

@@ -98,8 +98,32 @@ export interface ReviewHarness {
   edit(ref: string, value: string): { ok: boolean; value: string; reason?: string };
 }
 
+/** § Phase 9: drift detection and repair, driven from a spec. */
+export interface TeachHarness {
+  /** Record a deliberately fragile id-only profile, as a pre-redesign one. */
+  recordIdOnlyProfile(mapping: Record<string, string>): unknown;
+  /** How much of the stored profile still resolves against this render. */
+  health(): {
+    resolved: number;
+    total: number;
+    rate: number;
+    stale: boolean;
+    broken: string[];
+  } | null;
+  /** Point at a field by `name`, as the user would point at it on screen. */
+  pick(name: string): { selectors: string[]; label: string; refused?: string } | null;
+  /** Teach every mapping and save the next version. */
+  teachAndSave(mapping: Record<string, string>): { version: number; fields: number };
+  profileVersion(): number;
+  selectorsFor(key: string): string[];
+  /** Fill from the stored profile; returns how many fields took a value. */
+  fill(values: Record<string, string>): Promise<number>;
+  resetProfile(): void;
+}
+
 declare global {
   interface Window {
+    __teach: TeachHarness;
     __review: ReviewHarness;
     __run: RunHarness;
     /**

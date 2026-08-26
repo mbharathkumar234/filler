@@ -172,9 +172,26 @@ export function buildSelectors(
 
   selectors.push(structuralPath(el, root));
 
-  // An unstable id is still better than nothing if we have little else.
+  /*
+   * A generated id goes in too — last.
+   *
+   * It was previously dropped unless there was nothing else, which cost more
+   * than it saved. Two things need it:
+   *
+   *  - `elementFor` re-resolving a field after an in-place postback, where the
+   *    id is still the one this render emitted;
+   *  - profile resolution. §Phase 9's health check asks "does this profile's
+   *    selector match a field on this page", and a profile recorded elsewhere
+   *    — shipped, imported, or captured under a different render — may hold an
+   *    id the harvester would never *prefer*. Refusing to record it made a
+   *    working profile look broken, which is the one answer a staleness check
+   *    must not give.
+   *
+   * Ranking it last is what keeps it harmless: `rankSelectors` demotes it
+   * again when a profile is written, and every earlier selector is tried first.
+   */
   const rawId = el.getAttribute('id');
-  if (!byId && rawId && selectors.length < 2) {
+  if (!byId && rawId) {
     selectors.push(`#${cssEscape(rawId)}`);
   }
 
