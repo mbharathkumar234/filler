@@ -16,7 +16,29 @@ export default defineManifest({
   minimum_chrome_version: '116',
 
   permissions: ['activeTab', 'storage', 'sidePanel', 'scripting'],
+
+  /**
+   * Still empty, and it stays empty. The extension has no standing access to
+   * any site.
+   */
   host_permissions: [],
+
+  /*
+   * Optional, and granted one origin at a time by the user (§ Phase B).
+   *
+   * A gesture-injected content script cannot run at `document_start`, and the
+   * post-fill reload window is a real P2 hole because of it: an ASP.NET
+   * postback returns the page carrying values the extension filled, and a
+   * portal that submits during `load` sends them before we can exist.
+   * `tests/e2e/guard-adversarial.spec.ts` demonstrates it.
+   *
+   * Closing that needs host permission for the site. Listing it here as
+   * *optional* means nothing is granted at install: the user is asked, per
+   * portal, at the moment they run a fill on it, and can revoke it from the
+   * panel. The alternative — a standing `<all_urls>` — is what Phase F
+   * forbids, and rightly.
+   */
+  optional_host_permissions: ['*://*/*'],
 
   background: {
     service_worker: 'src/background/index.ts',

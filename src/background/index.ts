@@ -56,12 +56,24 @@ import {
 } from './teach-service';
 import { beginRun, endRunLimit, mayStartRun } from './limits';
 import { validateRequest } from '@/shared/validate';
+import {
+  grantedOrigins,
+  originPattern,
+  requestPermission,
+  revokePermission,
+  statusFor,
+  syncFor,
+  unregisterAll,
+} from './early-guard';
 import { clearTab, pruneRuns } from '@/runtime/persistence';
 import { lockVault } from '@/vault/session';
 
 chrome.runtime.onInstalled.addListener(() => {
   // The panel opens on an explicit user gesture (P1), never on its own.
   void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  // § Phase B: start from a known state. An early-guard registration that
+  // survived an update would be a content script the user never re-authorised.
+  void unregisterAll().catch(() => {});
 });
 
 /**
@@ -128,6 +140,13 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
       }
       beginRun(request.tabId);
       try {
+        // § Phase B: if the user has granted this origin, make sure the
+        // document_start guard is registered before we put values in the page.
+        // The window this closes is the *next* load, which is exactly when a
+        // postback would return the page carrying what we filled.
+        const tab = await chrome.tabs.get(request.tabId).catch(() => null);
+        if (tab?.url) await syncFor(tab.url).catch(() => undefined);
+
         return await fillTab(request.tabId);
       } finally {
         endRunLimit(request.tabId);
@@ -239,6 +258,27 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
       return { ok: true, data: await exportLearned() };
     case 'profile:import':
       return importLearned(request.text);
+
+    // § Phase B — the document_start guard, per origin, opt-in.
+    case 'guard:status': {
+      const tab = await chrome.tabs.get(request.tabId).catch(() => null);
+      return { ok: true, data: await statusFor(tab?.url ?? '') };
+    }
+    case 'guard:enable': {
+      const tab = await chrome.tabs.get(request.tabId).catch(() => null);
+      const pattern = originPattern(tab?.url ?? '');
+      if (!pattern) {
+        return { ok: false, error: 'This page cannot be protected — it is not an ordinary web page.' };
+      }
+      // Requires a user gesture; the panel calls this from a click.
+      await requestPermission(pattern);
+      return { ok: true, data: await syncFor(tab?.url ?? '') };
+    }
+    case 'guard:disable':
+      await revokePermission(request.origin);
+      return { ok: true, data: null };
+    case 'guard:origins':
+      return { ok: true, data: await grantedOrigins() };
 
     case 'run:abort':
       if (tabId !== null) {

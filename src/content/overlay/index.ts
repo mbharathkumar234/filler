@@ -117,6 +117,21 @@ const STYLE = `
 export function mountOverlay(doc: Document = document): void {
   if (overlay?.host.isConnected) return;
 
+  /*
+   * § Phase B: at `document_start` there is no `<body>` yet.
+   *
+   * The early guard runs before the page's own scripts, which is the whole
+   * point of it — and if it blocks a submission in that window, this is where
+   * it would have thrown on `doc.body.append`. Deferring to `DOMContentLoaded`
+   * means the *block* still happens immediately and only the visible notice
+   * waits for somewhere to put it. Losing the toast would be a nuisance;
+   * throwing here would take the guard down with it.
+   */
+  if (!doc.body) {
+    doc.addEventListener('DOMContentLoaded', () => mountOverlay(doc), { once: true });
+    return;
+  }
+
   const host = doc.createElement('div');
   host.id = CONTAINER_ID;
   // Closed: the page must not be able to reach in and rewrite our controls.

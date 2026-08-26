@@ -15,6 +15,7 @@ import type { FieldDescriptor, MatchResult } from '@/shared/types';
 import { bandOf, type MatchBand } from '@/matching';
 import { errorMessage, send } from '@/ui/lib/client';
 import { TeachPanel } from '@/ui/review/TeachPanel';
+import { EarlyGuardPanel } from '@/ui/review/EarlyGuardPanel';
 
 const SOURCE_LABELS: Record<string, string> = {
   'label-for': 'label',
@@ -291,6 +292,7 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
             have to wait for the extension to agree that it is wrong.
           */}
           <div className="-mx-4 mt-3">
+            <EarlyGuardPanel tabId={harvest.tabId} />
             <TeachPanel
               tabId={harvest.tabId}
               fingerprint={harvest.fingerprint}

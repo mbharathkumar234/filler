@@ -283,6 +283,54 @@ describe('submitWithApproval', () => {
     expect(submitWithApproval(token(), document)).toBe(false);
   });
 
+  /**
+   * § COMPLETION_PLAN Phase B — "leaves no armed state behind".
+   *
+   * Every early return used to leave `state.armed` set. The narrow but real
+   * consequence: the element goes missing (a postback re-rendering the form),
+   * we bail out, and the guard stays armed for the rest of the ninety seconds.
+   * If the element then comes *back* with the same selector, a page-initiated
+   * click on it would be permitted — an activation nobody approved.
+   */
+  it('disarms when the recorded element is not on the page', () => {
+    const approval = token({ targetSelector: '#doesNotExist' });
+    arm(approval);
+
+    expect(submitWithApproval(approval, document)).toBe(false);
+    expect(guardState().armed).toBeNull();
+  });
+
+  it('does not permit a page click once the missing element comes back', () => {
+    // The postback case, end to end: bail out, element reappears, page clicks.
+    const approval = token({ targetSelector: '#btnLater' });
+    arm(approval);
+    expect(submitWithApproval(approval, document)).toBe(false);
+
+    const button = document.createElement('button');
+    button.id = 'btnLater';
+    button.type = 'submit';
+    document.querySelector('#frm')!.append(button);
+
+    const before = guardState().blocked;
+    button.click();
+
+    expect(guardState().blocked).toBeGreaterThan(before);
+  });
+
+  it('disarms when the token does not match the armed one', () => {
+    arm(token({ value: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }));
+    submitWithApproval(token({ value: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' }), document);
+    expect(guardState().armed).toBeNull();
+  });
+
+  it('disarms an expired token rather than leaving it to linger', () => {
+    const approval = token({ expiresAt: Date.now() - 1 });
+    arm(approval);
+
+    expect(submitWithApproval(approval, document)).toBe(false);
+    expect(guardState().armed).toBeNull();
+  });
+
   it('refuses a token that does not match the armed one', () => {
     arm(token({ value: 'aaaa' }));
     expect(submitWithApproval(token({ value: 'bbbb' }), document)).toBe(false);

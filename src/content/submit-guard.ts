@@ -303,15 +303,37 @@ function patchFormSubmit(doc: Document): void {
 /**
  * Perform the one authorised submission.
  *
- * The token is burned before the click, so a handler that throws cannot leave
- * a live token behind for a second attempt.
+ * ## Every exit disarms
+ *
+ * Found by the Phase B attack suite. Each early return used to leave
+ * `state.armed` set, and the consequence was narrow but real: the recorded
+ * element goes missing — a postback re-rendering the form is the ordinary way
+ * that happens — we bail out, and the guard stays armed for the rest of the
+ * ninety seconds. If the element then comes *back* under the same selector, a
+ * page-initiated click on it would be permitted, and nobody approved that
+ * activation.
+ *
+ * So an approval that cannot be spent is an approval that is thrown away. The
+ * user can approve again; a live token nobody is watching is the thing that
+ * must not exist.
  */
 export function submitWithApproval(token: ApprovalToken, doc: Document = document): boolean {
-  if (!tokenValid(token)) return false;
-  if (state.armed?.value !== token.value) return false;
+  if (!tokenValid(token)) {
+    disarm();
+    return false;
+  }
+  if (state.armed?.value !== token.value) {
+    // Not our token. Whatever is armed is no longer trustworthy either — the
+    // caller and the guard disagree about what was approved.
+    disarm();
+    return false;
+  }
 
   const target = doc.querySelector<HTMLElement>(token.targetSelector);
-  if (!target) return false;
+  if (!target) {
+    disarm();
+    return false;
+  }
 
   // The token stays armed across the click so the capture listeners let the
   // whole activation through; the submit event it raises spends it. The

@@ -177,6 +177,10 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'profile:rollback': (r) => str(r.fingerprint, 200),
   'profile:import': (r) => str(r.text, LIMITS.bytes),
 
+  'guard:status': (r) => num(r.tabId),
+  'guard:enable': (r) => num(r.tabId),
+  'guard:disable': (r) => str(r.origin, 500),
+
   'run:state': (r) => typeof r.state === 'object' && r.state !== null,
   'run:abort': (r) => str(r.why, 500),
 };
@@ -204,6 +208,7 @@ export const NO_PAYLOAD_TYPES: readonly RequestType[] = [
   'teach:pick-start',
   'teach:pick-stop',
   'profile:export',
+  'guard:origins',
 ];
 
 /**

@@ -39,6 +39,7 @@ import {
   setToastHandler,
   guardState,
   arm,
+  disarm,
   submitWithApproval,
   type ApprovalToken,
 } from './submit-guard';
@@ -327,6 +328,10 @@ if (!window.__autofillContentReady) {
   setAbortHandler(() => {
     abortRequested = true;
     setStatus('paused', 'Aborting…');
+    // § Phase B: an abort leaves no armed state behind. The worker revokes its
+    // own grant when it sees `run:abort`; this is the page side of the same
+    // thing, and it happens first because it is the half that can act.
+    disarm();
     void controller?.abort('user pressed Abort');
     void chrome.runtime.sendMessage(envelope({ type: 'run:abort', why: 'user pressed Abort' }));
   });
@@ -465,6 +470,7 @@ if (!window.__autofillContentReady) {
 
     if (request.type === 'run:abort') {
       abortRequested = true;
+      disarm();
       void controller?.abort('user aborted');
       setStatus('paused', 'Aborted. Nothing was submitted.');
       sendResponse({ ok: true, data: null });

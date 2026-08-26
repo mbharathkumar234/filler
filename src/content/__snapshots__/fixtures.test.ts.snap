@@ -1314,6 +1314,39 @@ exports[`fixture corpus > 'hostile-portal/page-onload.html' — harvest output s
 }
 `;
 
+exports[`fixture corpus > 'hostile-portal/reload-submit.html' — harvest output snapshot 1`] = `
+{
+  "blockers": [],
+  "fields": [
+    {
+      "enabled": true,
+      "labelText": "Candidate Name",
+      "maxLength": undefined,
+      "nearbyText": "",
+      "optionCount": undefined,
+      "ref": "f0",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Aadhaar Number",
+      "maxLength": 12,
+      "nearbyText": "",
+      "optionCount": undefined,
+      "ref": "f1",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+  ],
+  "wizard": null,
+}
+`;
+
 exports[`fixture corpus > 'hostile-portal/submitted.html' — harvest output snapshot 1`] = `
 {
   "blockers": [],

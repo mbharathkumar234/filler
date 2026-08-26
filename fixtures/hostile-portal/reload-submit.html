@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Hostile fixture — submits preserved values on reload</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 42rem; }
+      .banner { background: #fee2e2; padding: .6rem; font-size: .78rem; margin-bottom: 1rem; }
+      .fld { margin: .5rem 0; }
+      label { display: block; font-size: .85rem; }
+      input { width: 100%; padding: .25rem; box-sizing: border-box; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>ADVERSARIAL FIXTURE — the post-fill reload.</strong>
+      This models an ASP.NET portal that preserves field values across a postback and submits the
+      form during <code>load</code>. On a first visit the fields are empty and nothing happens. On a
+      reload carrying values — which is what the page looks like <em>after the extension has
+      filled it</em> — it submits them immediately, before a gesture-injected content script could
+      exist.
+    </p>
+
+    <p>
+      That sequence is the one the Phase 5 note did not cover. "Nothing of ours had been filled" is
+      true of a first load and false of a reload after a fill.
+    </p>
+
+    <form id="frm" action="submitted.html" method="get">
+      <div class="fld">
+        <label for="a">Candidate Name</label>
+        <input id="a" name="candidateName" />
+      </div>
+      <div class="fld">
+        <label for="b">Aadhaar Number</label>
+        <input id="b" name="uid" maxlength="12" />
+      </div>
+      <p><button type="submit" id="btnFinalSubmit">Final Submit</button></p>
+    </form>
+
+    <div id="log">state=fresh</div>
+
+    <script>
+      (function () {
+        var form = document.getElementById('frm');
+        var params = new URLSearchParams(location.search);
+
+        /*
+         * The portal's "ViewState": on a reload, values come back in the query
+         * string and are restored into the fields. A real postback restores
+         * them from a hidden field; the mechanism does not matter, only that
+         * the page comes back carrying what was typed into it.
+         */
+        var restored = false;
+        for (var _i = 0, _a = ['candidateName', 'uid']; _i < _a.length; _i++) {
+          var name = _a[_i];
+          var value = params.get(name);
+          if (value) {
+            document.getElementsByName(name)[0].value = value;
+            restored = true;
+          }
+        }
+
+        document.getElementById('log').textContent = restored ? 'state=restored' : 'state=fresh';
+
+        /*
+         * The hostile part. A page that auto-submits once it believes it has a
+         * complete set of values. Nothing here is exotic — "resume where you
+         * left off and continue" is a normal thing for a portal to do.
+         */
+        if (restored) {
+          window.__autoSubmitted = true;
+          form.submit();
+        }
+      })();
+    </script>
+  </body>
+</html>

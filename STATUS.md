@@ -186,7 +186,7 @@ happy-path only · 🔴 not implemented, or failing, or amber on a safety/privac
 | 5-2 | Sequential fill, waits for dependent selects | 🟢 | `fill-run.test.ts` → "waits for options to arrive before filling"; "gives up rather than hanging when options never arrive" |
 | 5-3 | maxLength truncation flagged, not silent | 🟢 | `fill.spec.ts` → "truncates to maxLength and flags it" |
 | 5-4 | Guard blocks click / submit / Enter | 🟢 | `fill.spec.ts` → "blocks a click on the real submit button"; "blocks a scripted form.submit() once installed"; "blocks Enter pressed inside the form" |
-| 5-5 | Guard installed at `document_start` | 🔴 | **Not done, and cannot be** under `activeTab` — injection is on a user gesture. The gap is *tested and documented* rather than hidden: `fill.spec.ts` → "the pre-injection gap is real, and we do not pretend otherwise" asserts the page navigates. P2 still holds (nothing of ours was filled), but the plan's literal wording is not met. |
+| 5-5 | Guard installed at `document_start` | 🟢 *(opt-in, per origin)* | **Closed in Phase B.** `early-guard.test.ts` (27 tests) → "registers at document_start, which is the entire point"; "refuses to register an origin the user has not granted". The Phase 5 reasoning that dismissed this was wrong — see the finding below. |
 | 5-6 | Undo restores pre-fill snapshot | 🟢 | `fill-run.test.ts` → undo tests |
 | 5-7 | Overlay in closed shadow root | 🟡 | implemented; no test that a hostile stylesheet cannot reach it |
 
@@ -211,8 +211,8 @@ happy-path only · 🔴 not implemented, or failing, or amber on a safety/privac
 |---|---|---|---|
 | 7-1 | Review model: label, value, key, confidence, rationale | 🟢 | `review.test.ts` (31 tests) |
 | 7-2 | Flags surfaced: low-conf, truncated, fuzzy, failed, required-empty | 🟢 | `review.test.ts` → "hoists the flagged rows out of a long form" |
-| 7-3 | High-sensitivity masked until revealed | 🟢 (model) / 🔴 (screen) | `review.test.ts` → "never leaks the leading digits of an Aadhaar". **The screen that renders it has no test.** |
-| 7-4 | Approval needs a deliberate gesture | 🔴 | `HoldToConfirm.tsx` implemented; **zero tests.** Safety-critical UI with no automated proof → red per the plan's rule. |
+| 7-3 | High-sensitivity masked until revealed | 🟢 | `review.test.ts` → "never leaks the leading digits of an Aadhaar"; `ReviewScreen.test.tsx` → "shows the value that is actually in the field" |
+| 7-4 | Approval needs a deliberate gesture | 🟢 | **Closed in Phase B.** `HoldToConfirm.test.tsx` (22 tests) → "ignores a plain click entirely"; "does not carry progress over into the next attempt"; "cancels when the window loses focus mid-hold" |
 | 7-5 | 128-bit token, single-use, 90s TTL, burned before the click | 🟢 | `approval.test.ts` → "refuses after ninety seconds"; "spends the token"; `approval-service.test.ts` → "burns the token even when talking to the page throws" |
 | 7-6 | Exactly one click on the recorded element | 🟢 | `approval-service.test.ts` → "sends exactly one submission, naming the approved element"; `fill.spec.ts` → "an armed token permits exactly one submission" |
 | 7-7 | Append-only audit log | 🟢 | `audit.test.ts` → "exposes no way to change or remove one entry" |
@@ -260,7 +260,7 @@ happy-path only · 🔴 not implemented, or failing, or amber on a safety/privac
 | 10-6 | P1/P6 rate & scope limits | 🟢 | `limits.test.ts` (15 tests) → "admits exactly the cap, then stops" |
 | 10-7 | Crash safety | 🟢 | `crash-safety.test.ts` (13 tests) → "does not come back armed once the ninety seconds are up" |
 | 10-8 | Onboarding flow | 🔴 | disclosure gate only. Guided profile entry, document upload with quality checks, and first supervised fill are **not sequenced**. No tests. |
-| 10-9 | In-product disclosure | 🟡 | `Disclosure.tsx` implemented; **no test** |
+| 10-9 | In-product disclosure | 🟡 | `Disclosure.tsx` implemented; still no test |
 | 10-10 | Privacy policy + store listing | 🟢 | `docs/PRIVACY.md`, `docs/STORE_LISTING.md` |
 | 10-11 | **External security review** | 🔴 | not done — cannot be self-performed |
 | 10-12 | **Real-portal smoke test** | 🔴 | not done — depends on 0-4 |
@@ -270,19 +270,66 @@ happy-path only · 🔴 not implemented, or failing, or amber on a safety/privac
 
 ## Tally
 
-| | Count |
-|---|---|
-| 🟢 Green | 54 |
-| 🟡 Amber | 8 |
-| 🔴 Red | 14 |
+| | Count | After Phase B |
+|---|---|---|
+| 🟢 Green | 54 | **58** |
+| 🟡 Amber | 8 | 8 |
+| 🔴 Red | 14 | **10** |
 
-**1,181 unit tests, 63 e2e tests.** typecheck, lint, build clean.
+**1,251 unit tests, 69 e2e tests.** typecheck, lint, build clean.
+
+Phase B moved 5-5, 7-3, 7-4 and the abort row to green, and closed a P2 hole
+that no row had been tracking at all.
 
 ---
 
+## Phase B — what the attack-first pass found
+
+Written after the audit, following the plan's instruction to attack the guard
+before touching it.
+
+### A P2 hole no row was tracking
+
+Phase 5 recorded the pre-injection window as acceptable because *"nothing of
+ours had been filled"*. That covers a **first** page load and nothing else.
+After a fill, an ASP.NET postback preserves field values, so the page returns
+**carrying the extension's own data** — and a portal that submits during `load`
+sends it before a gesture-injected script can exist.
+
+`fixtures/hostile-portal/reload-submit.html` and
+`tests/e2e/guard-adversarial.spec.ts` demonstrate it: the URL the browser lands
+on carries `candidateName=Ravi+Kumar&uid=234567890123`. Those were filled
+values, submitted without approval. That is a P2 violation, not a documented
+limit, and the Phase A audit inherited the wrong reasoning and marked it
+"architecturally impossible" rather than "unclosed".
+
+**Closed by** an opt-in, per-origin `document_start` registration
+(`background/early-guard.ts`). Two Must-Achieve items in the completion plan
+pull against each other here — Phase B wants `document_start`, Phase F says no
+`<all_urls>` — and the resolution is `optional_host_permissions`: the user
+grants **one origin at a time**, in context, and can revoke it from the panel.
+Standing `host_permissions` stays empty.
+
+### An approval that could outlive its own failure
+
+`submitWithApproval` had three early returns that left `state.armed` set. The
+consequence is narrow but real: the recorded element goes missing — a postback
+re-rendering the form is the ordinary way that happens — we bail out, and the
+guard stays armed for the rest of the ninety seconds. If the element comes back
+under the same selector, a page-initiated click on it would be **permitted**.
+
+Found by writing the attack first (`submit-guard.test.ts` → "does not permit a
+page click once the missing element comes back"), watching all four new tests
+fail, then fixing. Every exit path now disarms, and abort disarms the page-side
+guard as well as revoking the worker's grant.
+
 ## The finding that most changes the picture
 
-**There is not a single React component test in the project.** `find src/ui
+*(Recorded at Phase A; the two safety-critical components below now have tests —
+`HoldToConfirm.test.tsx` and `ReviewScreen.test.tsx`. The general point stands
+for the rest of `src/ui/`.)*
+
+**There was not a single React component test in the project.** `find src/ui
 -name "*.test.tsx"` returns zero.
 
 Every model behind the UI is well covered — `runtime/review.ts` has 31 tests,

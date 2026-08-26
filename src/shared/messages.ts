@@ -36,6 +36,7 @@ import type {
   TeachSession,
 } from '@/background/teach-service';
 import type { ProfileHealth } from '@/matching/teach';
+import type { EarlyGuardState } from '@/background/early-guard';
 import type { ApprovalToken } from '@/content/submit-guard';
 
 // ---------------------------------------------------------------------------
@@ -196,6 +197,16 @@ export type TeachRequest =
   | { type: 'profile:export' }
   | { type: 'profile:import'; text: string };
 
+/**
+ * The early guard (§ Phase B). All privileged — a content script must not be
+ * able to ask for host permission on its own page.
+ */
+export type GuardRequest =
+  | { type: 'guard:status'; tabId: number }
+  | { type: 'guard:enable'; tabId: number }
+  | { type: 'guard:disable'; origin: string }
+  | { type: 'guard:origins' };
+
 export type AuditRequest =
   | { type: 'audit:read'; limit?: number }
   | { type: 'audit:configure'; logValues: boolean }
@@ -212,6 +223,7 @@ export type ExtensionRequest =
   | AuditRequest
   | LlmRequest
   | TeachRequest
+  | GuardRequest
   | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
 
@@ -266,6 +278,10 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'profile:rollback',
   'profile:export',
   'profile:import',
+  'guard:status',
+  'guard:enable',
+  'guard:disable',
+  'guard:origins',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -337,6 +353,10 @@ export interface ResponseMap {
   'profile:rollback': ProfileVersionSummary | null;
   'profile:export': string;
   'profile:import': { imported: number; rejected: string[] };
+  'guard:status': EarlyGuardState;
+  'guard:enable': EarlyGuardState;
+  'guard:disable': null;
+  'guard:origins': string[];
   ping: 'pong';
   'harvest:request': null;
   'harvest:ready': null;
