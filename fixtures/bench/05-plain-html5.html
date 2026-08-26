@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 05 — plain HTML5 with autocomplete</title></head>
+<body>
+<!--
+  The well-built case: proper <label for>, and the site declares autocomplete.
+  This one exists to show the ceiling — if the matcher cannot do well here, the
+  problem is not the portals.
+-->
+<h1>Create your account</h1>
+<form>
+  <p><label for="n">Full name</label>
+     <input id="n" name="name" autocomplete="name" data-expect="identity.full_name" /></p>
+  <p><label for="gn">Given name</label>
+     <input id="gn" name="given-name" autocomplete="given-name" data-expect="identity.given_name" /></p>
+  <p><label for="fn">Family name</label>
+     <input id="fn" name="family-name" autocomplete="family-name" data-expect="identity.surname" /></p>
+  <p><label for="e">Email</label>
+     <input id="e" name="email" type="email" autocomplete="email" data-expect="contact.email" /></p>
+  <p><label for="t">Mobile</label>
+     <input id="t" name="tel" type="tel" autocomplete="tel" data-expect="contact.mobile" /></p>
+  <p><label for="bd">Birthday</label>
+     <input id="bd" name="bday" type="date" autocomplete="bday" data-expect="identity.dob" /></p>
+  <p><label for="a1">Address line 1</label>
+     <input id="a1" name="address-line1" autocomplete="address-line1" data-expect="address.permanent.line1" /></p>
+  <p><label for="a2">Address line 2</label>
+     <input id="a2" name="address-line2" autocomplete="address-line2" data-expect="address.permanent.line2" /></p>
+  <p><label for="c">Town or city</label>
+     <input id="c" name="city" autocomplete="address-level2" data-expect="address.permanent.city" /></p>
+  <p><label for="pc">Postcode</label>
+     <input id="pc" name="postal-code" autocomplete="postal-code" maxlength="6" data-expect="address.permanent.pincode" /></p>
+  <p><label for="co">Country</label>
+     <select id="co" name="country" autocomplete="country-name" data-expect="address.permanent.country">
+       <option value="">Choose</option><option>India</option><option>Nepal</option></select></p>
+  <p><label for="pw">Password</label>
+     <input id="pw" name="password" type="password" autocomplete="new-password" /></p>
+  <button type="submit">Create account</button>
+</form>
+</body></html>

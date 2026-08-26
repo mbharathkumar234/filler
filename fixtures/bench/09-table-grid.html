@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 09 — grid layout, labels in the header row</title></head>
+<body>
+<!--
+  The hard grid case: labels live in <th> in the header row, inputs sit in the
+  body row beneath. `following::input[1]` from a header resolves to the FIRST
+  column's input, which is the Phase 3 XPath trap.
+-->
+<h3>Educational Qualifications</h3>
+<table border="1">
+  <thead>
+    <tr><th>Board / University</th><th>Institution</th><th>Roll Number</th><th>Year of Passing</th><th>Marks Obtained</th><th>Maximum Marks</th><th>Percentage</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><input name="board" data-expect="education[].board_or_university" /></td>
+      <td><input name="institution" data-expect="education[].institution" /></td>
+      <td><input name="rollno" data-expect="education[].roll_number" /></td>
+      <td><input name="yop" maxlength="4" data-expect="education[].year_of_passing" /></td>
+      <td><input name="marks" data-expect="education[].marks_obtained" /></td>
+      <td><input name="maxmarks" data-expect="education[].max_marks" /></td>
+      <td><input name="pct" data-expect="education[].percentage" /></td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Candidate</h3>
+<table border="1">
+  <tr><th>Candidate Name</th><th>Father's Name</th><th>Date of Birth</th><th>Mobile</th></tr>
+  <tr>
+    <td><input name="cand_name" data-expect="identity.full_name" /></td>
+    <td><input name="father_name" data-expect="family.father_name" /></td>
+    <td><input name="dob" data-expect="identity.dob" /></td>
+    <td><input name="mobile" maxlength="10" data-expect="contact.mobile" /></td>
+  </tr>
+</table>
+<button type="submit">Save</button>
+</body></html>

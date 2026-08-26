@@ -240,6 +240,118 @@ describe('failing closed', () => {
   });
 });
 
+describe('the outbound schema (§ Phase C)', () => {
+  it('accepts exactly the properties the contract names', () => {
+    const outcome = guardPayload(
+      [
+        {
+          ref: 'f1',
+          label: 'Candidate Name',
+          name: 'txtName',
+          type: 'text',
+          maxLength: 60,
+          nearby: 'Personal Details',
+          options: ['A', 'B'],
+          required: true,
+        },
+      ],
+      [],
+    );
+    expect(outcome.payload).not.toBeNull();
+  });
+
+  it.each([
+    ['a stray value', { value: 'Ravi Kumar' }],
+    ['document bytes', { bytes: [1, 2, 3] }],
+    ['a filename', { filename: 'aadhaar-scan.jpg' }],
+    ['a nested object', { meta: { anything: 'at all' } }],
+  ])('refuses a payload carrying %s', (_name, extra) => {
+    // `RedactedField` makes this impossible by construction — until somebody
+    // spreads a wider object through an `as`, an `any`, or a JSON round-trip.
+    const outcome = guardPayload(
+      [{ ref: 'f1', label: 'Name', ...extra } as never],
+      [],
+    );
+
+    expect(outcome.payload).toBeNull();
+    expect(outcome.refused).toMatch(/not in the contract/i);
+  });
+
+  it('refuses options that are objects rather than plain strings', () => {
+    // An array of objects is exactly where something would ride along.
+    const outcome = guardPayload(
+      [{ ref: 'f1', label: 'State', options: [{ value: 'KA', text: 'Karnataka' }] } as never],
+      [],
+    );
+    expect(outcome.payload).toBeNull();
+  });
+
+  it('names the property but never quotes its contents', () => {
+    const outcome = guardPayload(
+      [{ ref: 'f1', label: 'Name', value: '234567890123' } as never],
+      [],
+    );
+    expect(outcome.refused).toContain('value');
+    expect(outcome.refused).not.toContain('234567890123');
+  });
+});
+
+describe('THE FILENAME CANARY (§ Phase C-4)', () => {
+  /**
+   * The plan asks for the document path to be verified "by the same canary
+   * mechanism using a canary filename".
+   *
+   * Document bytes are unreachable from the LLM path by module boundary —
+   * `redaction.ts` cannot import `documents/`, proved by lint. A filename is
+   * different: it is a *string*, and strings travel. A page that shows
+   * "Currently uploaded: aadhaar-scan-ravi.jpg" beside a file input puts one
+   * into exactly the label text the plan permits sending.
+   */
+  const FILENAME = 'aadhaar-scan-ravi-kumar.jpg';
+
+  it('never lets an uploaded filename out through page text', () => {
+    document.body.innerHTML = `
+      <label for="f">Upload Aadhaar</label>
+      <input id="f" name="fileAadhaar" type="file" />
+      <p>Currently uploaded: ${FILENAME}</p>
+    `;
+
+    const redacted = redactFields(harvest(document).fields);
+    const outcome = guardPayload(redacted.fields, denyListFrom([]));
+
+    expect(outcome.payload).not.toBeNull();
+    expect(JSON.stringify(payloadFields(outcome.payload!))).not.toContain(FILENAME);
+  });
+
+  it('never lets it out through a file input’s own value attribute', () => {
+    document.body.innerHTML = `
+      <label for="f">Upload Aadhaar</label>
+      <input id="f" name="fileAadhaar" type="file" value="${FILENAME}"
+             placeholder="${FILENAME}" title="${FILENAME}" />
+    `;
+
+    const redacted = redactFields(harvest(document).fields);
+    const outcome = guardPayload(redacted.fields, denyListFrom([]));
+
+    expect(JSON.stringify(payloadFields(outcome.payload!))).not.toContain(FILENAME);
+  });
+
+  it('still says the field is a file upload, which is what the model needs', () => {
+    // The counterweight: a redaction that erased the field entirely would pass
+    // every canary check and leave the model unable to identify it.
+    document.body.innerHTML = `
+      <label for="f">Upload Aadhaar</label>
+      <input id="f" name="fileAadhaar" type="file" />
+    `;
+
+    const redacted = redactFields(harvest(document).fields);
+    const payload = JSON.stringify(redacted.fields);
+
+    expect(payload).toContain('Aadhaar');
+    expect(payload).toContain('file');
+  });
+});
+
 describe('the branded payload', () => {
   it('is the only thing the client can be handed', () => {
     // Structural, not a convention: `GuardedPayload` carries a unique symbol

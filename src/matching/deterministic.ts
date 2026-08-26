@@ -165,21 +165,79 @@ function matchOptionSet(field: FieldDescriptor): { key: FieldKey; matched: numbe
 const CORRESPONDENCE_HINT = /correspondence|communication|present|current|mailing|पत्राचार|वर्तमान/i;
 const PERMANENT_HINT = /permanent|native|स्थायी/i;
 
+export type AddressSection = 'permanent' | 'correspondence';
+
+/** The section this field's own text names, if it names one. */
+function ownSection(field: FieldDescriptor): AddressSection | undefined {
+  const context = `${field.nearbyText} ${field.labelText}`;
+  if (CORRESPONDENCE_HINT.test(context)) return 'correspondence';
+  if (PERMANENT_HINT.test(context)) return 'permanent';
+  return undefined;
+}
+
+/**
+ * Carry a section heading forward across the address block beneath it.
+ *
+ * Found by the Phase E benchmark. A Google Form gives every question its own
+ * heading, so "Current address" labelled the street field and the City, PIN and
+ * State questions after it carried no adjective at all. Matched one at a time
+ * they split: street to `address.correspondence.line1`, the rest to
+ * `address.permanent.*` — one block assembled out of two different addresses,
+ * at 0.90, which is worse than picking either one.
+ *
+ * A heading applies to what sits under it, which is how a person reads the
+ * page. So the adjective propagates forward over a *run* of address fields and
+ * stops at the first field that is not one — a following "Permanent Account
+ * Number" is not a section heading, and neither is anything else past the end
+ * of the block. Fields before any adjective keep the default.
+ *
+ * Forward only, deliberately: headings precede their fields. Inferring a
+ * section backwards from a field further down would be guessing.
+ */
+export function resolveAddressSections(
+  fields: readonly FieldDescriptor[],
+  keys: ReadonlyArray<MatchResult['key']>,
+): ReadonlyArray<AddressSection | undefined> {
+  const out: Array<AddressSection | undefined> = [];
+  let carried: AddressSection | undefined;
+
+  fields.forEach((field, index) => {
+    if (!(keys[index] ?? 'unknown').startsWith('address.')) {
+      carried = undefined; // The run ended; this heading governs nothing further.
+      out.push(undefined);
+      return;
+    }
+    const own = ownSection(field);
+    if (own !== undefined) carried = own;
+    out.push(own ?? carried);
+  });
+
+  return out;
+}
+
 /**
  * Retarget an address key onto the block it actually sits in.
  *
  * A form has "Address Line 1" twice, under two headings. The label alone cannot
  * tell them apart; the section can. Without this the second block would either
  * mis-map or land in the ambiguity cap.
+ *
+ * `section` is the resolved answer above when the caller is `matchForm`. A
+ * single-field call has no block to read, so it falls back to this field's own
+ * text — the behaviour a lone `matchField` has always had.
  */
-function applyAddressContext(key: FieldKey, field: FieldDescriptor): FieldKey {
+function applyAddressContext(
+  key: FieldKey,
+  field: FieldDescriptor,
+  section: AddressSection | undefined,
+): FieldKey {
   if (!key.startsWith('address.')) return key;
 
-  const context = `${field.nearbyText} ${field.labelText}`;
-  if (CORRESPONDENCE_HINT.test(context)) {
+  const resolved = section ?? ownSection(field);
+  if (resolved === 'correspondence') {
     return key.replace('address.permanent.', 'address.correspondence.') as FieldKey;
   }
-  if (PERMANENT_HINT.test(context)) {
+  if (resolved === 'permanent') {
     return key.replace('address.correspondence.', 'address.permanent.') as FieldKey;
   }
   return key;
@@ -374,6 +432,12 @@ function primaryIdentifier(field: FieldDescriptor): string {
 export interface MatchOptions {
   /** Keys already taken by a higher-priority match, to avoid duplicates. */
   taken?: ReadonlySet<FieldKey>;
+  /**
+   * Which address block this field sits in, resolved across the whole form by
+   * `matchForm`. Omitted by a single-field call, which then reads the field's
+   * own text instead.
+   */
+  section?: AddressSection;
 }
 
 export function matchField(field: FieldDescriptor, options: MatchOptions = {}): MatchResult {
@@ -390,7 +454,7 @@ export function matchField(field: FieldDescriptor, options: MatchOptions = {}): 
   // Group signals by key, retargeting address keys onto their section.
   const byKey = new Map<FieldKey, { score: number; reasons: string[]; count: number }>();
   for (const signal of collectSignals(field)) {
-    const key = applyAddressContext(signal.key, field);
+    const key = applyAddressContext(signal.key, field, options.section);
     const existing = byKey.get(key);
     if (existing) {
       existing.score = Math.max(existing.score, signal.score);
@@ -480,17 +544,32 @@ export function matchField(field: FieldDescriptor, options: MatchOptions = {}): 
  * before a weaker field can take it — otherwise the first "Name" on the page
  * wins `identity.full_name` even when a later field says so far more clearly.
  */
+function sectionOpt(section: AddressSection | undefined): { section?: AddressSection } {
+  // `exactOptionalPropertyTypes` — an explicit `undefined` is not the same as absent.
+  return section === undefined ? {} : { section };
+}
+
 export function matchForm(fields: readonly FieldDescriptor[]): MatchResult[] {
-  const first = fields.map((field) => ({ field, result: matchField(field) }));
+  // Two passes over the address keys: the first finds which fields are in an
+  // address block at all, the second re-matches them with the section that the
+  // block's heading implies. A field's own adjective still wins.
+  const probe = fields.map((field) => matchField(field).key);
+  const sections = resolveAddressSections(fields, probe);
+
+  const first = fields.map((field, index) => ({
+    field,
+    index,
+    result: matchField(field, { ...sectionOpt(sections[index]) }),
+  }));
 
   const order = [...first].sort((a, b) => b.result.confidence - a.result.confidence);
   const taken = new Set<FieldKey>();
   const final = new Map<string, MatchResult>();
 
-  for (const { field, result } of order) {
+  for (const { field, index, result } of order) {
     // Repeatable rows legitimately reuse a key across rows.
     if (result.key !== 'unknown' && !result.key.includes('[]') && taken.has(result.key)) {
-      const rematched = matchField(field, { taken });
+      const rematched = matchField(field, { taken, ...sectionOpt(sections[index]) });
 
       if (rematched.key !== 'unknown' && !taken.has(rematched.key)) {
         final.set(field.ref, rematched);

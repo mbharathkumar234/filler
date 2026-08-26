@@ -82,7 +82,25 @@ time. Nothing is synced.
 **`sidePanel`** — The side panel is the extension's entire user interface.
 
 **No host permissions are requested.** The extension has no standing access to
-any website.
+any website. `host_permissions` in the manifest is an empty array.
+
+**`optional_host_permissions: ["*://*/*"]`** — reviewers will ask about this, so
+the answer is here rather than buried. **Nothing is granted at install.** The
+pattern is broad because the extension supports *any* portal a user chooses, and
+Chrome requires an origin to be listed here before it can be requested at all.
+What the user actually grants is one origin at a time, from a button in the side
+panel, on a site they are already using.
+
+The reason it exists: the submit guard normally starts when the user clicks the
+extension. That is late enough to matter in exactly one case — if a portal
+reloads the page with the previously filled values still in it and submits them
+during `load`, they would go before the guard exists. Granting the origin lets
+the guard register as a `document_start` content script **for that origin only**,
+with `persistAcrossSessions: false`, and the panel lists every granted origin
+with a one-click revoke.
+
+If a reviewer would prefer the feature removed rather than the pattern narrowed,
+it can be: the extension works without it, with that one window left open.
 
 **Remote code:** none. All code is bundled. The one WebAssembly module is the
 Argon2id password-hashing implementation, embedded in the package rather than

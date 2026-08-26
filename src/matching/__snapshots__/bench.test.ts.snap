@@ -1,0 +1,107 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`coverage, reported per form > records the table 1`] = `
+[
+  {
+    "fields": 16,
+    "form": "01-aspnet-scholarship",
+    "mappable": 15,
+    "mapped": 15,
+    "mismatched": 0,
+    "percent": 100,
+    "unmapped": 0,
+  },
+  {
+    "fields": 15,
+    "form": "02-react-spa",
+    "mappable": 14,
+    "mapped": 13,
+    "mismatched": 0,
+    "percent": 92.9,
+    "unmapped": 0,
+  },
+  {
+    "fields": 14,
+    "form": "03-php-legacy",
+    "mappable": 13,
+    "mapped": 13,
+    "mismatched": 0,
+    "percent": 100,
+    "unmapped": 0,
+  },
+  {
+    "fields": 11,
+    "form": "04-google-form",
+    "mappable": 10,
+    "mapped": 10,
+    "mismatched": 0,
+    "percent": 100,
+    "unmapped": 0,
+  },
+  {
+    "fields": 11,
+    "form": "05-plain-html5",
+    "mappable": 11,
+    "mapped": 11,
+    "mismatched": 0,
+    "percent": 100,
+    "unmapped": 0,
+  },
+  {
+    "fields": 12,
+    "form": "06-bootstrap-placeholder",
+    "mappable": 11,
+    "mapped": 11,
+    "mismatched": 0,
+    "percent": 100,
+    "unmapped": 0,
+  },
+  {
+    "fields": 9,
+    "form": "07-wizard-step3",
+    "mappable": 9,
+    "mapped": 9,
+    "mismatched": 0,
+    "percent": 100,
+    "unmapped": 0,
+  },
+  {
+    "fields": 12,
+    "form": "08-bilingual-hindi",
+    "mappable": 12,
+    "mapped": 12,
+    "mismatched": 0,
+    "percent": 100,
+    "unmapped": 0,
+  },
+  {
+    "fields": 11,
+    "form": "09-table-grid",
+    "mappable": 11,
+    "mapped": 8,
+    "mismatched": 0,
+    "percent": 72.7,
+    "unmapped": 3,
+  },
+  {
+    "fields": 14,
+    "form": "10-shadow-components",
+    "mappable": 13,
+    "mapped": 13,
+    "mismatched": 0,
+    "percent": 100,
+    "unmapped": 0,
+  },
+]
+`;
+
+exports[`coverage, reported per form > records the total 1`] = `
+{
+  "fields": 125,
+  "mappable": 119,
+  "mapped": 115,
+  "mismatched": 0,
+  "percent": 96.6,
+  "unmapped": 3,
+}
+`;

@@ -383,3 +383,95 @@ describe('matchForm', () => {
     expect(results.map((r) => r.fieldRef)).toEqual(['f0', 'f1', 'f2']);
   });
 });
+
+describe('address sections carry across the block beneath the heading', () => {
+  const addr = (ref: string, labelText: string, nearbyText = ''): FieldDescriptor =>
+    field({ ref, labelText, nearbyText, selectors: [`#${ref}`] });
+
+  function keysFor(fields: FieldDescriptor[]): string[] {
+    return matchForm(fields).map((m) => m.key);
+  }
+
+  it('gives the whole run the adjective only the first field carries', () => {
+    // The Google Form shape: one heading per question, so "Current address"
+    // labels the street field and nothing else says which address it is.
+    const keys = keysFor([
+      addr('a', 'Current address'),
+      addr('b', 'City'),
+      addr('c', 'PIN code'),
+    ]);
+
+    expect(keys).toEqual([
+      'address.correspondence.line1',
+      'address.correspondence.city',
+      'address.correspondence.pincode',
+    ]);
+  });
+
+  it('never assembles one address out of two sections', () => {
+    // The regression this rule exists for. Splitting a block is worse than
+    // choosing either section, because the result is a street from one address
+    // and a PIN code from another — and it happens above the auto-fill bar.
+    const results = matchForm([
+      addr('a', 'Current address'),
+      addr('b', 'City'),
+      addr('c', 'PIN code'),
+    ]);
+
+    const sections = new Set(results.map((m) => m.key.split('.').slice(0, 2).join('.')));
+    expect([...sections]).toEqual(['address.correspondence']);
+  });
+
+  it('keeps two labelled blocks apart', () => {
+    const keys = keysFor([
+      addr('a', 'Address Line 1', 'Permanent Address'),
+      addr('b', 'City', 'Permanent Address'),
+      addr('c', 'Address Line 1', 'Correspondence Address'),
+      addr('d', 'City', 'Correspondence Address'),
+    ]);
+
+    expect(keys).toEqual([
+      'address.permanent.line1',
+      'address.permanent.city',
+      'address.correspondence.line1',
+      'address.correspondence.city',
+    ]);
+  });
+
+  it('defaults to permanent when the form names no section at all', () => {
+    const keys = keysFor([addr('a', 'Street address'), addr('b', 'City'), addr('c', 'PIN code')]);
+
+    expect(keys).toEqual([
+      'address.permanent.line1',
+      'address.permanent.city',
+      'address.permanent.pincode',
+    ]);
+  });
+
+  it('stops carrying at the end of the block', () => {
+    // "Permanent Account Number" is a PAN field, not a section heading, and the
+    // address questions after it must not inherit anything from before it.
+    const keys = keysFor([
+      addr('a', 'Correspondence address'),
+      addr('b', 'City'),
+      field({ ref: 'c', labelText: 'Permanent Account Number', selectors: ['#c'], maxLength: 10 }),
+      addr('d', 'Address Line 1'),
+      addr('e', 'PIN code'),
+    ]);
+
+    expect(keys).toEqual([
+      'address.correspondence.line1',
+      'address.correspondence.city',
+      'id.pan',
+      'address.permanent.line1',
+      'address.permanent.pincode',
+    ]);
+  });
+
+  it('reads a lone field on its own text, with no block to consult', () => {
+    // `matchField` is called directly by the teach flow, one field at a time.
+    expect(matchField(addr('a', 'Correspondence address')).key).toBe(
+      'address.correspondence.line1',
+    );
+  });
+});

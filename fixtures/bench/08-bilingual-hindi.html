@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="hi"><head><meta charset="utf-8" /><title>Bench 08 — bilingual Hindi / English</title></head>
+<body>
+<!-- A state portal in Devanagari with English in parentheses, as they do. -->
+<h2>आवेदन पत्र / Application Form</h2>
+<form>
+  <p><label for="h1">आवेदक का नाम / Applicant Name</label>
+     <input id="h1" name="txtName" data-expect="identity.full_name" /></p>
+  <p><label for="h2">पिता का नाम / Father's Name</label>
+     <input id="h2" name="txtFather" data-expect="family.father_name" /></p>
+  <p><label for="h3">माता का नाम / Mother's Name</label>
+     <input id="h3" name="txtMother" data-expect="family.mother_name" /></p>
+  <p><label for="h4">जन्म तिथि / Date of Birth</label>
+     <input id="h4" name="txtDob" type="date" data-expect="identity.dob" /></p>
+  <p><label for="h5">लिंग / Gender</label>
+     <select id="h5" name="ddlGender" data-expect="identity.gender">
+       <option value="">चुनें</option><option>पुरुष / Male</option><option>महिला / Female</option></select></p>
+  <p><label for="h6">आधार संख्या / Aadhaar Number</label>
+     <input id="h6" name="txtUid" maxlength="12" data-expect="id.aadhaar" /></p>
+  <p><label for="h7">मोबाइल नंबर / Mobile Number</label>
+     <input id="h7" name="txtMobile" maxlength="10" data-expect="contact.mobile" /></p>
+  <p><label for="h8">ई-मेल / Email</label>
+     <input id="h8" name="txtEmail" type="email" data-expect="contact.email" /></p>
+  <p><label for="h9">पता / Address</label>
+     <input id="h9" name="txtAddr" data-expect="address.permanent.line1" /></p>
+  <p><label for="h10">जिला / District</label>
+     <input id="h10" name="txtDistrict" data-expect="address.permanent.district" /></p>
+  <p><label for="h11">पिन कोड / PIN Code</label>
+     <input id="h11" name="txtPin" maxlength="6" data-expect="address.permanent.pincode" /></p>
+  <p><label for="h12">वार्षिक आय / Annual Income</label>
+     <input id="h12" name="txtIncome" data-expect="family.annual_income" /></p>
+  <button type="submit">जमा करें / Submit</button>
+</form>
+</body></html>

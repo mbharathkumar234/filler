@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 06 — Bootstrap, placeholder-only labels</title></head>
+<body>
+<!--
+  Bootstrap "floating label" markup where the visible label is CSS-positioned
+  and the real signal is the placeholder. Common, and hostile to label lookup.
+-->
+<h4>Exam Registration</h4>
+<form class="row g-3">
+  <div class="form-floating"><input class="form-control" id="f1" name="cname" placeholder="Candidate Name" data-expect="identity.full_name" /></div>
+  <div class="form-floating"><input class="form-control" id="f2" name="fname" placeholder="Father's Name" data-expect="family.father_name" /></div>
+  <div class="form-floating"><input class="form-control" id="f3" name="dob" placeholder="Date of Birth" data-expect="identity.dob" /></div>
+  <div class="form-floating"><input class="form-control" id="f4" name="mob" placeholder="Mobile Number" maxlength="10" data-expect="contact.mobile" /></div>
+  <div class="form-floating"><input class="form-control" id="f5" name="mail" placeholder="Email Address" type="email" data-expect="contact.email" /></div>
+  <div class="form-floating"><input class="form-control" id="f6" name="uid" placeholder="Aadhaar Number" maxlength="12" data-expect="id.aadhaar" /></div>
+  <div class="form-floating"><input class="form-control" id="f7" name="addr" placeholder="Address Line 1" data-expect="address.permanent.line1" /></div>
+  <div class="form-floating"><input class="form-control" id="f8" name="city" placeholder="City" data-expect="address.permanent.city" /></div>
+  <div class="form-floating"><input class="form-control" id="f9" name="pin" placeholder="PIN Code" maxlength="6" data-expect="address.permanent.pincode" /></div>
+  <div class="form-floating"><input class="form-control" id="f10" name="roll" placeholder="Roll Number" data-expect="education[].roll_number" /></div>
+  <div class="form-floating"><input class="form-control" id="f11" name="board" placeholder="Board or University" data-expect="education[].board_or_university" /></div>
+  <div class="form-floating"><input class="form-control" id="f12" name="promo" placeholder="Promo Code" data-expect="unknown" /></div>
+  <button class="btn btn-primary" type="submit">Register</button>
+</form>
+</body></html>

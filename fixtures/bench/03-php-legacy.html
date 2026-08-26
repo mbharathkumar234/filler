@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 03 — PHP legacy, bare text labels</title></head>
+<body>
+<!--
+  Classic PHP: no <label> elements anywhere. Labels are bare text nodes followed
+  by <br>. Name attributes are the only structured signal.
+-->
+<h3>Ration Card — Member Registration</h3>
+<form method="post" action="save.php">
+  Applicant Name<br><input type="text" name="applicant_name" size="40" data-expect="identity.full_name" /><br>
+  Father's Name<br><input type="text" name="father_name" size="40" data-expect="family.father_name" /><br>
+  Mother's Name<br><input type="text" name="mother_name" size="40" data-expect="family.mother_name" /><br>
+  Date of Birth<br><input type="text" name="dob" size="12" data-expect="identity.dob" /><br>
+  Sex<br>
+  <select name="gender" data-expect="identity.gender">
+    <option value="">-select-</option><option>Male</option><option>Female</option>
+  </select><br>
+  Aadhaar No<br><input type="text" name="aadhaar_no" maxlength="12" data-expect="id.aadhaar" /><br>
+  Mobile No<br><input type="text" name="mobile_no" maxlength="10" data-expect="contact.mobile" /><br>
+  Email<br><input type="text" name="email_id" data-expect="contact.email" /><br>
+  House No and Street<br><input type="text" name="address_line1" size="50" data-expect="address.permanent.line1" /><br>
+  Village / Town<br><input type="text" name="city" size="30" data-expect="address.permanent.city" /><br>
+  District<br><input type="text" name="district" size="30" data-expect="address.permanent.district" /><br>
+  Pincode<br><input type="text" name="pincode" maxlength="6" data-expect="address.permanent.pincode" /><br>
+  Annual Family Income<br><input type="text" name="annual_income" data-expect="family.annual_income" /><br>
+  Card Number (filled by office)<br><input type="text" name="card_no" data-expect="unknown" /><br>
+  <input type="submit" name="submit" value="Save Details" />
+</form>
+</body></html>

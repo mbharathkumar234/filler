@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 04 — Google-Forms style, aria-labelledby</title></head>
+<body>
+<!--
+  Google Forms: every question is a div, the input is labelled by
+  aria-labelledby pointing at the heading div. No <label>, no name attribute.
+-->
+<div role="list">
+  <div role="listitem">
+    <div id="q1title" role="heading">What is your full name?</div>
+    <input type="text" aria-labelledby="q1title" data-expect="identity.full_name" />
+  </div>
+  <div role="listitem">
+    <div id="q2title" role="heading">Email</div>
+    <input type="email" aria-labelledby="q2title" data-expect="contact.email" />
+  </div>
+  <div role="listitem">
+    <div id="q3title" role="heading">Phone number</div>
+    <input type="tel" aria-labelledby="q3title" data-expect="contact.mobile" />
+  </div>
+  <div role="listitem">
+    <div id="q4title" role="heading">Date of birth</div>
+    <input type="date" aria-labelledby="q4title" data-expect="identity.dob" />
+  </div>
+  <div role="listitem">
+    <div id="q5title" role="heading">Your father's name</div>
+    <input type="text" aria-labelledby="q5title" data-expect="family.father_name" />
+  </div>
+  <!--
+    "Current address" is the correspondence address, and the four questions
+    under it are one block — Google Forms gives each its own heading, so only
+    the first carries the adjective. `heldout-exam` reads "Present Address" the
+    same way. The block must resolve as a unit or it assembles a mixed address.
+  -->
+  <div role="listitem">
+    <div id="q6title" role="heading">Current address</div>
+    <input type="text" aria-labelledby="q6title" data-expect="address.correspondence.line1" />
+  </div>
+  <div role="listitem">
+    <div id="q7title" role="heading">City</div>
+    <input type="text" aria-labelledby="q7title" data-expect="address.correspondence.city" />
+  </div>
+  <div role="listitem">
+    <div id="q8title" role="heading">PIN code</div>
+    <input type="text" aria-labelledby="q8title" maxlength="6" data-expect="address.correspondence.pincode" />
+  </div>
+  <div role="listitem">
+    <div id="q9title" role="heading">Which state do you live in?</div>
+    <select aria-labelledby="q9title" data-expect="address.correspondence.state">
+      <option value="">Choose</option><option>Karnataka</option><option>Kerala</option><option>Tamil Nadu</option>
+    </select>
+  </div>
+  <div role="listitem">
+    <div id="q10title" role="heading">Gender</div>
+    <select aria-labelledby="q10title" data-expect="identity.gender">
+      <option value="">Choose</option><option>Male</option><option>Female</option><option>Prefer not to say</option>
+    </select>
+  </div>
+  <div role="listitem">
+    <div id="q11title" role="heading">Anything else we should know?</div>
+    <textarea aria-labelledby="q11title" data-expect="unknown"></textarea>
+  </div>
+</div>
+<button type="submit">Submit</button>
+</body></html>

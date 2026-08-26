@@ -75,6 +75,14 @@ You are also responsible for the terms of the sites you use it on.
 | `sidePanel` | The panel is the extension's entire interface. |
 
 **No `host_permissions`.** The extension has no standing access to any site.
+
+**Optional, per-site access.** You can choose, one portal at a time, to let
+AutoFill start protecting a page from the moment it loads rather than from the
+moment you click. This exists for one specific case: if a portal reloads the
+page with your values already in it and submits them automatically, the guard
+would otherwise arrive too late. Nothing is granted unless you press the button,
+it applies to that one site, and the panel lists every site you have granted
+with a way to take it back.
 **No declared content scripts** — nothing runs on a page until you ask it to.
 **No `tabs`, `webRequest`, `cookies`, `history`, or `downloads`.**
 

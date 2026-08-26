@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 01 — ASP.NET WebForms, table layout</title></head>
+<body>
+<!-- Old ASP.NET: generated ids, labels in the adjacent table cell, no <label for>. -->
+<h2>Post-Matric Scholarship — Applicant Details</h2>
+<form id="aspnetForm" method="post" action="Default.aspx">
+<input type="hidden" name="__VIEWSTATE" value="/wEPDwUKMTM0NTIzNDU2" />
+<input type="hidden" name="__EVENTVALIDATION" value="/wEWBAKk" />
+<table>
+  <tr><td>Name of the Applicant <span style="color:red">*</span></td>
+      <td><input id="ctl00_cph_txtApplicantName" name="ctl00$cph$txtApplicantName" maxlength="75" data-expect="identity.full_name" /></td></tr>
+  <tr><td>Father / Husband Name</td>
+      <td><input id="ctl00_cph_txtFatherName" name="ctl00$cph$txtFatherName" maxlength="75" data-expect="family.father_name" /></td></tr>
+  <tr><td>Mother Name</td>
+      <td><input id="ctl00_cph_txtMotherName" name="ctl00$cph$txtMotherName" maxlength="75" data-expect="family.mother_name" /></td></tr>
+  <tr><td>Date of Birth (DD/MM/YYYY)</td>
+      <td><input id="ctl00_cph_txtDOB" name="ctl00$cph$txtDOB" data-expect="identity.dob" /></td></tr>
+  <tr><td>Gender</td>
+      <td><select id="ctl00_cph_ddlGender" name="ctl00$cph$ddlGender" data-expect="identity.gender">
+        <option value="">--Select--</option><option value="M">Male</option><option value="F">Female</option></select></td></tr>
+  <tr><td>Social Category</td>
+      <td><select id="ctl00_cph_ddlCategory" name="ctl00$cph$ddlCategory" data-expect="identity.category">
+        <option value="">--Select--</option><option>General</option><option>OBC</option><option>SC</option><option>ST</option></select></td></tr>
+  <tr><td>Aadhaar Number</td>
+      <td><input id="ctl00_cph_txtAadhaar" name="ctl00$cph$txtAadhaar" maxlength="12" data-expect="id.aadhaar" /></td></tr>
+  <tr><td>Mobile No.</td>
+      <td><input id="ctl00_cph_txtMobile" name="ctl00$cph$txtMobile" maxlength="10" data-expect="contact.mobile" /></td></tr>
+  <tr><td>Email Id</td>
+      <td><input id="ctl00_cph_txtEmail" name="ctl00$cph$txtEmail" type="email" data-expect="contact.email" /></td></tr>
+  <tr><td>Permanent Address</td>
+      <td><input id="ctl00_cph_txtAddr1" name="ctl00$cph$txtAddr1" data-expect="address.permanent.line1" /></td></tr>
+  <tr><td>City / Town</td>
+      <td><input id="ctl00_cph_txtCity" name="ctl00$cph$txtCity" data-expect="address.permanent.city" /></td></tr>
+  <tr><td>District</td>
+      <td><input id="ctl00_cph_txtDistrict" name="ctl00$cph$txtDistrict" data-expect="address.permanent.district" /></td></tr>
+  <tr><td>Pin Code</td>
+      <td><input id="ctl00_cph_txtPin" name="ctl00$cph$txtPin" maxlength="6" data-expect="address.permanent.pincode" /></td></tr>
+  <tr><td>Bank Account Number</td>
+      <td><input id="ctl00_cph_txtAcct" name="ctl00$cph$txtAcct" data-expect="bank.account_number" /></td></tr>
+  <tr><td>IFSC Code</td>
+      <td><input id="ctl00_cph_txtIfsc" name="ctl00$cph$txtIfsc" maxlength="11" data-expect="bank.ifsc" /></td></tr>
+  <tr><td>Application No. (office use)</td>
+      <td><input id="ctl00_cph_txtAppNo" name="ctl00$cph$txtAppNo" data-expect="unknown" /></td></tr>
+</table>
+<button type="submit" id="ctl00_cph_btnSubmit">Submit Application</button>
+</form>
+</body></html>

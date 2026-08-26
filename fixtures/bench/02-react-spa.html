@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 02 — React SPA, aria-label only</title></head>
+<body>
+<!--
+  A React SPA: generated ids, NO name attributes at all, and labelling done
+  entirely through aria-label. Nothing here for a name-token heuristic to bite on.
+-->
+<div id="root">
+  <main>
+    <h1>Apply for a seat</h1>
+    <div class="MuiFormControl-root">
+      <input id=":r1:" aria-label="Full name of candidate" class="MuiInputBase-input" data-expect="identity.full_name" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":r2:" aria-label="Email address" type="email" class="MuiInputBase-input" data-expect="contact.email" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":r3:" aria-label="Mobile number" inputmode="numeric" maxlength="10" class="MuiInputBase-input" data-expect="contact.mobile" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":r4:" aria-label="Date of birth" type="date" class="MuiInputBase-input" data-expect="identity.dob" />
+    </div>
+    <div class="MuiFormControl-root">
+      <select id=":r5:" aria-label="Gender" data-expect="identity.gender">
+        <option value="">Select</option><option>Male</option><option>Female</option><option>Other</option>
+      </select>
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":r6:" aria-label="Father's name" class="MuiInputBase-input" data-expect="family.father_name" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":r7:" aria-label="PAN" maxlength="10" class="MuiInputBase-input" data-expect="id.pan" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":r8:" aria-label="Street address" class="MuiInputBase-input" data-expect="address.permanent.line1" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":r9:" aria-label="City" class="MuiInputBase-input" data-expect="address.permanent.city" />
+    </div>
+    <div class="MuiFormControl-root">
+      <select id=":ra:" aria-label="State" data-expect="address.permanent.state">
+        <option value="">Select</option><option>Karnataka</option><option>Maharashtra</option><option>Tamil Nadu</option>
+      </select>
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":rb:" aria-label="PIN code" maxlength="6" inputmode="numeric" class="MuiInputBase-input" data-expect="address.permanent.pincode" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":rc:" aria-label="Highest qualification institution" class="MuiInputBase-input" data-expect="education[].institution" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":rd:" aria-label="Year of passing" maxlength="4" inputmode="numeric" class="MuiInputBase-input" data-expect="education[].year_of_passing" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":re:" aria-label="Percentage" class="MuiInputBase-input" data-expect="education[].percentage" />
+    </div>
+    <div class="MuiFormControl-root">
+      <input id=":rf:" aria-label="Referral code" class="MuiInputBase-input" data-expect="unknown" />
+    </div>
+    <button type="submit" id=":rg:">Submit</button>
+  </main>
+</div>
+</body></html>

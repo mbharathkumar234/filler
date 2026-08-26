@@ -166,6 +166,18 @@ export function guardPayload(
     };
   }
 
+  // § Phase C: the schema check, at the last moment before a payload exists.
+  // Placed here rather than in `redaction.ts` so it guards *everything* that
+  // reaches the client, including anything a future caller assembles by hand.
+  const schema = checkPayloadSchema(cleaned);
+  if (!schema.ok) {
+    return {
+      payload: null,
+      removed,
+      refused: `The payload carried a property that is not in the contract ("${schema.offender}"). Nothing was sent.`,
+    };
+  }
+
   return { payload: { fields: cleaned } as unknown as GuardedPayload, removed };
 }
 
@@ -186,6 +198,65 @@ function findSurvivor(fields: readonly RedactedField[], denyList: readonly strin
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * The exact set of properties a transmitted field may carry (§ Phase C).
+ *
+ *   "Outbound payloads contain only: label text, name/id, type, options,
+ *    nearby text, maxLength, pattern. Nothing else. Schema-validate before send."
+ *
+ * `RedactedField` already makes this true by construction. This is the runtime
+ * half, and it exists because "by construction" stops being true the moment
+ * somebody spreads a wider object into a narrower type — which TypeScript
+ * permits through an `as`, an `any`, or a JSON round-trip.
+ */
+const ALLOWED_FIELD_KEYS: ReadonlySet<string> = new Set([
+  'ref',
+  'label',
+  'name',
+  'type',
+  'maxLength',
+  'pattern',
+  'nearby',
+  'options',
+  'required',
+]);
+
+export interface SchemaCheck {
+  ok: boolean;
+  /** The offending property name, never its value. */
+  offender?: string;
+}
+
+/**
+ * Does this payload carry only what the contract permits?
+ *
+ * Checked recursively, because a nested object is exactly how something would
+ * arrive unnoticed. Reports the property *name* — a message quoting the value
+ * would put the thing we refused to send into a log.
+ */
+export function checkPayloadSchema(fields: readonly RedactedField[]): SchemaCheck {
+  for (const field of fields) {
+    for (const [name, value] of Object.entries(field)) {
+      if (!ALLOWED_FIELD_KEYS.has(name)) return { ok: false, offender: name };
+
+      // Options are the only array, and it must be plain strings — an array of
+      // objects would be a place for anything at all to ride along.
+      if (name === 'options') {
+        if (!Array.isArray(value)) return { ok: false, offender: 'options' };
+        if (value.some((item) => typeof item !== 'string')) {
+          return { ok: false, offender: 'options[]' };
+        }
+        continue;
+      }
+
+      if (value !== null && typeof value === 'object') {
+        return { ok: false, offender: name };
+      }
+    }
+  }
+  return { ok: true };
 }
 
 /** Read the payload back out. The only way to reach a guarded payload's body. */

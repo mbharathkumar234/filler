@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 07 — multi-step wizard, step 3 of 5</title></head>
+<body>
+<!-- A wizard mid-flow. Bank details only; the step indicator is the context. -->
+<nav class="wizard-steps"><span>Step 3 of 5 — Bank Details</span></nav>
+<form>
+  <fieldset>
+    <legend>Account for disbursal</legend>
+    <p><label for="b1">Name as per bank records</label>
+       <input id="b1" name="txtAcctHolder" data-expect="bank.account_holder" /></p>
+    <p><label for="b2">Account Number</label>
+       <input id="b2" name="txtAcctNo" inputmode="numeric" data-expect="bank.account_number" /></p>
+    <p><label for="b3">Re-enter Account Number</label>
+       <input id="b3" name="txtAcctNo2" inputmode="numeric" data-expect="bank.account_number" /></p>
+    <p><label for="b4">IFSC</label>
+       <input id="b4" name="txtIfsc" maxlength="11" data-expect="bank.ifsc" /></p>
+    <p><label for="b5">Bank Name</label>
+       <input id="b5" name="txtBank" data-expect="bank.bank_name" /></p>
+    <p><label for="b6">Branch</label>
+       <input id="b6" name="txtBranch" data-expect="bank.branch" /></p>
+    <p><label for="b7">Account Type</label>
+       <select id="b7" name="ddlAcctType" data-expect="bank.account_type">
+         <option value="">Select</option><option>Savings</option><option>Current</option></select></p>
+  </fieldset>
+  <fieldset>
+    <legend>Confirm your identity</legend>
+    <p><label for="b8">Aadhaar linked to this account</label>
+       <input id="b8" name="txtUid" maxlength="12" data-expect="id.aadhaar" /></p>
+    <p><label for="b9">PAN</label>
+       <input id="b9" name="txtPan" maxlength="10" data-expect="id.pan" /></p>
+  </fieldset>
+  <button type="button">Back</button>
+  <button type="submit">Save &amp; Next</button>
+</form>
+</body></html>

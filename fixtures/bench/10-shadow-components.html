@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>Bench 10 — web components, open shadow roots</title></head>
+<body>
+<!--
+  A design-system portal. Each field is a custom element with an OPEN shadow
+  root; the harvester pierces those (Phase 3 "Should Achieve").
+-->
+<h2>Domicile Certificate — Application</h2>
+<form id="host"></form>
+<script>
+  const FIELDS = [
+    ['Applicant Full Name', 'txtName', 'identity.full_name', {}],
+    ['Father or Guardian Name', 'txtGuardian', 'family.guardian_name', {}],
+    ['Date of Birth', 'txtDob', 'identity.dob', { type: 'date' }],
+    ['Nationality', 'txtNationality', 'identity.nationality', {}],
+    ['Religion', 'ddlReligion', 'identity.religion', { tag: 'select', options: ['Hindu', 'Muslim', 'Christian', 'Sikh'] }],
+    ['Mobile Number', 'txtMobile', 'contact.mobile', { maxlength: '10' }],
+    ['Email Address', 'txtEmail', 'contact.email', { type: 'email' }],
+    ['Residential Address Line 1', 'txtAddr1', 'address.permanent.line1', {}],
+    ['Residential Address Line 2', 'txtAddr2', 'address.permanent.line2', {}],
+    ['Town or City', 'txtCity', 'address.permanent.city', {}],
+    ['PIN Code', 'txtPin', 'address.permanent.pincode', { maxlength: '6' }],
+    ['Voter ID Number', 'txtVoter', 'id.voter', {}],
+    ['Blood Group', 'txtBlood', 'identity.blood_group', { maxlength: '3' }],
+    ['Officer Remarks', 'txtRemarks', 'unknown', {}],
+  ];
+
+  class GovField extends HTMLElement {
+    connectedCallback() {
+      const root = this.attachShadow({ mode: 'open' });
+      const label = this.getAttribute('label') ?? '';
+      const name = this.getAttribute('field') ?? '';
+      const expect = this.getAttribute('expect') ?? '';
+      const tag = this.getAttribute('control') ?? 'input';
+
+      const wrap = document.createElement('div');
+      const lbl = document.createElement('label');
+      lbl.setAttribute('for', name);
+      lbl.textContent = label;
+
+      const control = document.createElement(tag);
+      control.id = name;
+      control.setAttribute('name', name);
+      control.setAttribute('data-expect', expect);
+      if (this.getAttribute('itype')) control.setAttribute('type', this.getAttribute('itype'));
+      if (this.getAttribute('maxlength')) control.setAttribute('maxlength', this.getAttribute('maxlength'));
+      for (const text of (this.getAttribute('options') ?? '').split('|').filter(Boolean)) {
+        const opt = document.createElement('option');
+        opt.textContent = text;
+        control.append(opt);
+      }
+
+      wrap.append(lbl, control);
+      root.append(wrap);
+    }
+  }
+  customElements.define('gov-field', GovField);
+
+  const host = document.getElementById('host');
+  for (const [label, name, expect, opts] of FIELDS) {
+    const el = document.createElement('gov-field');
+    el.setAttribute('label', label);
+    el.setAttribute('field', name);
+    el.setAttribute('expect', expect);
+    if (opts.tag) el.setAttribute('control', opts.tag);
+    if (opts.type) el.setAttribute('itype', opts.type);
+    if (opts.maxlength) el.setAttribute('maxlength', opts.maxlength);
+    if (opts.options) el.setAttribute('options', opts.options.join('|'));
+    host.append(el);
+  }
+</script>
+<button type="submit" form="host">Submit Application</button>
+</body></html>
