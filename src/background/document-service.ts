@@ -14,11 +14,16 @@ import { openVaultDb } from '@/vault/db';
 import {
   deleteMaster,
   getCachedVariant,
+  getMaster,
   getMasterByKey,
   listMasters,
   putMaster,
   putVariant,
 } from '@/vault/document-store';
+import { readAndExtract, type OcrEngine } from '@/documents/read-document';
+import { readPdfText } from '@/documents/pdf-text';
+import type { Candidate, DocumentType } from '@/documents/extract';
+import type { TextSource } from '@/documents/read-document';
 import { VaultLockedError, isUnlocked, withKey } from '@/vault/session';
 import { inspectQuality, planTargetBox } from '@/documents/geometry';
 import type { DocConstraint } from '@/shared/types';
@@ -40,6 +45,60 @@ export interface DerivedPayload {
   quality?: number;
   warnings: string[];
   fromCache: boolean;
+}
+
+/** What the panel gets back from `doc:extract`. */
+export interface DocumentExtraction {
+  documentType: DocumentType;
+  candidates: Candidate[];
+  /** Where the text came from, so the screen can say whether it is exact. */
+  source: TextSource;
+  scripts: string[];
+  notes: string[];
+  warnings: string[];
+}
+
+/**
+ * The optional OCR engine.
+ *
+ * Left null in this build. Reading a *photograph* needs a large dependency and
+ * model data; reading a PDF's text layer needs neither and is exact, so the
+ * feature is useful without one. `readAndExtract` degrades to a sentence
+ * explaining that rather than an error — see `read-document.ts`.
+ */
+let ocrEngine: OcrEngine | null = null;
+
+/** Install an engine. Called at most once, from the worker's own setup. */
+export function setOcrEngine(engine: OcrEngine | null): void {
+  ocrEngine = engine;
+}
+
+/**
+ * Read a stored document and propose values from it.
+ *
+ * The bytes are decrypted here and **never leave this function** — the panel
+ * receives extracted candidates, not the document. Nothing is written to the
+ * vault: every candidate comes back `confirmed: false`, and the user decides
+ * one at a time on the suggestion screen.
+ */
+async function extractFrom(id: string): Promise<DocumentExtraction> {
+  const document = await withKey((db, key) => getMaster(db, key, id));
+  if (!document) throw new Error('That document is no longer in your vault.');
+
+  const result = await readAndExtract(
+    document.bytes,
+    { mime: document.meta.mime },
+    { pdfText: readPdfText, ...(ocrEngine === null ? {} : { ocr: ocrEngine }) },
+  );
+
+  return {
+    documentType: result.documentType,
+    candidates: result.candidates,
+    source: result.read.source,
+    scripts: result.read.scripts,
+    notes: result.read.notes,
+    warnings: result.warnings,
+  };
 }
 
 export async function handleDocumentRequest(
@@ -80,6 +139,10 @@ export async function handleDocumentRequest(
 
       case 'doc:preflight':
         return ok(await preflight(request.key, request.constraint));
+
+      case 'doc:extract':
+        if (!isUnlocked()) throw new VaultLockedError();
+        return ok(await extractFrom(request.id));
     }
   } catch (error) {
     if (error instanceof VaultLockedError) return err(error.message, 'VAULT_LOCKED');

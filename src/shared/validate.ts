@@ -98,7 +98,8 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'vault:create': (r) => str(r.passphrase, LIMITS.passphrase),
   'vault:unlock': (r) => str(r.passphrase, LIMITS.passphrase),
   'vault:reauth': (r) => str(r.passphrase, LIMITS.passphrase),
-  'vault:set': (r) => key(r.key) && str(r.value),
+  'vault:set': (r) =>
+    key(r.key) && str(r.value) && (r.fromDocument === undefined || typeof r.fromDocument === 'boolean'),
   'vault:delete': (r) => key(r.key),
   'vault:import': (r) => str(r.text, LIMITS.bytes) && str(r.passphrase, LIMITS.passphrase),
 
@@ -114,6 +115,7 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'doc:delete': (r) => str(r.id, 200),
   'doc:derive': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,
   'doc:preflight': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,
+  'doc:extract': (r) => str(r.id, 200),
 
   'harvest:tab': (r) => num(r.tabId),
   'fill:tab': (r) => num(r.tabId),

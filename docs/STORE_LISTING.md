@@ -131,3 +131,14 @@ Productivity → Workflow & Planning
 - [ ] `npm run build` output reviewed: no source maps shipped, no `console.log`
       of user data.
 - [ ] Version bumped in `package.json`.
+
+## Reading details out of your documents
+
+The extension can read a document you have uploaded — an e-Aadhaar PDF, a
+scanned card — and suggest details to save from it. This runs entirely on the
+device: the document is decrypted in the extension's own background worker,
+read there, and never transmitted. Nothing is saved without you ticking it, and
+every suggested value is shown beside the line it came from and can be edited
+first.
+
+Where a number carries a check digit, it is verified before being offered.

@@ -24,7 +24,7 @@ import type { VaultStatus } from '@/vault/session';
 import type { ImportResult } from '@/vault/backup-format';
 import type { DocConstraint } from './types';
 import type { DocumentSummary } from '@/vault/document-store';
-import type { DerivedPayload } from '@/background/document-service';
+import type { DerivedPayload, DocumentExtraction } from '@/background/document-service';
 import type { TabHarvest } from '@/background/harvest-service';
 import type { FillReport, WriteInstruction } from '@/background/fill-service';
 import type { ReviewPayload } from '@/background/review-service';
@@ -50,7 +50,7 @@ export type VaultRequest =
   | { type: 'vault:unlock'; passphrase: string }
   | { type: 'vault:lock' }
   | { type: 'vault:list' }
-  | { type: 'vault:set'; key: FieldKey; value: string }
+  | { type: 'vault:set'; key: FieldKey; value: string; fromDocument?: boolean }
   | { type: 'vault:delete'; key: FieldKey }
   | { type: 'vault:completeness' }
   | { type: 'vault:export' }
@@ -74,7 +74,8 @@ export type DocumentRequest =
     }
   | { type: 'doc:delete'; id: string }
   | { type: 'doc:derive'; key: FieldKey; constraint: DocConstraint }
-  | { type: 'doc:preflight'; key: FieldKey; constraint: DocConstraint };
+  | { type: 'doc:preflight'; key: FieldKey; constraint: DocConstraint }
+  | { type: 'doc:extract'; id: string };
 
 export type RuntimeRequest =
   | { type: 'ping' }
@@ -246,6 +247,7 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'doc:delete',
   'doc:derive',
   'doc:preflight',
+  'doc:extract',
   'harvest:tab',
   'fill:tab',
   'fill:undo:tab',
@@ -310,6 +312,7 @@ export interface ResponseMap {
   /** A derived file, or a readable explanation of why it could not be made. */
   'doc:derive': DerivedPayload | { failed: true; reason: string; code: string };
   'doc:preflight': { ok: boolean; warnings: string[]; reason?: string };
+  'doc:extract': DocumentExtraction;
   'harvest:tab': TabHarvest;
   'fill:tab': FillReport;
   'fill:undo:tab': { restored: number };

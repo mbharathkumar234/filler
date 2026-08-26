@@ -16,7 +16,15 @@ export const DB_NAME = 'autofill-vault';
 export const DB_VERSION = 3;
 
 /** Where a stored value came from — surfaced in the review screen (Phase 7). */
-export type ProvenanceSource = 'user' | 'imported' | 'corrected';
+/**
+ * Where a stored value came from.
+ *
+ * `extracted` is kept distinct from `user` deliberately: a value read off a
+ * scanned card and confirmed by the user is not the same as one they typed,
+ * and if a misread ever does get through, this is what makes it findable
+ * afterwards rather than indistinguishable from everything else.
+ */
+export type ProvenanceSource = 'user' | 'imported' | 'corrected' | 'extracted';
 
 /** A profile row as it sits on disk: key in the clear, value sealed. */
 export interface StoredProfileRecord {

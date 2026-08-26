@@ -27,6 +27,32 @@ records *which kind of field* was filled (`id.aadhaar`), never its contents,
 unless you explicitly turn on value logging — which is off by default, and the
 switch says what it costs.
 
+## Reading details out of your documents
+
+You can ask the extension to read a document you have uploaded and suggest
+details to save from it — an Aadhaar number off an e-Aadhaar PDF, a name and
+date of birth off a scanned card.
+
+All of this happens on your device. The document is decrypted inside the
+extension's own background worker, read there, and the text is discarded when
+the reading finishes. **The document's contents are never sent anywhere**, and
+they are never given to the optional AI helper — the boundary that keeps your
+saved values away from that helper covers document text in exactly the same
+way, and the same tests enforce it.
+
+Two things about this are worth stating plainly:
+
+- **Nothing is saved without you.** The extension shows you what it read, next
+  to the line of the document it read it from, and saves only what you tick.
+  Every value is editable before you save it.
+- **A value read from a document is recorded as such.** It is stored with a
+  note saying it came from a scan rather than from your typing, so if a
+  misreading ever does get through, it can be found afterwards.
+
+Where a number carries a check digit — Aadhaar does — the extension verifies it
+and tells you whether it passed. A number that fails is not offered for saving
+at all; you are told it was probably misread.
+
 ## What leaves your device
 
 **One thing, and only if you turn it on.** If you supply an Anthropic API key,

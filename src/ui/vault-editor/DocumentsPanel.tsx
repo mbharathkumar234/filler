@@ -16,6 +16,7 @@ import type { FieldKey } from '@/matching/taxonomy';
 import type { DocumentSummary } from '@/vault/document-store';
 import { describeConstraint, parseConstraint } from '@/documents/constraints';
 import { assessMaster, roleFor } from '@/documents/intake';
+import { ExtractedDetails } from './ExtractedDetails';
 import { errorMessage, isLockedError, send } from '@/ui/lib/client';
 import { DOCUMENT_KEYS, labelFor } from '@/ui/lib/field-groups';
 
@@ -42,6 +43,9 @@ export function DocumentsPanel({ onLocked }: Props) {
   const [busyKey, setBusyKey] = useState<FieldKey | null>(null);
   const [constraintText, setConstraintText] = useState(SAMPLE_CONSTRAINT);
   const [previews, setPreviews] = useState<Map<FieldKey, Preview | { failed: string }>>(new Map());
+  /** Which stored document, if any, is currently being read for details. */
+  const [reading, setReading] = useState<{ id: string; label: string } | null>(null);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
 
   // Revoke object URLs on unmount so previews do not leak memory.
   const urls = useRef<string[]>([]);
@@ -185,6 +189,22 @@ export function DocumentsPanel({ onLocked }: Props) {
         </p>
       )}
 
+      {savedNotice !== null && (
+        <p
+          role="status"
+          className="mt-2 rounded border border-emerald-300 bg-emerald-50 p-2 text-xs text-emerald-900"
+        >
+          {savedNotice}{' '}
+          <button
+            type="button"
+            onClick={() => setSavedNotice(null)}
+            className="underline"
+          >
+            Dismiss
+          </button>
+        </p>
+      )}
+
       <ul className="mt-3 space-y-3">
         {DOCUMENT_KEYS.map((key) => {
           const master = byKey.get(key);
@@ -236,6 +256,17 @@ export function DocumentsPanel({ onLocked }: Props) {
                     </button>
                     <button
                       type="button"
+                      onClick={() =>
+                        setReading((was) =>
+                          was?.id === master.id ? null : { id: master.id, label: labelFor(key) },
+                        )
+                      }
+                      className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50"
+                    >
+                      Read details from this
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => void remove(master.id)}
                       className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
                     >
@@ -244,6 +275,23 @@ export function DocumentsPanel({ onLocked }: Props) {
                   </>
                 )}
               </div>
+
+              {reading?.id === master?.id && reading !== null && (
+                <ExtractedDetails
+                  documentId={reading.id}
+                  documentLabel={reading.label}
+                  onLocked={onLocked}
+                  onClose={() => setReading(null)}
+                  onSaved={(count) => {
+                    setReading(null);
+                    setSavedNotice(
+                      count === 0
+                        ? 'Nothing was saved.'
+                        : `Saved ${count} detail${count === 1 ? '' : 's'} to your vault.`,
+                    );
+                  }}
+                />
+              )}
 
               {findings.length > 0 && (
                 <ul className="mt-1.5 space-y-1">

@@ -48,7 +48,10 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
   'vault:create': { payload: { passphrase: 'a long enough passphrase' } },
   'vault:unlock': { payload: { passphrase: 'a long enough passphrase' } },
   'vault:reauth': { payload: { passphrase: 'a long enough passphrase' } },
-  'vault:set': { payload: { key: 'identity.full_name', value: 'Ravi Kumar' } },
+  'vault:set': {
+    payload: { key: 'identity.full_name', value: 'Ravi Kumar', fromDocument: true },
+    optional: ['fromDocument'],
+  },
   'vault:delete': { payload: { key: 'identity.full_name' } },
   'vault:import': { payload: { text: '{}', passphrase: 'pass' } },
 
@@ -64,6 +67,7 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
   },
   'doc:delete': { payload: { id: 'doc-1' } },
   'doc:derive': { payload: { key: 'doc.photo', constraint: {} } },
+  'doc:extract': { payload: { id: 'doc-1' } },
   'doc:preflight': { payload: { key: 'doc.photo', constraint: {} } },
 
   'harvest:tab': { payload: { tabId: 7 } },

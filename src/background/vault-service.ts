@@ -81,7 +81,12 @@ export async function handleVaultRequest(
         return ok(await withKey((db, key) => getAllFields(db, key)));
 
       case 'vault:set':
-        await withKey((db, key) => setField(db, key, request.key, request.value, 'user'));
+        // A value read off a scanned card is recorded as `extracted`, not as
+        // something the user typed. If a misread ever does get past the
+        // suggestion screen, this is what makes it findable afterwards.
+        await withKey((db, key) =>
+          setField(db, key, request.key, request.value, request.fromDocument === true ? 'extracted' : 'user'),
+        );
         return ok(null);
 
       case 'vault:delete':
