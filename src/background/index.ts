@@ -65,7 +65,8 @@ import {
   syncFor,
   unregisterAll,
 } from './early-guard';
-import { clearTab, pruneRuns } from '@/runtime/persistence';
+import { clearRun, clearTab, loadRun, pruneRuns, saveRun } from '@/runtime/persistence';
+import type { RunState } from '@/shared/types';
 import { lockVault } from '@/vault/session';
 
 /**
@@ -214,6 +215,51 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
         : { ok: true, data: { tabId } };
     case 'run:state':
       // The panel subscribes to these; the worker only relays.
+      return { ok: true, data: null };
+
+    /*
+     * Run persistence, on behalf of a content script.
+     *
+     * `chrome.storage.session` is trusted-context only. A content script asking
+     * for it directly gets "Access to storage is not allowed from this
+     * context", which is what stopped every scan on a real page. The worker is
+     * a trusted context, so it does the storing.
+     *
+     * `tabId` comes from `sender`, never from the message. A content script
+     * therefore cannot read or overwrite another tab's run by asking nicely.
+     */
+    case 'run:save':
+      if (tabId === null) return { ok: false, error: 'Not in a tab.' };
+      await saveRun(tabId, request.fingerprint, request.state as RunState, Date.now());
+      return { ok: true, data: null };
+
+    case 'run:load': {
+      if (tabId === null) return { ok: false, error: 'Not in a tab.' };
+      const record = await loadRun(tabId, request.fingerprint, Date.now());
+      if (record === null) return { ok: true, data: null };
+
+      /*
+       * Strip the approval token.
+       *
+       * A persisted `ARMED` state carries a live token, and this reply goes to
+       * a content script — which runs inside whatever page the user is on. The
+       * content script has no use for it either: the token reaches the guard
+       * through `fill:submit` from the panel, never from storage. Handing it
+       * back here would turn a convenience into a P2 bypass.
+       */
+      return {
+        ok: true,
+        data: {
+          ...record,
+          state:
+            record.state.t === 'ARMED' ? { ...record.state, approvalToken: '' } : record.state,
+        },
+      };
+    }
+
+    case 'run:clear':
+      if (tabId === null) return { ok: false, error: 'Not in a tab.' };
+      await clearRun(tabId, request.fingerprint);
       return { ok: true, data: null };
     case 'review:build':
       return buildReviewForTab(request.tabId);

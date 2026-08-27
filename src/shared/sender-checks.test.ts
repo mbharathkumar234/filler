@@ -215,6 +215,9 @@ describe('the privileged list is complete, or the build fails', () => {
     'run:state': 'reports state the worker already knows',
     'run:continue': 'the user pressed continue',
     'run:abort': 'the user aborted; failing closed is the safe direction',
+    'run:save': 'writes the run state the content script is already driving; the worker owns the storage',
+    'run:load': 'returns this tab’s own run state with the approval token stripped',
+    'run:clear': 'discards this tab’s run state',
     'review:collect': 'reads back what is on the page, which the page has',
     'guard:origins': 'lists origins the user granted; no user data',
   };

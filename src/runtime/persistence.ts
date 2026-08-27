@@ -14,7 +14,12 @@
  *    for a half-finished application form. A run resumed a week later would be
  *    filling a page that no longer exists.
  *  - It is not readable by the page. `storage.session` defaults to a trusted
- *    access level, so a content script can reach it but a portal cannot.
+ *    access level — the worker and extension pages, and **not** content
+ *    scripts, which is stricter than this comment used to claim. A content
+ *    script reaching for it gets "Access to storage is not allowed from this
+ *    context", and that wrong sentence is why one did, and why every scan on a
+ *    real page failed. Content scripts go through `run:save`/`run:load`
+ *    instead, and the worker strips the approval token on the way back.
  *
  * What is stored is the plan — keys, selectors, confidences — and never a
  * value. A stolen `storage.session` yields a list of which *kinds* of thing

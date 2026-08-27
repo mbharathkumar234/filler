@@ -18,7 +18,7 @@
 
 import type { FillPlan, ReviewDiff, RunState } from '@/shared/types';
 import { mayWritePage } from '@/runtime/machine';
-import { RunStore } from '@/runtime/store';
+import { RunStore, type RunPersistence } from '@/runtime/store';
 import { blockerCleared, detectBlockers, primaryBlocker, type BlockerFinding } from './blockers';
 import { readValue, reverify, type PlannedRef } from './reverify';
 import { watchPage, type WatchHandle } from './watcher';
@@ -46,6 +46,15 @@ export interface ControllerPorts {
   onResume?(): void;
   /** Was this document freshly loaded, rather than re-injected into? */
   reloaded?: boolean;
+  /**
+   * Where the run is written down.
+   *
+   * Supplied by the caller because a content script cannot reach
+   * `chrome.storage.session` — it is trusted-context only — and must ask the
+   * worker instead. Tests and the worker pass nothing and get the direct
+   * implementation.
+   */
+  persistence?: RunPersistence;
 }
 
 export class RunController {
@@ -86,7 +95,12 @@ export class RunController {
     if (this.#store?.formFingerprint === formFingerprint) return this.#store.state;
 
     this.#watcher?.stop();
-    this.#store = new RunStore(this.ports.tabId, formFingerprint);
+    this.#store = new RunStore(
+      this.ports.tabId,
+      formFingerprint,
+      undefined,
+      this.ports.persistence,
+    );
     this.#store.subscribe((state) => this.ports.onState?.(state));
 
     const restored = await this.#store.hydrate();

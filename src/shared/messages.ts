@@ -18,6 +18,7 @@
 
 import type { FieldKey } from '@/matching/taxonomy';
 import type { RunState } from './types';
+import type { PersistedRun } from '@/runtime/persistence';
 import type { ProfileEntry } from '@/vault/profile-store';
 import type { Completeness } from '@/vault/profile-store';
 import type { VaultStatus } from '@/vault/session';
@@ -86,7 +87,17 @@ export type RuntimeRequest =
   | { type: 'run:state'; state: RunState }
   /** The user pressed "I have completed this" — in the panel or the overlay. */
   | { type: 'run:continue' }
-  | { type: 'run:abort'; why: string };
+  | { type: 'run:abort'; why: string }
+  /**
+   * Run persistence, on behalf of a content script.
+   *
+   * `chrome.storage.session` is trusted-context only, so a content script
+   * cannot reach it. These three let it ask the worker, which can — and which
+   * strips the approval token before handing state back to an untrusted caller.
+   */
+  | { type: 'run:save'; fingerprint: string; state: unknown }
+  | { type: 'run:load'; fingerprint: string }
+  | { type: 'run:clear'; fingerprint: string };
 
 /** Panel-initiated harvest of the active tab. Privileged. */
 export type HarvestRequest = { type: 'harvest:tab'; tabId: number };
@@ -365,6 +376,9 @@ export interface ResponseMap {
   'harvest:ready': null;
   'run:hello': { tabId: number };
   'run:state': null;
+  'run:save': null;
+  'run:load': PersistedRun | null;
+  'run:clear': null;
   'run:continue': null;
   'run:abort': null;
 }

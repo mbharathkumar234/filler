@@ -185,6 +185,10 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
 
   'run:state': (r) => typeof r.state === 'object' && r.state !== null,
   'run:abort': (r) => str(r.why, 500),
+  'run:save': (r) =>
+    str(r.fingerprint, 200) && typeof r.state === 'object' && r.state !== null,
+  'run:load': (r) => str(r.fingerprint, 200),
+  'run:clear': (r) => str(r.fingerprint, 200),
 };
 
 /** Message types that legitimately carry nothing but a `type`. */

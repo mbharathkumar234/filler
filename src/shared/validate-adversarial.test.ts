@@ -135,6 +135,9 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
 
   'run:state': { payload: { state: { t: 'IDLE' } } },
   'run:abort': { payload: { why: 'user closed the panel' } },
+  'run:save': { payload: { fingerprint: 'fp-abc', state: { t: 'IDLE' } } },
+  'run:load': { payload: { fingerprint: 'fp-abc' } },
+  'run:clear': { payload: { fingerprint: 'fp-abc' } },
 };
 
 const TYPED = Object.entries(VALID);

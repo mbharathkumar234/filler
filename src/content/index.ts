@@ -34,6 +34,8 @@ import { applyEdit, collectValues, focusField } from './review-bridge';
 import { startPicker, type PickerHandle } from './picker';
 import { isFreshDocument } from './watcher';
 import { RunController } from './run-controller';
+import type { RunPersistence } from '@/runtime/store';
+import type { PersistedRun } from '@/runtime/persistence';
 import {
   installSubmitGuard,
   setToastHandler,
@@ -214,6 +216,52 @@ async function whoAmI(): Promise<number | null> {
   return tabId;
 }
 
+/**
+ * Run persistence, done by the worker on our behalf.
+ *
+ * A content script cannot touch `chrome.storage.session` — it is trusted-context
+ * only, and reaching for it throws "Access to storage is not allowed from this
+ * context", which is what made every scan on a real page fail. The worker is a
+ * trusted context, so it stores; it also knows which tab we are, so no tab id
+ * crosses the bus.
+ *
+ * `load` comes back with the approval token stripped. That is deliberate and
+ * costs nothing: the token reaches the guard through `fill:submit` from the
+ * panel, never from storage.
+ */
+const workerPersistence: RunPersistence = {
+  async save(_tabId: number, fingerprint: string, state: RunState): Promise<void> {
+    await chrome.runtime
+      .sendMessage(envelope({ type: 'run:save', fingerprint, state }))
+      .catch(() => {
+        // The worker may be restarting. Losing one write is survivable; the
+        // next transition rewrites the whole state.
+      });
+  },
+
+  async load(_tabId: number, fingerprint: string): Promise<PersistedRun | null> {
+    try {
+      // The worker returns the whole record, already version-checked and keyed
+      // to its own `sender.tab.id`. Taking it wholesale is not laziness: it is
+      // what keeps `persistence.ts` — and therefore `chrome.storage.session` —
+      // out of this bundle entirely. `content-storage.test.ts` asserts that.
+      const response = (await chrome.runtime.sendMessage(
+        envelope({ type: 'run:load', fingerprint }),
+      )) as Result<PersistedRun | null> | undefined;
+
+      return response?.ok ? response.data : null;
+    } catch {
+      return null;
+    }
+  },
+
+  async clear(_tabId: number, fingerprint: string): Promise<void> {
+    await chrome.runtime
+      .sendMessage(envelope({ type: 'run:clear', fingerprint }))
+      .catch(() => {});
+  },
+};
+
 async function adoptRun(fingerprint: string): Promise<void> {
   const id = await whoAmI();
   if (id === null) return;
@@ -224,6 +272,7 @@ async function adoptRun(fingerprint: string): Promise<void> {
     reloaded: documentWasReloaded,
     resolve: elementFor,
     requestRefill,
+    persistence: workerPersistence,
     onState: (state) => {
       void chrome.runtime.sendMessage(envelope({ type: 'run:state', state })).catch(() => {
         // The panel may be closed. The state is persisted regardless.
