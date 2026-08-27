@@ -522,3 +522,62 @@ ordering, and the optional-permission prompt flow.
 Deliberately not shimmed. A compatibility layer would compile and would be
 untestable here, and an extension that has never been loaded into the browser
 it claims to support is not ported. The gap is honest; a shim would not be.
+
+---
+
+# A bug that shipped, and what it says about the tests
+
+Found by running the extension, not by any test: **creating a vault failed with
+`window is not defined`.**
+
+`vault/crypto.ts` used `await import('hash-wasm')` to keep Argon2id out of code
+paths that never open a vault. Vite compiles every dynamic import into a
+`__vitePreload` wrapper which injects `<link rel="modulepreload">` into
+`document.head` and reports failures through `window.dispatchEvent`. A service
+worker has neither global.
+
+The masking was the worse half. The wrapper ends with
+`baseModule().catch(handlePreloadError)`, so *every* dynamic-import failure —
+whatever the real cause — was rewritten into that one sentence before it reached
+the user.
+
+**Not a regression.** The same dynamic import is in the previous commit's build,
+byte for byte. Vault creation with Argon2id had never worked in a real browser.
+
+## Why 1,847 tests missed it
+
+Every layer of the suite ran the code somewhere it could not fail:
+
+- Unit tests run in **Node and jsdom** — dynamic import works, both globals exist.
+- The Playwright suite drives a **harness page**, which is a page: it has a
+  `window` and a `document`.
+- The bundle-boundary tests only ever examined **`dist/content.js`**. There was
+  no test anywhere that looked at the service worker bundle *as a worker*.
+
+The gap was not subtle in hindsight. The one execution context with the most
+restrictions was the only one nothing tested.
+
+## The fix
+
+| Change | Effect |
+|--------|--------|
+| `import { argon2id } from 'hash-wasm'` in `crypto.ts` | The vault path no longer goes through the wrapper at all |
+| `build.modulePreload: false` | Empties every dependency array, so the `document.head` branch is dead code everywhere |
+
+`worker-bundle.test.ts` now asserts both, and was verified against the original
+bug: restoring the dynamic import and removing the config turns three tests red.
+The content-script boundary is unchanged — `content.js` still carries no
+`hash-wasm`, no `argon2`, and no `__vitePreload`.
+
+## What is still open
+
+`documents/` imports pdf.js and pdf-lib dynamically, and that stays. Bundling
+them statically drags ~1.6 MB **and two hundred real `document.` references**
+into the worker, which is a worse problem than the one it solves. With empty
+dependency arrays those imports no longer touch the DOM — but if one of them
+fails, the wrapper still masks the reason.
+
+The proper fix is an **offscreen document** for PDF work, which is the MV3
+answer for DOM-dependent processing and is a piece of work in its own right.
+Until then, PDF rasterisation and PDF text extraction in the worker are the
+untested-in-a-real-worker paths, and should be treated as such.

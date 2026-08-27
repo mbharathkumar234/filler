@@ -32,6 +32,8 @@ export const KDF_ITERATIONS = 600_000;
  * laptop expensive to attack rather than merely slow. That is the threat model's
  * first adversary, so it is the one the KDF is chosen for.
  */
+import { argon2id } from 'hash-wasm';
+
 export const ARGON2_MEMORY_KIB = 65_536;
 export const ARGON2_ITERATIONS = 3;
 export const ARGON2_PARALLELISM = 1;
@@ -149,9 +151,21 @@ export async function deriveKey(passphrase: string, params: KdfParams): Promise<
 /**
  * Argon2id, via WASM.
  *
- * `hash-wasm` is imported dynamically so its module is only fetched when a
- * vault is actually opened — it is dead weight in every other code path, and
- * the content script must never carry it.
+ * Imported **statically**, which reverses an earlier decision worth explaining
+ * because the reasoning behind it was sound and the conclusion was still wrong.
+ *
+ * It used to be `await import('hash-wasm')`, so the module was only fetched
+ * when a vault was actually opened. That is right in a page and wrong here:
+ * this runs in an MV3 service worker, and Vite compiles every dynamic import
+ * into a `__vitePreload` wrapper that reaches for `document.head` and
+ * `window.dispatchEvent`. Neither global exists in a worker, so creating a
+ * vault failed — and the wrapper's own error handler rewrote the real cause
+ * into `window is not defined`, which is what the user saw and what made it
+ * hard to find.
+ *
+ * The original concern — that the content script must never carry this — still
+ * holds and is unaffected: `content/` is a separate entry point and does not
+ * import `vault/`. `worker-bundle.test.ts` asserts both halves.
  *
  * The raw 32 bytes are imported as a non-extractable `CryptoKey` and the
  * intermediate array is zeroed. That zeroing is best-effort and worth naming as
@@ -159,8 +173,6 @@ export async function deriveKey(passphrase: string, params: KdfParams): Promise<
  * buffer already. It closes the obvious window, not every window.
  */
 async function deriveArgon2Key(passphrase: string, params: Argon2Params): Promise<CryptoKey> {
-  const { argon2id } = await import('hash-wasm');
-
   const raw = (await argon2id({
     password: passphrase,
     salt: params.salt,

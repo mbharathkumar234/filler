@@ -36,6 +36,28 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
+    /*
+     * No module-preload helper.
+     *
+     * Vite wraps every dynamic `import()` in `__vitePreload`, which injects
+     * `<link rel="modulepreload">` tags into `document.head` and reports
+     * failures with `window.dispatchEvent`. Both are meaningless in an
+     * extension — there is no document to preload into — and in the **service
+     * worker** neither global exists at all.
+     *
+     * The result was a real, shipped bug: `crypto.ts` dynamically imports
+     * `hash-wasm` for Argon2id, so creating a vault ran the helper, and any
+     * failure inside it surfaced to the user as `window is not defined`. Worse
+     * than the crash was the masking — `baseModule().catch(handlePreloadError)`
+     * rewrites *every* dynamic-import error into that same sentence, so the
+     * actual cause never reached anyone.
+     *
+     * Turning the helper off leaves bare `import()`, which is what a service
+     * worker can actually run, and lets real errors say what they are.
+     * `worker-bundle.test.ts` asserts the worker bundle stays free of both
+     * globals.
+     */
+    modulePreload: false,
     // No remote code, no eval — Phase 10 hardening depends on this staying true.
     minify: false,
     sourcemap: true,
