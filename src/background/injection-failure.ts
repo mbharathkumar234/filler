@@ -90,6 +90,41 @@ function isPermissionRefusal(detail: string): boolean {
   return /cannot access|host permission|cannot be scripted|not allowed/i.test(detail);
 }
 
+/**
+ * A refusal on a site we cannot name.
+ *
+ * The remedy is deliberately specific. "Grant permission" is not actionable
+ * from here, and "reload the page" is actively wrong — reloading does nothing
+ * for a lapsed `activeTab` grant. Clicking the extension's icon is what grants
+ * it, and it is one click.
+ */
+function notAllowedUnknownSite(): InjectionFailure {
+  return {
+    problem: 'no-permission',
+    message: 'Not allowed to read this page yet.',
+    remedy:
+      'Click the extension’s icon in the toolbar while this page is open, then press Scan again. Chrome grants access when you open the extension on a page, and takes it back as soon as you navigate.',
+    grantable: false,
+  };
+}
+
+/**
+ * The permission pattern for a page's origin, or null if it has none to grant.
+ *
+ * Shared with the panel, which offers "always allow this site" *after* a scan
+ * succeeds — that is the first moment the URL is known, because the content
+ * script reports its own location and Chrome does not.
+ */
+export function originPatternOf(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null;
+    return `${parsed.protocol}//${parsed.hostname}/*`;
+  } catch {
+    return null;
+  }
+}
+
 export function explainInjectionFailure(url: string, error: unknown): InjectionFailure {
   const detail = error instanceof Error ? error.message : String(error ?? 'unknown error');
 
@@ -101,6 +136,20 @@ export function explainInjectionFailure(url: string, error: unknown): InjectionF
   }
 
   if (parsed === null) {
+    /*
+     * No URL is the normal case here, not an edge case.
+     *
+     * `chrome.tabs.get()` withholds `url` unless the extension holds `tabs` or
+     * host access, and this one deliberately holds neither — so at the exact
+     * moment a scan is refused for want of permission, we also cannot see
+     * which site refused it.
+     *
+     * A refusal is still a refusal without a URL attached. What we lose is the
+     * ability to *name* the site and offer to grant it; what still works, and
+     * needs no URL, is clicking the toolbar icon.
+     */
+    if (isPermissionRefusal(detail)) return notAllowedUnknownSite();
+
     return {
       problem: 'unknown',
       message: `This page could not be read: ${detail}`,

@@ -131,6 +131,43 @@ describe('the special cases Chrome handles differently', () => {
   });
 });
 
+describe('when Chrome will not even tell us the URL', () => {
+  /**
+   * The case that broke this in practice, and the one most easily missed.
+   *
+   * `chrome.tabs.get()` returns a tab with **no `url`** unless the extension
+   * holds `tabs` or host access — and this extension deliberately holds
+   * neither. So at the exact moment a scan fails for want of permission, we
+   * also cannot see which site it failed on.
+   *
+   * The first version treated an unknown URL as "no idea what happened" and
+   * suggested reloading the page, which does nothing at all for a lapsed
+   * `activeTab` grant. A refusal is still a refusal without a URL attached,
+   * and the remedy that works — clicking the toolbar icon — does not need one.
+   */
+  it('still recognises a permission refusal', () => {
+    const failure = explainInjectionFailure('', NO_ACCESS);
+    expect(failure.problem).toBe('no-permission');
+  });
+
+  it('gives the remedy that actually works, not a reload', () => {
+    const failure = explainInjectionFailure('', NO_ACCESS);
+    expect(failure.remedy).toMatch(/icon/i);
+    expect(failure.remedy).not.toMatch(/reload/i);
+  });
+
+  it('offers no origin, because it genuinely does not know one', () => {
+    const failure = explainInjectionFailure('', NO_ACCESS);
+    expect(failure.grantable).toBe(false);
+    expect(failure.origin).toBeUndefined();
+  });
+
+  it('does not claim a permission problem for an unrelated error', () => {
+    const failure = explainInjectionFailure('', new Error('The tab was closed.'));
+    expect(failure.problem).toBe('unknown');
+  });
+});
+
 describe('when it genuinely does not know', () => {
   it('reports the underlying error rather than inventing a reason', () => {
     const odd = new Error('The tab was closed.');
@@ -140,10 +177,17 @@ describe('when it genuinely does not know', () => {
     expect(failure.message).toContain('The tab was closed.');
   });
 
-  it('survives a url it cannot parse', () => {
-    const failure = explainInjectionFailure('not a url at all', NO_ACCESS);
-    expect(failure.problem).toBe('unknown');
-    expect(failure.grantable).toBe(false);
+  it('treats an unparseable url like a missing one', () => {
+    // Written the other way round at first, before it was clear that a URL we
+    // cannot read is the *ordinary* case rather than a malformed input. What
+    // decides the answer is the error: a refusal is a refusal, and the site
+    // being unnameable only costs us the ability to offer a grant.
+    const refused = explainInjectionFailure('not a url at all', NO_ACCESS);
+    expect(refused.problem).toBe('no-permission');
+    expect(refused.grantable).toBe(false);
+
+    const other = explainInjectionFailure('not a url at all', new Error('The tab was closed.'));
+    expect(other.problem).toBe('unknown');
   });
 
   it('survives an empty url, which is what a just-opened tab reports', () => {

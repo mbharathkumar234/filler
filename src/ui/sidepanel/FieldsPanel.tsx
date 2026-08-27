@@ -14,6 +14,7 @@ import type { FillReport } from '@/background/fill-service';
 import type { FieldDescriptor, MatchResult } from '@/shared/types';
 import { bandOf, type MatchBand } from '@/matching';
 import { RequestFailed, errorMessage, send } from '@/ui/lib/client';
+import { originPatternOf } from '@/background/injection-failure';
 import { TeachPanel } from '@/ui/review/TeachPanel';
 import { EarlyGuardPanel } from '@/ui/review/EarlyGuardPanel';
 
@@ -45,6 +46,8 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
    * the whole problem with the old wording.
    */
   const [needsHost, setNeedsHost] = useState<string | null>(null);
+  /** Origin we could be granted permanently, offered after a successful scan. */
+  const [offerAlways, setOfferAlways] = useState<string | null>(null);
 
   const scan = useCallback(async () => {
     setBusy(true);
@@ -56,8 +59,25 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
         setError('No active tab.');
         return;
       }
-      setHarvest(await send({ type: 'harvest:tab', tabId: tab.id }));
+      const result = await send({ type: 'harvest:tab', tabId: tab.id });
+      setHarvest(result);
       setFill(null);
+
+      /*
+       * Now — and only now — we know which site this is.
+       *
+       * Chrome withholds `tab.url` without permission, so the first moment the
+       * origin is knowable is after a scan has already succeeded, from the
+       * content script's own report. Offering the permanent grant here is what
+       * stops the user clicking the toolbar icon after every navigation.
+       */
+      const pattern = originPatternOf(result.url);
+      if (pattern !== null) {
+        const held = await chrome.permissions
+          .contains({ origins: [pattern] })
+          .catch(() => true);
+        setOfferAlways(held ? null : pattern);
+      }
     } catch (err) {
       setError(errorMessage(err));
       if (err instanceof RequestFailed && err.code === 'NEEDS_HOST_PERMISSION' && err.detail) {
@@ -74,20 +94,20 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
    * `chrome.permissions.request` needs a user gesture, which is why it runs
    * straight off the click rather than anywhere tidier.
    */
-  const allowSite = useCallback(async () => {
-    if (needsHost === null) return;
+  const allowSite = useCallback(async (pattern: string) => {
     try {
-      const granted = await chrome.permissions.request({ origins: [needsHost] });
+      const granted = await chrome.permissions.request({ origins: [pattern] });
       if (!granted) {
         setError('Access was not granted, so this page still cannot be read.');
         return;
       }
       setNeedsHost(null);
+      setOfferAlways(null);
       await scan();
     } catch (err) {
       setError(errorMessage(err));
     }
-  }, [needsHost, scan]);
+  }, [scan]);
 
   const runFill = useCallback(async () => {
     setBusy(true);
@@ -152,11 +172,36 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
       {needsHost !== null && (
         <button
           type="button"
-          onClick={() => void allowSite()}
+          onClick={() => void allowSite(needsHost)}
           className="mt-2 w-full rounded bg-blue-700 px-3 py-2 text-xs font-medium text-white"
         >
           Allow this site, then scan again
         </button>
+      )}
+
+      {offerAlways !== null && (
+        <div className="mt-2 rounded border border-slate-300 bg-slate-50 p-2">
+          <p className="text-[11px] text-slate-700">
+            Chrome only lets this extension read a page until you navigate away. Allow this site
+            once and it will keep working here without clicking the toolbar icon each time.
+          </p>
+          <div className="mt-1.5 flex gap-2">
+            <button
+              type="button"
+              onClick={() => void allowSite(offerAlways)}
+              className="rounded bg-blue-700 px-2 py-1 text-[11px] font-medium text-white"
+            >
+              Always allow this site
+            </button>
+            <button
+              type="button"
+              onClick={() => setOfferAlways(null)}
+              className="text-[11px] text-slate-500 underline"
+            >
+              Not now
+            </button>
+          </div>
+        </div>
       )}
 
       {harvest && harvest.matches.some((m) => bandOf(m) !== 'unmapped') && (
