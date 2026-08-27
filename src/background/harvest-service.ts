@@ -11,6 +11,7 @@ import type { Result } from '@/shared/messages';
 import { envelope } from '@/shared/messages';
 import type { HarvestReport } from '@/content/index';
 import type { MatchResult } from '@/shared/types';
+import { explainInjectionFailure } from './injection-failure';
 import { bundledProfiles, locateBySelector } from '@/matching/profile-cache';
 import { profileHealth, type ProfileHealth } from '@/matching/teach';
 import { loadLearned } from '@/matching/learned-profiles';
@@ -67,12 +68,24 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
       files: [CONTENT_SCRIPT],
     });
   } catch (error) {
+    /*
+     * Ask the URL what kind of page this is before saying why it failed.
+     *
+     * This used to match the error text and announce "Chrome blocks extensions
+     * on it", which on a Google Form is untrue — the real cause is a lapsed
+     * `activeTab` grant, and the remedy is one click on the toolbar icon.
+     * `explainInjectionFailure` answers the question that actually helps: can
+     * the user do something about it, and what.
+     */
+    const tab = await chrome.tabs.get(tabId).catch(() => null);
+    const failure = explainInjectionFailure(tab?.url ?? '', error);
+
     return {
       ok: false,
-      error:
-        error instanceof Error && /cannot be scripted|Cannot access/i.test(error.message)
-          ? 'This page cannot be read — Chrome blocks extensions on it (a store page, a PDF viewer, or a settings page).'
-          : `Could not read this page: ${error instanceof Error ? error.message : 'unknown error'}`,
+      error: `${failure.message} ${failure.remedy}`,
+      ...(failure.grantable && failure.origin !== undefined
+        ? { code: 'NEEDS_HOST_PERMISSION', detail: failure.origin }
+        : {}),
     };
   }
 

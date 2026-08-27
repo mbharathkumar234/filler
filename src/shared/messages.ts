@@ -371,7 +371,14 @@ export interface ResponseMap {
 
 export type ResponseFor<T extends RequestType> = ResponseMap[T];
 
-export type Result<T> = { ok: true; data: T } | { ok: false; error: string; code?: string };
+export type Result<T> =
+  | { ok: true; data: T }
+  /**
+   * `code` is for the UI to branch on; `detail` carries the one piece of data
+   * the remedy needs — currently the origin pattern to request when a page
+   * could not be read for want of permission.
+   */
+  | { ok: false; error: string; code?: string; detail?: string };
 
 // ---------------------------------------------------------------------------
 // Envelope

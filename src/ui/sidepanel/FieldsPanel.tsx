@@ -13,7 +13,7 @@ import type { TabHarvest } from '@/background/harvest-service';
 import type { FillReport } from '@/background/fill-service';
 import type { FieldDescriptor, MatchResult } from '@/shared/types';
 import { bandOf, type MatchBand } from '@/matching';
-import { errorMessage, send } from '@/ui/lib/client';
+import { RequestFailed, errorMessage, send } from '@/ui/lib/client';
 import { TeachPanel } from '@/ui/review/TeachPanel';
 import { EarlyGuardPanel } from '@/ui/review/EarlyGuardPanel';
 
@@ -37,10 +37,19 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
   const [busy, setBusy] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [fill, setFill] = useState<FillReport | null>(null);
+  /**
+   * Set when the scan failed only for want of permission on this site.
+   *
+   * Kept separate from `error` because it is the one failure with a button
+   * attached: the user can fix it here, and a message without the button was
+   * the whole problem with the old wording.
+   */
+  const [needsHost, setNeedsHost] = useState<string | null>(null);
 
   const scan = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setNeedsHost(null);
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) {
@@ -51,10 +60,34 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
       setFill(null);
     } catch (err) {
       setError(errorMessage(err));
+      if (err instanceof RequestFailed && err.code === 'NEEDS_HOST_PERMISSION' && err.detail) {
+        setNeedsHost(err.detail);
+      }
     } finally {
       setBusy(false);
     }
   }, []);
+
+  /**
+   * Ask Chrome for this site, then scan again.
+   *
+   * `chrome.permissions.request` needs a user gesture, which is why it runs
+   * straight off the click rather than anywhere tidier.
+   */
+  const allowSite = useCallback(async () => {
+    if (needsHost === null) return;
+    try {
+      const granted = await chrome.permissions.request({ origins: [needsHost] });
+      if (!granted) {
+        setError('Access was not granted, so this page still cannot be read.');
+        return;
+      }
+      setNeedsHost(null);
+      await scan();
+    } catch (err) {
+      setError(errorMessage(err));
+    }
+  }, [needsHost, scan]);
 
   const runFill = useCallback(async () => {
     setBusy(true);
@@ -115,6 +148,16 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
       <p className="mt-1 text-xs text-slate-500">
         Reads the page only when you press Scan. Nothing is ever submitted without your approval.
       </p>
+
+      {needsHost !== null && (
+        <button
+          type="button"
+          onClick={() => void allowSite()}
+          className="mt-2 w-full rounded bg-blue-700 px-3 py-2 text-xs font-medium text-white"
+        >
+          Allow this site, then scan again
+        </button>
+      )}
 
       {harvest && harvest.matches.some((m) => bandOf(m) !== 'unmapped') && (
         <div className="mt-2 flex gap-2">

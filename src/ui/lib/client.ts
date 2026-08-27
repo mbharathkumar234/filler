@@ -19,6 +19,8 @@ export class RequestFailed extends Error {
   constructor(
     message: string,
     readonly code?: string,
+    /** Extra the remedy needs — e.g. the origin to ask permission for. */
+    readonly detail?: string,
   ) {
     super(message);
   }
@@ -36,7 +38,7 @@ export async function send<R extends ExtensionRequest>(
     throw new RequestFailed('No response from the extension background worker.');
   }
   if (!result.ok) {
-    throw new RequestFailed(result.error, result.code);
+    throw new RequestFailed(result.error, result.code, result.detail);
   }
   return result.data;
 }
