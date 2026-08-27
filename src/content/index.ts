@@ -314,9 +314,21 @@ declare global {
   }
 }
 
+/*
+ * Wire once per document, and only count it as wired if it worked.
+ *
+ * The flag used to be set on the line *before* the wiring, which made any
+ * throw permanent: the frame was marked ready, the listener was never
+ * registered, and every later injection saw the flag and did nothing. From the
+ * panel that looked like "no readable frame responded" forever, with no way
+ * back short of reloading the page — and no clue that reloading was the answer.
+ *
+ * Setting it at the end, and clearing it on the way out of a failure, means a
+ * transient error costs one attempt instead of the session.
+ */
 if (!window.__autofillContentReady) {
   window.__autofillContentReady = true;
-
+  try {
   // P2 first: the guard is live before anything can be written.
   setToastHandler((message) => {
     mountOverlay();
@@ -490,7 +502,14 @@ if (!window.__autofillContentReady) {
     return false;
   });
 
-  void chrome.runtime.sendMessage(envelope({ type: 'harvest:ready' })).catch(() => {
-    // The panel may not be open. Nothing to do.
-  });
+    void chrome.runtime.sendMessage(envelope({ type: 'harvest:ready' })).catch(() => {
+      // The panel may not be open. Nothing to do.
+    });
+  } catch (error) {
+    // Leave the frame injectable again, and make the reason visible in the
+    // page's own console — this used to fail silently and permanently.
+    window.__autofillContentReady = false;
+    console.error('[AutoFill Assistant] could not wire this page:', error);
+    throw error;
+  }
 }

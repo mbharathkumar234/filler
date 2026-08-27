@@ -90,13 +90,36 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
   }
 
   const frames: FrameReport[] = [];
+  /** Frames that answered *and* failed. Kept so the message can say why. */
+  const failures: string[] = [];
+
   for (const injection of injected) {
-    const report = await requestHarvest(tabId, injection.frameId);
-    if (report) frames.push({ ...report, frameId: injection.frameId });
+    const outcome = await requestHarvest(tabId, injection.frameId);
+    if (outcome.kind === 'report') {
+      frames.push({ ...outcome.report, frameId: injection.frameId });
+    } else if (outcome.kind === 'failed') {
+      failures.push(outcome.error);
+    }
   }
 
   if (frames.length === 0) {
-    return { ok: false, error: 'No readable frame responded on this page.' };
+    /*
+     * Say which of the two this was.
+     *
+     * A frame that answered with an error is a defect in our own content
+     * script, and reporting it as "nothing responded" is how it stayed
+     * invisible. A frame that never answered is usually a page whose script
+     * was wired before this version of the extension was loaded, and
+     * reloading genuinely fixes that.
+     */
+    if (failures.length > 0) {
+      return { ok: false, error: `Reading this page failed: ${failures[0]}` };
+    }
+    return {
+      ok: false,
+      error:
+        'Nothing on this page answered. Reload the page, then press Scan again — this usually means the page was open before the extension was loaded or updated.',
+    };
   }
 
   const top = frames.find((f) => f.frameId === 0) ?? frames[0]!;
@@ -186,18 +209,36 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
   };
 }
 
-async function requestHarvest(tabId: number, frameId: number): Promise<HarvestReport | null> {
-  try {
-    const response = (await chrome.tabs.sendMessage(
-      tabId,
-      envelope({ type: 'harvest:request' }),
-      { frameId },
-    )) as Result<HarvestReport> | undefined;
+/**
+ * The three things that can happen when a frame is asked to harvest.
+ *
+ * They used to collapse into `null`, which is why a page could report "no
+ * readable frame responded" when in fact a frame had responded, in detail, to
+ * say what went wrong. Distinguishing "nobody was listening" from "the listener
+ * failed" is the whole point: the first is normal — about:blank and ad frames
+ * have no listener — and the second is a defect nobody could see.
+ */
+type FrameOutcome =
+  | { kind: 'report'; report: HarvestReport }
+  | { kind: 'failed'; error: string }
+  | { kind: 'silent' };
 
-    return response?.ok ? response.data : null;
-  } catch {
-    // A frame that does not answer is not an error: about:blank frames and
-    // ad iframes routinely have no listener.
-    return null;
+async function requestHarvest(tabId: number, frameId: number): Promise<FrameOutcome> {
+  let response: Result<HarvestReport> | undefined;
+  try {
+    response = (await chrome.tabs.sendMessage(tabId, envelope({ type: 'harvest:request' }), {
+      frameId,
+    })) as Result<HarvestReport> | undefined;
+  } catch (error) {
+    // No receiving end means no listener in that frame, which is ordinary.
+    // Anything else is worth keeping.
+    const detail = error instanceof Error ? error.message : String(error);
+    return /Receiving end does not exist|Could not establish connection/i.test(detail)
+      ? { kind: 'silent' }
+      : { kind: 'failed', error: detail };
   }
+
+  if (response === undefined) return { kind: 'silent' };
+  if (response.ok) return { kind: 'report', report: response.data };
+  return { kind: 'failed', error: response.error };
 }
