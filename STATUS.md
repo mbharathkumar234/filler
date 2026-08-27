@@ -624,11 +624,29 @@ The content script has its own build: `vite.content.config.ts`, `lib` mode,
 `content-script-format.test.ts` asserts the output has no top-level import, no
 export, no reference to another chunk — verified against the bug.
 
-## What this leaves open
+## The gap itself, now closed
 
-The gap is not closed, only this instance of it. Nothing yet loads the built
-extension into a real browser and drives it. Until something does, "the tests
-pass" continues to mean "the code is correct in a friendlier environment than
-the one it ships to". A Playwright run against a persistent context with
-`--load-extension` would close it, and is the highest-value test left unwritten
-in this project.
+`tests/e2e/extension.spec.ts` loads `dist/` as an unpacked extension in a real
+Chromium and drives the actual service worker. Five tests, and between them they
+cover all three bugs above:
+
+| Test | The bug it would have caught |
+|------|------------------------------|
+| the service worker starts without throwing | `window is not defined` at module scope |
+| an action handler is registered | the toolbar click granting no `activeTab` |
+| the content script parses as a classic script | the ES-module content script |
+| the content script finishes wiring itself | the self-locking ready flag |
+| the submit guard is live in the real bundle | P2, in the artefact that ships |
+
+Verified against the real bug: restoring the ES-module form turns two of them
+red. And the guard test was vacuous in its first version — the practice form has
+three required fields, and an empty one makes the browser refuse the submit on
+its own, so it passed against a content script that could not even parse. It now
+demonstrates the submit succeeding *first*, then blocks it.
+
+**What still is not reachable.** `chrome.scripting.executeScript` needs
+`activeTab` or a host permission even for the extension's own pages, and
+`activeTab` needs a real toolbar click, which Playwright cannot perform. So the
+injection *call* on a user-granted page remains untested; what is tested is that
+the file it injects parses, runs, and wires itself. Closing the last step would
+need a driver that can operate browser chrome.
