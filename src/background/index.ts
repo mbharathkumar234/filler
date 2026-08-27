@@ -68,12 +68,61 @@ import {
 import { clearTab, pruneRuns } from '@/runtime/persistence';
 import { lockVault } from '@/vault/session';
 
+/**
+ * Applied on every worker start, not only on install.
+ *
+ * The setting persists across restarts, so an extension already carrying the
+ * old `true` would keep swallowing action clicks until it was reinstalled —
+ * which is exactly the state a user hitting this bug is already in.
+ */
+function setPanelBehaviour(): Promise<void> {
+  return chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false }).catch(() => {});
+}
+
+void setPanelBehaviour();
+
 chrome.runtime.onInstalled.addListener(() => {
-  // The panel opens on an explicit user gesture (P1), never on its own.
-  void chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  /*
+   * Open the panel ourselves rather than letting Chrome do it.
+   *
+   * This looks like a step backwards and is the opposite. With
+   * `openPanelOnActionClick: true` Chrome opens the panel *instead of*
+   * dispatching the click, so `chrome.action.onClicked` never fires — and a
+   * click that never reaches the extension never counts as invoking it. That
+   * is precisely the event that grants `activeTab`.
+   *
+   * The consequence was that this extension could not obtain `activeTab` at
+   * all: pressing Scan on any ordinary web page failed with "Cannot access
+   * contents of the page", and clicking the icon — the advice the panel itself
+   * gave — did nothing to change that, because the click was being swallowed.
+   *
+   * Handling the click ourselves grants `activeTab` and opens the panel, which
+   * is what the user expected the icon to do all along. P1 is unaffected: the
+   * panel still opens only on a deliberate click.
+   */
+  void setPanelBehaviour();
   // § Phase B: start from a known state. An early-guard registration that
   // survived an update would be a content script the user never re-authorised.
   void unregisterAll().catch(() => {});
+});
+
+/**
+ * The toolbar click: grant `activeTab`, then show the panel.
+ *
+ * `chrome.sidePanel.open()` must be called inside the gesture, so it is the
+ * first thing here — anything awaited before it loses the gesture and the panel
+ * silently fails to open.
+ *
+ * Merely *receiving* this event is what grants `activeTab` for the tab, which
+ * is why the listener matters even though its body is one line.
+ */
+chrome.action?.onClicked?.addListener((tab) => {
+  const options = tab.id === undefined ? { windowId: tab.windowId } : { tabId: tab.id };
+  void chrome.sidePanel.open(options).catch(() => {
+    // Opening can fail if the gesture has expired or the tab has gone. There is
+    // nothing useful to do about it, and throwing here would leave an unhandled
+    // rejection in the worker for a click the user can simply repeat.
+  });
 });
 
 /**
