@@ -29,8 +29,39 @@ function practiceForm() {
   };
 }
 
+/**
+ * Make Vite's dynamic-import helper survive a service worker.
+ *
+ * `__vitePreload` ends with `window.dispatchEvent(e)` in its error handler. In
+ * an MV3 service worker there is no `window`, so **every** dynamic-import
+ * failure — whatever actually went wrong — was replaced by
+ * `window is not defined` before it reached anyone. That masking is what made
+ * the vault-creation bug so hard to find: the real error never surfaced.
+ *
+ * `globalThis.dispatchEvent?.()` is the same call in a page (where
+ * `window === globalThis`) and a no-op in a worker. With no listener attached,
+ * `defaultPrevented` stays false and the helper rethrows the **original**
+ * error, which is the behaviour that was wanted all along.
+ *
+ * `modulePreload: false` already empties every dependency array, so the
+ * helper's other DOM branch — the one that writes to `document.head` — is dead
+ * code. Between the two, nothing the worker can reach touches the DOM.
+ */
+function workerSafePreload() {
+  const NEEDLE = 'window.dispatchEvent(e);';
+  return {
+    name: 'autofill:worker-safe-preload',
+    generateBundle(_options: unknown, bundle: Record<string, { type: string; code?: string }>) {
+      for (const chunk of Object.values(bundle)) {
+        if (chunk.type !== 'chunk' || !chunk.code?.includes(NEEDLE)) continue;
+        chunk.code = chunk.code.replaceAll(NEEDLE, 'globalThis.dispatchEvent?.(e);');
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwind(), crx({ manifest }), practiceForm()],
+  plugins: [react(), tailwind(), crx({ manifest }), practiceForm(), workerSafePreload()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

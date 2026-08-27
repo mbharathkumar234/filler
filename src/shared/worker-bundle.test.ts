@@ -66,6 +66,30 @@ describe('the built worker bundle', () => {
     expect(withDeps, 'a preload call carries deps and will reach for document.head').toEqual([]);
   });
 
+  it.skipIf(workerChunk() === null)('reads no `window` property on any reachable line', async () => {
+    /*
+     * The last one was `window.dispatchEvent` inside `__vitePreload`'s error
+     * handler, and it is the reason a dynamic-import failure surfaced as
+     * `window is not defined` instead of saying what went wrong. A build
+     * plugin rewrites it to `globalThis.dispatchEvent?.()`.
+     *
+     * Comments are stripped first: this file and `crypto.ts` both *discuss*
+     * `window.dispatchEvent`, and a check that forbids naming the bug makes
+     * the bug harder to explain.
+     */
+    const code = (await readFile(workerChunk()!, 'utf8'))
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|\s)\/\/[^\n]*/g, '$1');
+
+    // `window` is also a local variable name in `constraints.ts` and
+    // `derive.ts` — a byte-size window. Those three properties are its.
+    const offenders = [...code.matchAll(/(?<![.\w$])window\s*\.\s*(\w+)/g)]
+      .map((match) => match[1]!)
+      .filter((prop) => !['maxBytes', 'minBytes', 'notes'].includes(prop));
+
+    expect(offenders, 'the worker bundle reads a DOM global').toEqual([]);
+  });
+
   it.skipIf(workerChunk() === null)('never maps dependencies at all', async () => {
     // `__vite__mapDeps` only exists when something is being preloaded. Its
     // presence means `modulePreload: false` has stopped taking effect.

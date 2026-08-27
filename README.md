@@ -35,7 +35,8 @@ repair mechanism, not a precondition. See the scope amendment at the top of the 
 
 ```sh
 npm install
-npm run dev              # build the unpacked extension into dist/
+npm run build            # build the unpacked extension into dist/  <- load THIS
+npm run dev              # vite dev server with HMR; not what you load into Chrome
 npm test                 # vitest unit tests
 npm run typecheck        # tsc --noEmit
 npm run lint             # eslint
@@ -45,8 +46,13 @@ npm run e2e              # playwright against the served fixtures
 
 Regenerate the oversized test photo with `node scripts/make-photo-fixture.mjs`.
 
-Load the extension: `chrome://extensions` -> enable Developer mode -> **Load unpacked** ->
-select `dist/`. Click the toolbar icon to open the side panel.
+Load the extension: **`npm run build`** first, then `chrome://extensions` -> enable
+Developer mode -> **Load unpacked** -> select `dist/`. Click the toolbar icon to open the
+side panel. After any rebuild, press **Reload** on the extension card — Chrome keeps the old
+service worker otherwise.
+
+`npm run dev` starts a dev server; it is not a substitute for `npm run build` when loading
+the unpacked extension, and this line used to say otherwise.
 
 ## Layout
 
