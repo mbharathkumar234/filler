@@ -4,7 +4,12 @@
     "lib": ["ES2023", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": ["node"],
+    // `chrome` because the e2e specs evaluate code *inside* the extension's
+    // service worker, where the API is real. The types are the same ones
+    // `tsconfig.json` uses for `src`; without them the specs typecheck against
+    // an environment that does not match where their code runs — which is the
+    // exact class of mistake this suite has been chasing.
+    "types": ["node", "chrome"],
 
     "strict": true,
     "noUncheckedIndexedAccess": true,
