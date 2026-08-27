@@ -6,7 +6,7 @@
   "description": "Browser-extension assistant that stores personal details once and fills repetitive portal forms, stopping before submission.",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run typecheck && vite build && vite build -c vite.content.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint .",
     "test": "vitest run",

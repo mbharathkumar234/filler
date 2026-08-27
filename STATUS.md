@@ -581,3 +581,54 @@ The proper fix is an **offscreen document** for PDF work, which is the MV3
 answer for DOM-dependent processing and is a piece of work in its own right.
 Until then, PDF rasterisation and PDF text extraction in the worker are the
 untested-in-a-real-worker paths, and should be treated as such.
+
+---
+
+# The content script never ran
+
+Found by using the extension, after four earlier rounds chasing the error
+messages it produced. `dist/content.js` was an **ES module** — it began
+`import { … } from "./assets/…"`, because Rollup split shared code into chunks
+when it was an entry in the main build.
+
+`chrome.scripting.executeScript({ files })` injects a **classic** script. A
+classic script with a top-level `import` is a syntax error. The file never
+parsed, so nothing ran, no message listener was registered, and every scan on
+every real page ended with "nothing on this page answered".
+
+## Why 1,895 tests and 76 e2e runs missed it
+
+The Playwright suite loads the content script with
+`addScriptTag({ type: 'module' })`. That exercises the **code** thoroughly — the
+whole submit guard, the fill engine, drift recovery, 20/20 resume — and does not
+exercise the **injection** at all. The one step that only exists in a loaded
+extension was the one step nothing tested.
+
+This is the third bug of exactly that shape:
+
+| Bug | Ran the code where | Real context |
+|-----|--------------------|--------------|
+| `window is not defined` | Node, jsdom, a harness page | service worker: no `window` |
+| Toolbar click granted nothing | no test has a real `chrome.action` | a loaded extension |
+| Content script never parsed | a page, as a module | `executeScript`, as a classic script |
+
+Every one ran in a context **more permissive than production**. A suite can be
+large, adversarial and mutation-tested and still never put the code where it has
+to run. Coverage and mutation score say nothing about this class, and neither
+did they here.
+
+## The fix
+
+The content script has its own build: `vite.content.config.ts`, `lib` mode,
+`iife` format, self-contained. `npm run build` runs it after the main build.
+`content-script-format.test.ts` asserts the output has no top-level import, no
+export, no reference to another chunk — verified against the bug.
+
+## What this leaves open
+
+The gap is not closed, only this instance of it. Nothing yet loads the built
+extension into a real browser and drives it. Until something does, "the tests
+pass" continues to mean "the code is correct in a friendlier environment than
+the one it ships to". A Playwright run against a persistent context with
+`--load-extension` would close it, and is the highest-value test left unwritten
+in this project.

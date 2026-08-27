@@ -92,18 +92,18 @@ export default defineConfig({
     // No remote code, no eval — Phase 10 hardening depends on this staying true.
     minify: false,
     sourcemap: true,
+    /*
+     * The content script is **not** built here.
+     *
+     * It is injected programmatically with `chrome.scripting.executeScript`,
+     * which runs a *classic* script — and as an entry in this build Rollup
+     * emitted it as an ES module importing shared chunks, which a classic
+     * script cannot parse. It has its own build instead:
+     * `vite.content.config.ts`, `lib` mode, `iife`, self-contained.
+     */
     rollupOptions: {
-      input: {
-        // The content script is injected programmatically on a user gesture,
-        // so it is NOT declared in the manifest (a declared content script
-        // auto-injects everywhere, which is what §Phase 3 forbids). It still
-        // needs to be built, hence an explicit entry with a fixed filename
-        // that harvest-service.ts can hand to chrome.scripting.
-        content: 'src/content/index.ts',
-      },
       output: {
-        entryFileNames: (chunk) =>
-          chunk.name === 'content' ? 'content.js' : 'assets/[name]-[hash].js',
+        entryFileNames: 'assets/[name]-[hash].js',
       },
     },
   },
