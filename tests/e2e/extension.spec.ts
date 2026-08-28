@@ -100,6 +100,31 @@ test.describe('the extension as Chrome actually loads it', () => {
     expect(wired, 'without this the toolbar click grants nothing').toBe(true);
   });
 
+  test('content.js is actually in the package', async () => {
+    /*
+     * The build used to emit it from a second command in `package.json`, and a
+     * `dist` was produced without it. Chrome reports that as
+     * "Could not load file: 'content.js'" — which reads like yet another
+     * mysterious scan failure and is really a missing file.
+     *
+     * Fetching it from the extension's own origin is exactly what
+     * `executeScript` has to do, so this fails for the same reason Chrome does.
+     */
+    const launched = await launch();
+    context = launched.context;
+
+    const page = await launched.context.newPage();
+    await page.goto(`chrome-extension://${launched.id}/practice/first-fill.html`);
+
+    const status = await page.evaluate(async () => {
+      const response = await fetch('/content.js');
+      return { ok: response.ok, length: (await response.text()).length };
+    });
+
+    expect(status.ok, 'content.js is missing from the built extension').toBe(true);
+    expect(status.length).toBeGreaterThan(1000);
+  });
+
   test('the content script parses as a classic script', async () => {
     /*
      * The bug this is for. As an ES module the file failed with "Cannot use

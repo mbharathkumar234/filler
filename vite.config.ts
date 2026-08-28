@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import tailwind from '@tailwindcss/vite';
 import { crx } from '@crxjs/vite-plugin';
 import { fileURLToPath, URL } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import manifest from './manifest.config.ts';
 
 /**
@@ -60,8 +60,47 @@ function workerSafePreload() {
   };
 }
 
+/**
+ * Build the content script as part of this build, not beside it.
+ *
+ * It needs its own Vite config — `executeScript` injects a *classic* script,
+ * and only `lib`/`iife` produces one — but making that a second command in
+ * `package.json` made it skippable, and it got skipped. The result was a `dist`
+ * with no `content.js` at all, which Chrome reports as
+ * "Could not load file: 'content.js'" and which looks from the panel like yet
+ * another mysterious scan failure.
+ *
+ * Running it from `closeBundle` means any `vite build` produces a complete
+ * extension. The existence check afterwards is the point: a missing content
+ * script must fail the build loudly, not ship quietly.
+ */
+function buildContentScript() {
+  return {
+    name: 'autofill:build-content-script',
+    apply: 'build' as const,
+    async closeBundle() {
+      const { build } = await import('vite');
+      await build({ configFile: fileURLToPath(new URL('./vite.content.config.ts', import.meta.url)) });
+
+      const output = fileURLToPath(new URL('./dist/content.js', import.meta.url));
+      if (!existsSync(output)) {
+        throw new Error(
+          'dist/content.js was not produced. The extension cannot read any page without it.',
+        );
+      }
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react(), tailwind(), crx({ manifest }), practiceForm(), workerSafePreload()],
+  plugins: [
+    react(),
+    tailwind(),
+    crx({ manifest }),
+    practiceForm(),
+    workerSafePreload(),
+    buildContentScript(),
+  ],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },

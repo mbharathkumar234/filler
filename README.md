@@ -36,7 +36,7 @@ repair mechanism, not a precondition. See the scope amendment at the top of the 
 ```sh
 npm install
 npm run build            # build the unpacked extension into dist/  <- load THIS
-npm run dev              # vite dev server with HMR; not what you load into Chrome
+npm run dev              # vite dev server; it does NOT produce a loadable dist/
 npm test                 # vitest unit tests
 npm run typecheck        # tsc --noEmit
 npm run lint             # eslint
@@ -51,8 +51,10 @@ Developer mode -> **Load unpacked** -> select `dist/`. Click the toolbar icon to
 side panel. After any rebuild, press **Reload** on the extension card — Chrome keeps the old
 service worker otherwise.
 
-`npm run dev` starts a dev server; it is not a substitute for `npm run build` when loading
-the unpacked extension, and this line used to say otherwise.
+`npm run dev` starts a dev server. It is not a substitute for `npm run build` when loading
+the unpacked extension — it does not emit `content.js`, and an extension without that can
+open its panel and read nothing. `npm run build` ends with `scripts/verify-dist.mjs`, which
+fails loudly if `dist/` is not loadable, so a broken build cannot pass quietly.
 
 ## Layout
 
