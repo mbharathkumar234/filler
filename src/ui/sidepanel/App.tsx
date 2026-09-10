@@ -19,6 +19,7 @@ import { LlmPanel } from '@/ui/review/LlmPanel';
 import { Disclosure, hasSeenDisclosure } from '@/ui/onboarding/Disclosure';
 import { GettingStarted } from '@/ui/onboarding/GettingStarted';
 import { LanguagePicker } from '@/ui/lib/LanguagePicker';
+import { useVaultKeepalive } from '@/ui/lib/use-vault-keepalive';
 import { FieldsPanel } from './FieldsPanel';
 
 export function App() {
@@ -52,6 +53,14 @@ export function App() {
     void refresh();
     void hasSeenDisclosure().then(setDisclosed);
   }, [refresh]);
+
+  /*
+   * Hold the key in the service worker while the user is working. Without
+   * this the worker is suspended after ~30s of no bus traffic and the vault
+   * locks mid-edit, long before its idle deadline. See the hook for why the
+   * fix is a heartbeat and not a longer deadline.
+   */
+  useVaultKeepalive(status?.unlocked === true);
 
   // Re-check when the panel regains focus: the vault may have auto-locked while
   // it sat in the background.
