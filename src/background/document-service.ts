@@ -9,6 +9,8 @@
 
 import type { DocumentRequest, Result, ResponseMap } from '@/shared/messages';
 import { derive, type DerivedFile } from '@/documents/derive';
+import { measureShape } from '@/documents/raster';
+import { roleFor } from '@/documents/intake';
 import { createRasterBackend } from '@/documents/raster';
 import { openVaultDb } from '@/vault/db';
 import {
@@ -112,6 +114,17 @@ export async function handleDocumentRequest(
 
       case 'doc:put': {
         const bytes = Uint8Array.from(request.bytes);
+        /*
+         * Measure the ink here, once, while the bytes are in hand.
+         *
+         * It has to be the worker rather than the panel: the panel never sees a
+         * stored document again — the bytes are decrypted in this process and
+         * stay in it — so a measurement taken anywhere else could not be
+         * repeated later. Failure is expected and harmless (a PDF has no
+         * bitmap, a blank scan has no ink), and `undefined` means every reader
+         * falls back to judging by the canvas.
+         */
+        const shape = await measureShape(bytes, request.mime).catch(() => null);
         const summary = await withKey((db, key) =>
           putMaster(db, key, {
             key: request.key,
@@ -123,6 +136,7 @@ export async function handleDocumentRequest(
               width: request.width,
               height: request.height,
               capturedAt: new Date().toISOString(),
+              ...(shape ? { content: shape.content } : {}),
             },
           }),
         );
@@ -184,7 +198,23 @@ async function deriveFor(
       };
     }
 
-    const result = await derive(createRasterBackend(), master.bytes, master.meta.mime, constraint);
+    /*
+     * Two things the geometry cannot work out for itself.
+     *
+     * `content` is where the ink is, measured at upload — it lets the trim
+     * remove blank paper before the target box is planned.
+     *
+     * `fit: 'pad'` for a signature overrides the centre-crop that a fixed
+     * physical size implies. Centre-cropping a photograph trims the edges of a
+     * face, which is a compromise; centre-cropping a signature removes the
+     * ascender and the underline, which is a mutilation. A signature that does
+     * not match the portal's box is letterboxed onto the page colour instead —
+     * whole, and still recognisably the user's mark.
+     */
+    const result = await derive(createRasterBackend(), master.bytes, master.meta.mime, constraint, {
+      ...(master.meta.content ? { content: master.meta.content } : {}),
+      ...(roleFor(key) === 'signature' ? { fit: 'pad' as const } : {}),
+    });
     if (!result.ok) {
       return { failed: true as const, code: result.code, reason: result.reason };
     }

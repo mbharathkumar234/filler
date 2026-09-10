@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  canonicalise,
-  describeBytes,
-  describeConstraint,
-  parseConstraint,
-} from './constraints';
+import { READABLE_SOURCE_MIMES, canonicalise, describeBytes, describeConstraint, mimeFromFilename, parseConstraint, unreadableFormatLabel } from './constraints';
 
 /**
  * §7 Session 3 asks for "10 real constraint strings". None were supplied with
@@ -299,5 +294,35 @@ describe('describeBytes', () => {
     expect(describeBytes(20 * KB)).toBe('20 KB');
     expect(describeBytes(2 * 1024 * KB)).toBe('2 MB');
     expect(describeBytes(512)).toBe('512 bytes');
+  });
+});
+
+describe('recognising formats we cannot open', () => {
+  it('names HEIC, which is what an iPhone produces by default', () => {
+    expect(unreadableFormatLabel('image/heic')).toBe('HEIC');
+    expect(unreadableFormatLabel('image/HEIF')).toBe('HEIF');
+  });
+
+  it('has no name for a format it can actually read', () => {
+    expect(unreadableFormatLabel('image/jpeg')).toBeNull();
+  });
+
+  it('falls back to the extension when the browser reports no type', () => {
+    // Windows gives `.heic` an empty MIME type unless a codec is registered.
+    expect(mimeFromFilename('12TH_bkm.heic')).toBe('image/heic');
+    expect(mimeFromFilename('CASTE(english)_bkm.HEIC')).toBe('image/heic');
+    expect(mimeFromFilename('marksheet.pdf')).toBe('application/pdf');
+  });
+
+  it('refuses to guess without an extension', () => {
+    expect(mimeFromFilename('scan')).toBeNull();
+    expect(mimeFromFilename('scan.')).toBeNull();
+    expect(mimeFromFilename('scan.xyz')).toBeNull();
+  });
+
+  it('agrees with itself about what is readable', () => {
+    for (const mime of READABLE_SOURCE_MIMES) {
+      expect(unreadableFormatLabel(mime)).toBeNull();
+    }
   });
 });

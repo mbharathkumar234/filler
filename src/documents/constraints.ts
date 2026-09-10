@@ -289,6 +289,77 @@ export function parseConstraint(text: string): ParsedConstraint {
   return { constraint, matched, empty: matched.length === 0 };
 }
 
+/**
+ * The source formats the derivation pipeline can actually open.
+ *
+ * Deliberately the *pipeline's* answer rather than the browser's. Chrome will
+ * happily decode WebP and AVIF into a bitmap, but `derive.ts` refuses them as a
+ * source, so treating them as readable here would move the failure from intake
+ * — where the user still has the original — to derivation, where they no longer
+ * do. That is the exact inversion this module exists to prevent.
+ */
+export const READABLE_SOURCE_MIMES: ReadonlySet<string> = new Set([
+  'image/jpeg',
+  'image/png',
+  'application/pdf',
+]);
+
+/**
+ * Formats we can *name* but not open.
+ *
+ * Naming matters. "We could not read that file" invites the user to try the
+ * same file again; "we cannot read HEIC" tells them what to change.
+ */
+const UNREADABLE_LABELS: Readonly<Record<string, string>> = {
+  'image/heic': 'HEIC',
+  'image/heic-sequence': 'HEIC',
+  'image/heif': 'HEIF',
+  'image/heif-sequence': 'HEIF',
+  'image/tiff': 'TIFF',
+  'image/avif': 'AVIF',
+  'image/webp': 'WebP',
+  'image/bmp': 'BMP',
+  'image/gif': 'GIF',
+};
+
+/** A human name for a format we cannot read, or null if we do not know it. */
+export function unreadableFormatLabel(mime: string): string | null {
+  return UNREADABLE_LABELS[mime.toLowerCase()] ?? null;
+}
+
+const EXTENSION_MIMES: Readonly<Record<string, string>> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  pdf: 'application/pdf',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  hif: 'image/heif',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  avif: 'image/avif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  gif: 'image/gif',
+};
+
+/**
+ * Guess a type from a filename.
+ *
+ * Needed because a browser does not always know. Windows reports no MIME type
+ * at all for `.heic` unless an OS codec is registered, so the file arrives as
+ * an empty string — and a file with no type cannot be explained to the user,
+ * only shrugged at. The extension is the last thing that still says what it is.
+ *
+ * Only ever used as a *fallback*: a type the browser supplies is better
+ * evidence than a name anybody can rename.
+ */
+export function mimeFromFilename(name: string): string | null {
+  const dot = name.lastIndexOf('.');
+  if (dot < 0 || dot === name.length - 1) return null;
+  return EXTENSION_MIMES[name.slice(dot + 1).toLowerCase()] ?? null;
+}
+
 export function shortMime(mime: string): string {
   switch (mime) {
     case 'image/jpeg':

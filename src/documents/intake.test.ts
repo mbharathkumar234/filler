@@ -196,3 +196,180 @@ describe('the remedy matches the role, not just the problem', () => {
     expect(wide[0]!.remedy).not.toBe(tall[0]!.remedy);
   });
 });
+
+/**
+ * The reported bug, in one place.
+ *
+ * A user photographed their signature, cropped it tight, and was told to "crop
+ * away the paper above and below it". There was no paper. The signature simply
+ * has a tall flourish. The point of these tests is that the extension may only
+ * give advice it has evidence for.
+ */
+describe('shape advice, when the ink has actually been measured', () => {
+  // Comfortably above the 280x120 size floor, so the only rule that can fire
+  // here is the shape one. Same proportions as the reported image.
+  const signature = meta({ key: 'doc.signature', width: 400, height: 514, bytes: 90_000 });
+
+  /** A shape reading for ink filling `w x h` of the given canvas. */
+  function shape(w: number, h: number, canvas: { width: number; height: number }) {
+    const marginRatio = 1 - (w * h) / (canvas.width * canvas.height);
+    return {
+      content: { left: 0, top: 0, width: w, height: h },
+      contentAspect: w / h,
+      canvasAspect: canvas.width / canvas.height,
+      marginRatio,
+      trimmable: marginRatio >= 0.08,
+    };
+  }
+
+  it('never tells you to crop paper that is not there', () => {
+    const tight = shape(388, 502, { width: 400, height: 514 });
+    const found = assessMaster(signature, 'signature', tight);
+
+    for (const finding of found) {
+      expect(finding.remedy).not.toMatch(/crop away the paper/i);
+    }
+  });
+
+  /**
+   * A real signature, photographed on plain paper: 720x640, ink 210x230, so
+   * about 0.91 wide-to-tall. Two rounds of this were reported as a false
+   * alarm, and both times the extension was measuring something other than
+   * the signature or judging it against a window no ordinary signature meets.
+   */
+  it('says nothing about the shape of an ordinary compact signature', () => {
+    const compact = shape(210, 230, { width: 720, height: 640 });
+    const found = assessMaster(
+      meta({ key: 'doc.signature', width: 720, height: 640, bytes: 22_000 }),
+      'signature',
+      compact,
+    );
+
+    expect(found.filter((f) => /taller than it is wide/i.test(f.message))).toEqual([]);
+    expect(blockersIn(found)).toHaveLength(0);
+  });
+
+  it('mentions the blank paper as a note, not as a complaint', () => {
+    const compact = shape(210, 230, { width: 720, height: 640 });
+    const found = assessMaster(
+      meta({ key: 'doc.signature', width: 720, height: 640, bytes: 22_000 }),
+      'signature',
+      compact,
+    );
+
+    expect(found).toHaveLength(1);
+    // Nothing is wrong; the user is being told what will happen to their file.
+    expect(found[0]!.severity).toBe('note');
+    expect(found[0]!.message).toMatch(/blank space/i);
+    expect(found[0]!.remedy).toMatch(/nothing to do/i);
+  });
+
+  it('still warns about something genuinely pathological', () => {
+    // A column: ink fifteen times taller than it is wide. Not a signature.
+    const column = shape(40, 600, { width: 400, height: 640 });
+    const found = assessMaster(
+      meta({ key: 'doc.signature', width: 400, height: 640, bytes: 30_000 }),
+      'signature',
+      column,
+    );
+
+    const shapeFindings = found.filter((f) => /taller than it is wide/i.test(f.message));
+    expect(shapeFindings).toHaveLength(1);
+    expect(shapeFindings[0]!.severity).toBe('warning');
+    expect(shapeFindings[0]!.remedy).toMatch(/sign again/i);
+    // Never the advice that started all this.
+    expect(shapeFindings[0]!.remedy).not.toMatch(/crop away the paper/i);
+  });
+
+  it('keeps quiet when the frame is tight and the shape is right', () => {
+    const strip = shape(390, 145, { width: 400, height: 150 });
+    const found = assessMaster(
+      meta({ key: 'doc.signature', width: 400, height: 150, bytes: 40_000 }),
+      'signature',
+      strip,
+    );
+    expect(found).toEqual([]);
+  });
+
+  it('falls back to the old canvas rule when nothing was measured', () => {
+    // Documents stored before this existed carry no reading, and must keep
+    // behaving exactly as they did.
+    const found = assessMaster(signature, 'signature');
+    expect(blockersIn(found)).toHaveLength(1);
+    expect(found[0]!.remedy).toMatch(/crop away the paper/i);
+  });
+
+  it('applies the same honesty to a portrait photo', () => {
+    const tall = shape(480, 1380, { width: 500, height: 1400 });
+    const found = assessMaster(
+      meta({ width: 500, height: 1400, bytes: 600_000 }),
+      'photo',
+      tall,
+    );
+    expect(blockersIn(found)).toHaveLength(0);
+    expect(found.some((f) => /passport shape/i.test(f.remedy))).toBe(true);
+  });
+});
+
+/**
+ * Files whose pixels could not be read.
+ *
+ * Every rule in this module measures a bitmap, so a file that never became one
+ * arrives with zero dimensions. The original code let that fall through into
+ * the size check and reported "0x0 pixels, which is too small" — a complaint
+ * about the wrong thing, with a remedy that cannot be followed, on the two
+ * formats people most often have: an iPhone HEIC and a PDF certificate.
+ */
+describe('files that could not be read at all', () => {
+  it('explains a HEIC instead of calling it too small', () => {
+    const found = assessMaster(
+      meta({ key: 'doc.marksheet_12', mime: 'image/heic', width: 0, height: 0, bytes: 1_469_440 }),
+      'document',
+    );
+
+    expect(found).toHaveLength(1);
+    expect(found[0]!.message).not.toMatch(/0×0|too small/i);
+    expect(found[0]!.message).toMatch(/HEIC/);
+    // The remedy has to be something the user can actually do today.
+    expect(found[0]!.remedy).toMatch(/Most Compatible|share/i);
+  });
+
+  it('names other formats it cannot open', () => {
+    const found = assessMaster(
+      meta({ key: 'doc.caste_certificate', mime: 'image/tiff', width: 0, height: 0 }),
+      'document',
+    );
+    expect(found[0]!.message).toMatch(/TIFF/);
+    expect(found[0]!.message).not.toMatch(/too small/i);
+  });
+
+  it('does not tell a PDF certificate it is 0x0 pixels', () => {
+    // The most common format a certificate arrives in. It has no bitmap, and
+    // `rasterisePdf` settles its size at derivation time.
+    const found = assessMaster(
+      meta({ key: 'doc.degree_certificate', mime: 'application/pdf', width: 0, height: 0 }),
+      'document',
+    );
+    expect(found).toEqual([]);
+  });
+
+  it('still refuses a PDF where an image is required, and only says that once', () => {
+    const found = assessMaster(
+      meta({ key: 'doc.photo', mime: 'application/pdf', width: 0, height: 0 }),
+      'photo',
+    );
+
+    expect(found).toHaveLength(1);
+    expect(found[0]!.message).toMatch(/PDF/);
+    expect(found[0]!.message).not.toMatch(/too small/i);
+  });
+
+  it('distinguishes a corrupt JPEG from an unsupported format', () => {
+    const found = assessMaster(
+      meta({ mime: 'image/jpeg', width: 0, height: 0 }),
+      'photo',
+    );
+    expect(found[0]!.message).toMatch(/could not be opened/i);
+    expect(found[0]!.remedy).toMatch(/incomplete or renamed/i);
+  });
+});

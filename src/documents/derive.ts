@@ -12,6 +12,7 @@
  */
 
 import type { DocConstraint } from '@/shared/types';
+import { TRIMMABLE_MARGIN, padContentBox, type ContentBox } from './trim';
 import { describeConstraint, shortMime } from './constraints';
 import {
   inspectQuality,
@@ -52,6 +53,14 @@ export interface RasterBackend {
   rasterisePdf(bytes: Uint8Array, targetWidth: number): Promise<RasterSource>;
   /** Wrap already-encoded JPEG bytes in a single-page PDF. */
   wrapJpegInPdf(jpeg: Uint8Array, width: number, height: number): Promise<Uint8Array>;
+  /**
+   * Crop `source` to a rectangle in its own pixels.
+   *
+   * Optional so that a backend written before trimming existed still satisfies
+   * the interface — and so a test double only implements it when the test is
+   * about cropping. When it is absent, derivation simply does not trim.
+   */
+  crop?(source: RasterSource, box: ContentBox): Promise<RasterSource>;
   /** Release any native resources held by a source. */
   release?(source: RasterSource): void;
 }
@@ -92,6 +101,25 @@ export type DerivationResult =
 export interface DeriveOptions extends SearchOptions {
   /** Overrides the default output-format choice. */
   preferMime?: string;
+  /**
+   * Where the content sits in the source, from `trim.ts`.
+   *
+   * When supplied and the surrounding margin is worth removing, the image is
+   * cropped to it before anything else happens. This is what makes a signature
+   * photographed in the middle of a sheet of A4 come out as a signature strip
+   * instead of a strip of paper with a signature somewhere in it.
+   */
+  content?: ContentBox;
+  /**
+   * Force a fit mode, overriding what the constraint implies.
+   *
+   * The caller knows things the geometry does not. A portal that fixes a
+   * physical size implies `cover`, which centre-crops — correct for a
+   * photograph, where trimming the edges of a face is better than distorting
+   * it, and wrong for a signature, where the edges *are* the signature and
+   * cutting them off destroys it.
+   */
+  fit?: FitMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,6 +160,41 @@ export function chooseOutputMime(
  * resize → encode, binary-searching JPEG quality into the byte window →
  * optionally wrap in a PDF.
  */
+/**
+ * Crop away the blank margin, or return the source untouched.
+ *
+ * Every failure here is non-fatal on purpose. A backend with no `crop`, a box
+ * that does not fit, a crop that throws — none of them are reasons to fail a
+ * derivation that would otherwise succeed. The worst outcome of skipping the
+ * trim is the output we produced before trimming existed.
+ */
+async function trimToContent(
+  backend: RasterBackend,
+  source: RasterSource,
+  content: ContentBox | undefined,
+): Promise<RasterSource> {
+  if (!content || !backend.crop) return source;
+
+  const canvas = { width: source.width, height: source.height };
+  const area = canvas.width * canvas.height;
+  if (area <= 0) return source;
+
+  const margin = 1 - (content.width * content.height) / area;
+  if (margin < TRIMMABLE_MARGIN) return source;
+
+  const box = padContentBox(content, canvas);
+  if (box.width <= 0 || box.height <= 0) return source;
+  if (box.width === canvas.width && box.height === canvas.height) return source;
+
+  try {
+    const cropped = await backend.crop(source, box);
+    backend.release?.(source);
+    return cropped;
+  } catch {
+    return source;
+  }
+}
+
 export async function derive(
   backend: RasterBackend,
   bytes: Uint8Array,
@@ -176,10 +239,20 @@ export async function derive(
     };
   }
 
+  // ---- trim ---------------------------------------------------------------
+  /*
+   * Remove the blank margin before measuring anything, so the target box is
+   * planned against the content and not against the paper around it. Skipped
+   * when there is little margin to gain: a crop means a re-encode, and trading
+   * quality for two percent of border is a bad deal.
+   */
+  source = await trimToContent(backend, source, options.content);
+
   const original: SourceImage = { width: source.width, height: source.height };
 
   // ---- plan and resize ----------------------------------------------------
-  const box = planTargetBox(original, constraint);
+  const planned = planTargetBox(original, constraint);
+  const box = options.fit ? { ...planned, fit: options.fit } : planned;
   const warnings = inspectQuality(original, box);
 
   const resized =

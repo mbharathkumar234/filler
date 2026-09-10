@@ -119,6 +119,16 @@ export interface DocumentMeta {
   dpi?: number;
   pages?: number;
   capturedAt: string;
+  /**
+   * Where the ink actually sits inside the canvas, in the image's own pixels.
+   *
+   * Measured once at upload (`documents/trim.ts`) because the panel never sees
+   * a stored document's bytes — they are decrypted in the worker and stay
+   * there. Optional: documents stored before this existed have none, PDFs have
+   * none, and a measurement is allowed to fail. Absent means "judge by the
+   * canvas", which is what everything did before.
+   */
+  content?: { left: number; top: number; width: number; height: number };
 }
 
 // ---------------------------------------------------------------------------

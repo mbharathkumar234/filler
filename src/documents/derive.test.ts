@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { chooseOutputMime, derive, describeDerivation, type RasterBackend, type RasterSource } from './derive';
 import { parseConstraint } from './constraints';
 import { mmToPx } from './geometry';
+import type { DocConstraint } from '@/shared/types';
 
 const KB = 1024;
 
@@ -304,5 +305,124 @@ describe('describeDerivation', () => {
     const text = describeDerivation(result, constraint);
     expect(text).toMatch(/^JPEG, \d+ KB, 276×354 px/);
     expect(text).toContain('required: JPEG, 20 KB–50 KB, 3.5 × 4.5 cm');
+  });
+});
+
+/**
+ * Trimming, and the reason it is not merely cosmetic.
+ *
+ * A signature photographed in the middle of a sheet of paper has a canvas that
+ * is mostly paper. Plan a target box against that canvas and the portal gets a
+ * strip of blank paper with a signature somewhere in the middle of it — every
+ * dimension satisfied and the output useless.
+ */
+describe('trimming to the content before planning', () => {
+  /** A backend that records the crop it was asked for. */
+  function croppingBackend(source = { width: 1000, height: 1000 }) {
+    const crops: { left: number; top: number; width: number; height: number }[] = [];
+    const backend = fakeBackend({
+      async decode() {
+        return { ...source, handle: 'decoded' };
+      },
+      async crop(_source, box) {
+        crops.push(box);
+        return { width: box.width, height: box.height, handle: 'cropped' };
+      },
+    });
+    return { backend, crops };
+  }
+
+  const jpeg: DocConstraint = { mime: ['image/jpeg'], maxBytes: 60_000 };
+
+  it('crops away a wide margin before choosing a target box', async () => {
+    const { backend, crops } = croppingBackend();
+
+    const result = await derive(backend, new Uint8Array(10), 'image/jpeg', jpeg, {
+      content: { left: 300, top: 460, width: 400, height: 80 },
+    });
+
+    expect(crops).toHaveLength(1);
+    // Padded outward a little, and never past the canvas.
+    expect(crops[0]!.width).toBeGreaterThanOrEqual(400);
+    expect(crops[0]!.left).toBeLessThanOrEqual(300);
+    expect(result.ok).toBe(true);
+  });
+
+  it('leaves a tight crop alone, because a re-encode is not free', async () => {
+    const { backend, crops } = croppingBackend();
+
+    // The reported signature: ink filling nearly the whole frame.
+    await derive(backend, new Uint8Array(10), 'image/jpeg', jpeg, {
+      content: { left: 8, top: 8, width: 984, height: 984 },
+    });
+
+    expect(crops).toHaveLength(0);
+  });
+
+  it('does nothing when no content box was measured', async () => {
+    const { backend, crops } = croppingBackend();
+    await derive(backend, new Uint8Array(10), 'image/jpeg', jpeg);
+    expect(crops).toHaveLength(0);
+  });
+
+  it('still derives against a backend too old to crop', async () => {
+    // `crop` is optional; a backend without it must not break derivation.
+    // The small source keeps this about cropping rather than about the byte
+    // budget — the default fake decodes a 12-megapixel photo.
+    const backend = fakeBackend({
+      async decode() {
+        return { width: 1000, height: 1000, handle: 'decoded' };
+      },
+    });
+    delete (backend as { crop?: unknown }).crop;
+
+    const result = await derive(backend, new Uint8Array(10), 'image/jpeg', jpeg, {
+      content: { left: 100, top: 100, width: 200, height: 200 },
+    });
+    expect(result.ok).toBe(true);
+  });
+
+  it('survives a crop that throws', async () => {
+    const backend = fakeBackend({
+      async decode() {
+        return { width: 1000, height: 1000, handle: 'decoded' };
+      },
+      async crop() {
+        throw new Error('canvas gone');
+      },
+    });
+
+    const result = await derive(backend, new Uint8Array(10), 'image/jpeg', jpeg, {
+      content: { left: 10, top: 10, width: 100, height: 100 },
+    });
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('fit override', () => {
+  /**
+   * A fixed physical size implies `cover`, which centre-crops. For a signature
+   * that removes the ascender and the underline. The caller can say so.
+   */
+  it('letterboxes instead of centre-cropping when asked', async () => {
+    const backend = fakeBackend();
+    const boxes: string[] = [];
+    backend.resize = async (_s, box) => {
+      boxes.push(box.fit);
+      return { width: box.width, height: box.height, handle: 'resized' };
+    };
+
+    const fixed: DocConstraint = {
+      mime: ['image/jpeg'],
+      maxBytes: 60_000,
+      dimensionsMm: [35, 45],
+    };
+
+    await derive(backend, new Uint8Array(10), 'image/jpeg', fixed, { fit: 'pad' });
+    expect(boxes).toEqual(['pad']);
+
+    boxes.length = 0;
+    await derive(backend, new Uint8Array(10), 'image/jpeg', fixed);
+    expect(boxes).toEqual(['cover']);
   });
 });

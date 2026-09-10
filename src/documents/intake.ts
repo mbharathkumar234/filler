@@ -30,10 +30,23 @@
 
 import type { DocumentMeta } from '@/shared/types';
 import type { FieldKey } from '@/matching/taxonomy';
+import type { ShapeReading } from './trim';
+import { READABLE_SOURCE_MIMES, unreadableFormatLabel } from './constraints';
 
 export type IntakeRole = 'photo' | 'signature' | 'document';
 
-export type Severity = 'blocker' | 'warning';
+/**
+ * `blocker` — the derived file will be rejected or useless; replace the source.
+ * `warning` — it will probably pass, but it is worse than it needs to be.
+ * `note`    — nothing is wrong. Something non-obvious will happen (a crop, a
+ *             letterbox) and the user should not be surprised by it.
+ *
+ * The third exists because the alternative was dressing "we will trim the
+ * blank paper for you" as a warning, and a product that shouts at you for
+ * uploading a perfectly good signature teaches you to ignore it when it is
+ * right.
+ */
+export type Severity = 'blocker' | 'warning' | 'note';
 
 export interface IntakeFinding {
   severity: Severity;
@@ -50,8 +63,28 @@ interface RoleTarget {
    */
   minWidth: number;
   minHeight: number;
-  /** Acceptable width÷height, or null where any shape is fine. */
+  /**
+   * Acceptable width÷height of the *canvas*, or null where any shape is fine.
+   *
+   * Used only when the ink could not be measured. It has to be strict, because
+   * judging a canvas is guessing: a portrait canvas is the one clue available
+   * that somebody uploaded a whole sheet of paper.
+   */
   aspect: { min: number; max: number } | null;
+  /**
+   * Acceptable width÷height of the *ink*, once it has been measured.
+   *
+   * Deliberately far wider than `aspect`, because measuring changes what the
+   * number means. A portrait canvas might be a whole sheet of paper; portrait
+   * *ink* is just a signature that is taller than it is wide, which is an
+   * enormously common way for a person to sign their name. The strict window
+   * was catching real signatures and telling their owners to sign differently.
+   *
+   * What remains here is a guard against the genuinely pathological — a
+   * column of text, a whole page whose margins were already trimmed off — and
+   * nothing narrower, since the output is letterboxed rather than cut off.
+   */
+  inkAspect: { min: number; max: number } | null;
   /** Human name for the messages. */
   noun: string;
 }
@@ -69,12 +102,16 @@ export const ROLE_TARGETS: Readonly<Record<IntakeRole, RoleTarget>> = {
     minWidth: 400,
     minHeight: 460,
     aspect: { min: 0.6, max: 1.05 },
+    // A photograph fills its frame, so the ink box is the frame. Measuring
+    // does not tell us anything new here, and the window stays as it was.
+    inkAspect: { min: 0.6, max: 1.05 },
     noun: 'photo',
   },
   signature: {
     minWidth: 280,
     minHeight: 120,
     aspect: { min: 1.4, max: 6.0 },
+    inkAspect: { min: 0.45, max: 10 },
     noun: 'signature',
   },
   document: {
@@ -82,6 +119,7 @@ export const ROLE_TARGETS: Readonly<Record<IntakeRole, RoleTarget>> = {
     minWidth: 600,
     minHeight: 600,
     aspect: null,
+    inkAspect: null,
     noun: 'document',
   },
 };
@@ -99,18 +137,55 @@ export function roleFor(key: FieldKey): IntakeRole {
  */
 const MIN_BYTES_PER_PIXEL = 0.02;
 
-export function assessMaster(meta: DocumentMeta, role: IntakeRole): IntakeFinding[] {
+export function assessMaster(
+  meta: DocumentMeta,
+  role: IntakeRole,
+  /**
+   * The ink's measured shape, when the caller has one. Optional because
+   * documents stored before this existed have none, and because the
+   * measurement can legitimately fail on a blank scan.
+   */
+  shape?: ShapeReading | null,
+): IntakeFinding[] {
   const target = ROLE_TARGETS[role];
   const findings: IntakeFinding[] = [];
 
-  // A PDF cannot be cropped to a headshot, and every portal that wants a photo
-  // wants an image. For a certificate it is the normal case.
-  if (meta.mime === 'application/pdf' && role !== 'document') {
-    findings.push({
-      severity: 'blocker',
-      message: `This is a PDF, and the form needs an image for your ${target.noun}.`,
-      remedy: `Save or export the ${target.noun} as a JPEG or PNG and upload that instead.`,
-    });
+  /*
+   * A PDF has no pixels to judge.
+   *
+   * Every rule below this point measures a bitmap, and a PDF is not one:
+   * `createImageBitmap` cannot open it, so its width and height arrive as
+   * zero. Falling through meant a perfectly good PDF certificate was told it
+   * was "0x0 pixels, which is too small" — advice that cannot be followed,
+   * about the most common format a certificate comes in.
+   *
+   * Its real page size is settled at derivation, where `rasterisePdf` renders
+   * it at whatever the portal asked for.
+   */
+  if (meta.mime === 'application/pdf') {
+    // A PDF cannot be cropped to a headshot, and every portal that wants a
+    // photo wants an image. For a certificate it is the normal case.
+    if (role !== 'document') {
+      findings.push({
+        severity: 'blocker',
+        message: `This is a PDF, and the form needs an image for your ${target.noun}.`,
+        remedy: `Save or export the ${target.noun} as a JPEG or PNG and upload that instead.`,
+      });
+    }
+    return findings;
+  }
+
+  /*
+   * Nothing could be measured, so nothing below can be judged.
+   *
+   * This is what a HEIC photograph from an iPhone looks like by the time it
+   * reaches here: Chrome ships no HEIC decoder, `createImageBitmap` rejects,
+   * and the dimensions default to zero. The old code then reported it as a
+   * tiny image. The file is not tiny — it is unreadable, which is a different
+   * problem with a different answer.
+   */
+  if (meta.width <= 0 || meta.height <= 0) {
+    return [unreadableFinding(meta.mime, target)];
   }
 
   const tooSmall = meta.width < target.minWidth || meta.height < target.minHeight;
@@ -125,26 +200,7 @@ export function assessMaster(meta: DocumentMeta, role: IntakeRole): IntakeFindin
   }
 
   if (target.aspect !== null && meta.height > 0) {
-    const ratio = meta.width / meta.height;
-    if (ratio > target.aspect.max) {
-      findings.push({
-        severity: 'blocker',
-        message: `This ${target.noun} is the wrong shape — it is much wider than it is tall.`,
-        remedy:
-          role === 'photo'
-            ? 'Crop it to a passport shape, taller than it is wide, with your face filling most of the frame.'
-            : `Crop it closer to the ${target.noun} itself.`,
-      });
-    } else if (ratio < target.aspect.min) {
-      findings.push({
-        severity: 'blocker',
-        message: `This ${target.noun} is the wrong shape — it is much taller than it is wide.`,
-        remedy:
-          role === 'signature'
-            ? 'A signature strip should be wide and short. Crop away the paper above and below it.'
-            : 'Crop it to a passport shape, a little taller than it is wide.',
-      });
-    }
+    findings.push(...assessShape(meta, role, target, shape));
   }
 
   // Only worth saying when the pixels are otherwise fine. A small image in few
@@ -161,11 +217,190 @@ export function assessMaster(meta: DocumentMeta, role: IntakeRole): IntakeFindin
   return findings;
 }
 
+/**
+ * Judge an image's shape, using the ink rather than the canvas where possible.
+ *
+ * ## Why this is not one comparison
+ *
+ * The old rule compared `width / height` against a window and, on a miss, told
+ * the user to crop. That advice has a hidden premise: that the canvas is bigger
+ * than the content, so cropping can change the ratio. When somebody has already
+ * cropped tight — which is what a careful user does — the premise is false and
+ * the instruction is impossible to follow. A blocker you cannot clear is worse
+ * than no blocker, because it says the fault is yours.
+ *
+ * With a measured content box there are three distinct situations, and they
+ * deserve three different sentences:
+ *
+ *  1. **The canvas is wrong, the ink is right.** Margins. Genuinely croppable,
+ *     and we crop it ourselves at derive time, so this is a note and not a
+ *     complaint.
+ *  2. **The ink itself is out of the window.** The signature really is that
+ *     shape. Cropping cannot help, so it is a *warning* — the file still
+ *     derives, letterboxed onto the page colour — and the remedy talks about
+ *     signing again rather than about cropping.
+ *  3. **No measurement.** Fall back to the canvas and the original wording,
+ *     which is all the old code could ever do.
+ */
+function assessShape(
+  meta: DocumentMeta,
+  role: IntakeRole,
+  target: RoleTarget,
+  shape?: ShapeReading | null,
+): IntakeFinding[] {
+  const aspect = target.aspect;
+  if (aspect === null) return [];
+
+  const canvasRatio = meta.width / meta.height;
+  const withinCanvas = canvasRatio >= aspect.min && canvasRatio <= aspect.max;
+
+  // (3) Nothing measured — the pre-existing behaviour, unchanged.
+  if (!shape) {
+    return withinCanvas ? [] : [canvasFinding(canvasRatio, role, target, 'blocker')];
+  }
+
+  // Measured ink is judged against the wider window; see `inkAspect`.
+  const window = target.inkAspect ?? aspect;
+  const inkRatio = shape.contentAspect;
+  const withinInk = inkRatio >= window.min && inkRatio <= window.max;
+
+  if (withinInk) {
+    // (1) The content is a shape we are happy with; only the framing is off.
+    if (withinCanvas || !shape.trimmable) return [];
+    return [
+      {
+        severity: 'note',
+        message: `Most of this picture is blank space around the ${target.noun}.`,
+        remedy: `Nothing to do — it is cropped to the ${target.noun} automatically when a form asks for it.`,
+      },
+    ];
+  }
+
+  // (2) The ink is genuinely out of the window. Say so without blaming a crop.
+  return [shapeFinding(inkRatio, role, target, shape.trimmable)];
+}
+
+/** The original wording, kept for the case where nothing was measured. */
+function canvasFinding(
+  ratio: number,
+  role: IntakeRole,
+  target: RoleTarget,
+  severity: Severity,
+): IntakeFinding {
+  const tooWide = ratio > target.aspect!.max;
+  return {
+    severity,
+    message: `This ${target.noun} is the wrong shape — it is much ${tooWide ? 'wider than it is tall' : 'taller than it is wide'}.`,
+    remedy: tooWide
+      ? role === 'photo'
+        ? 'Crop it to a passport shape, taller than it is wide, with your face filling most of the frame.'
+        : `Crop it closer to the ${target.noun} itself.`
+      : role === 'signature'
+        ? 'A signature strip should be wide and short. Crop away the paper above and below it.'
+        : 'Crop it to a passport shape, a little taller than it is wide.',
+  };
+}
+
+/**
+ * The ink is the wrong shape, and we know it, so the message says what was
+ * actually measured and the remedy is something the user can do.
+ */
+function shapeFinding(
+  ratio: number,
+  role: IntakeRole,
+  target: RoleTarget,
+  trimmable: boolean,
+): IntakeFinding {
+  const tooWide = ratio > (target.inkAspect ?? target.aspect!).max;
+  const measured = trimmable
+    ? `even ignoring the blank space around it`
+    : `and there is no blank space left to crop`;
+
+  if (role === 'signature') {
+    return {
+      severity: 'warning',
+      message: `This signature is taller than it is wide, ${measured}. Most forms want a short, wide strip.`,
+      remedy:
+        'It will still be used — it is placed on the page colour rather than cut off. ' +
+        'For a closer fit, sign again along a single line and photograph just that.',
+    };
+  }
+
+  if (role === 'photo') {
+    return {
+      severity: 'warning',
+      message: `This photo is ${tooWide ? 'much wider than it is tall' : 'much taller than it is wide'}, ${measured}.`,
+      remedy: tooWide
+        ? 'A passport photo is a little taller than it is wide. Retake or re-crop it with your face filling most of the frame.'
+        : 'Re-crop it closer to a passport shape, with your face filling most of the frame.',
+    };
+  }
+
+  return {
+    severity: 'warning',
+    message: `This ${target.noun} is an unusual shape, ${measured}.`,
+    remedy: `Check that the whole ${target.noun} is in the picture and nothing important is cut off.`,
+  };
+}
+
+/**
+ * Explain a file we could not open, as specifically as the evidence allows.
+ *
+ * The remedy is the whole point of this function. "Try a different file" is
+ * not a remedy — the user has one file, and it is this one. For HEIC, which is
+ * what an iPhone produces by default and therefore the case that actually
+ * happens, there are two concrete routes and both are worth spelling out.
+ */
+function unreadableFinding(mime: string, target: RoleTarget): IntakeFinding {
+  const label = unreadableFormatLabel(mime);
+
+  if (label === 'HEIC' || label === 'HEIF') {
+    return {
+      severity: 'blocker',
+      message: `This is a ${label} photo, and browsers cannot open ${label}. Your ${target.noun} has not been read.`,
+      remedy:
+        'On an iPhone, open the photo in Photos and share it to Files or Mail — it is converted ' +
+        'to JPEG on the way out. To stop it happening again: Settings → Camera → Formats → Most Compatible.',
+    };
+  }
+
+  if (label !== null) {
+    return {
+      severity: 'blocker',
+      message: `This is a ${label} file, which cannot be used for a form upload.`,
+      remedy: `Open it and save a copy as JPEG or PNG, then upload that.`,
+    };
+  }
+
+  if (READABLE_SOURCE_MIMES.has(mime)) {
+    // A format we do support, that still would not open: a truncated download,
+    // a renamed file, a genuinely corrupt image.
+    return {
+      severity: 'blocker',
+      message: `This file could not be opened as an image, although its name says it is one.`,
+      remedy: 'It may be incomplete or renamed. Try the original file, or open it and re-save it as a JPEG.',
+    };
+  }
+
+  return {
+    severity: 'blocker',
+    message: `This file is not in a format a form can accept.`,
+    remedy: `Upload your ${target.noun} as a JPEG, a PNG, or a PDF.`,
+  };
+}
+
 export function blockersIn(findings: readonly IntakeFinding[]): IntakeFinding[] {
   return findings.filter((f) => f.severity === 'blocker');
 }
 
-/** Is this stored document good enough to derive from? */
+/**
+ * Is this stored document good enough to derive from?
+ *
+ * No shape reading is passed: this asks about the *stored* file, and a caller
+ * that has measured the ink can pass it to `assessMaster` directly. Since a
+ * shape mismatch is now a warning rather than a blocker, the answer no longer
+ * turns on it either way.
+ */
 export function isUsable(meta: DocumentMeta): boolean {
   return blockersIn(assessMaster(meta, roleFor(meta.key))).length === 0;
 }

@@ -13,6 +13,7 @@
 
 import type { RasterBackend, RasterSource } from './derive';
 import type { TargetBox } from './geometry';
+import { readShape, type ContentBox, type LuminanceImage, type ShapeReading } from './trim';
 
 /** White, so a letterboxed photograph looks like a photograph and not a hole. */
 const PAD_COLOUR = '#ffffff';
@@ -84,11 +85,131 @@ function drawRect(source: ImageBitmap, box: TargetBox) {
   };
 }
 
+/**
+ * Downsample an image to a luminance buffer for `trim.ts`.
+ *
+ * Two decisions worth stating.
+ *
+ * **It samples rather than reading every pixel.** A 12-megapixel phone photo is
+ * 48 MB of RGBA, and the answer we want — where the ink stops — does not change
+ * at full resolution. Capping the long edge at `SAMPLE_EDGE` keeps the read
+ * under a megabyte and the cost flat regardless of what the user uploads.
+ *
+ * **It flattens onto white.** A PNG signature is usually ink on transparency,
+ * and transparent pixels read as black in raw RGBA — which would make the
+ * entire canvas "ink" and find nothing to trim. Compositing first means the
+ * measurement sees what the user sees.
+ */
+const SAMPLE_EDGE = 512;
+
+/** Rec. 709 luma. Green dominates because human vision does. */
+function luma(r: number, g: number, b: number): number {
+  return (r * 218 + g * 732 + b * 74) >> 10;
+}
+
+export async function readLuminance(bitmap: ImageBitmap): Promise<LuminanceImage | null> {
+  const scale = Math.min(1, SAMPLE_EDGE / Math.max(bitmap.width, bitmap.height));
+  const width = Math.max(1, Math.round(bitmap.width * scale));
+  const height = Math.max(1, Math.round(bitmap.height * scale));
+
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+
+  ctx.fillStyle = PAD_COLOUR;
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(bitmap, 0, 0, width, height);
+
+  let rgba: ImageData;
+  try {
+    rgba = ctx.getImageData(0, 0, width, height);
+  } catch {
+    // A cross-origin or otherwise tainted canvas. Not fatal: callers fall back
+    // to judging by the canvas, which is what they did before this existed.
+    return null;
+  }
+
+  const data = new Uint8Array(width * height);
+  for (let i = 0, p = 0; p < data.length; i += 4, p++) {
+    data[p] = luma(rgba.data[i]!, rgba.data[i + 1]!, rgba.data[i + 2]!);
+  }
+  return { width, height, data };
+}
+
+/**
+ * Measure where the content sits inside an image file.
+ *
+ * The returned box is in the **original image's** pixels, not the sample's, so
+ * callers can crop with it directly. `null` means "could not tell" — a blank
+ * page, an unreadable file, a canvas we may not read — and every caller treats
+ * that as "fall back to the whole canvas".
+ */
+export async function measureShape(
+  bytes: Uint8Array,
+  mime: string,
+): Promise<ShapeReading | null> {
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(new Blob([bytes as BlobPart], { type: mime }));
+  } catch {
+    return null;
+  }
+
+  try {
+    const sample = await readLuminance(bitmap);
+    if (!sample) return null;
+
+    const shape = readShape(sample);
+    if (!shape) return null;
+
+    // Scale the box back up. Round outward so a stroke on the boundary of a
+    // sampled pixel is kept rather than shaved.
+    const kx = bitmap.width / sample.width;
+    const ky = bitmap.height / sample.height;
+    const content: ContentBox = {
+      left: Math.max(0, Math.floor(shape.content.left * kx)),
+      top: Math.max(0, Math.floor(shape.content.top * ky)),
+      width: Math.min(bitmap.width, Math.ceil(shape.content.width * kx)),
+      height: Math.min(bitmap.height, Math.ceil(shape.content.height * ky)),
+    };
+
+    return { ...shape, content, canvasAspect: bitmap.width / bitmap.height };
+  } finally {
+    bitmap.close();
+  }
+}
+
 export function createRasterBackend(): RasterBackend {
   return {
     async decode(bytes, mime) {
       const bitmap = await createImageBitmap(new Blob([bytes as BlobPart], { type: mime }));
       return { width: bitmap.width, height: bitmap.height, handle: bitmap };
+    },
+
+    async crop(source, box) {
+      const bitmap = bitmapOf(source);
+      const canvas = new OffscreenCanvas(box.width, box.height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('OffscreenCanvas 2D context unavailable.');
+
+      // Flatten onto white first, for the same reason `resize` does: a cropped
+      // PNG keeps its alpha, and JPEG has nowhere to put it.
+      ctx.fillStyle = PAD_COLOUR;
+      ctx.fillRect(0, 0, box.width, box.height);
+      ctx.drawImage(
+        bitmap,
+        box.left,
+        box.top,
+        box.width,
+        box.height,
+        0,
+        0,
+        box.width,
+        box.height,
+      );
+
+      const cropped = canvas.transferToImageBitmap();
+      return { width: cropped.width, height: cropped.height, handle: cropped };
     },
 
     async resize(source, box) {
