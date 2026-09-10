@@ -353,8 +353,6 @@
   "education[].roll_number": [
     "roll number",
     "roll no",
-    "registration number",
-    "enrolment number",
     "seat number",
     "अनुक्रमांक",
     "रोल नंबर"
@@ -423,7 +421,6 @@
     "बैंक का नाम"
   ],
   "bank.branch": [
-    "branch",
     "branch name",
     "bank branch",
     "शाखा"
@@ -510,5 +507,138 @@
     "pwd certificate",
     "divyang certificate",
     "handicap certificate"
+  ],
+  "education[].course": [
+    "course",
+    "course name",
+    "degree",
+    "degree name",
+    "programme",
+    "program"
+  ],
+  "education[].branch": [
+    "branch",
+    "discipline",
+    "stream",
+    "branch of study"
+  ],
+  "education[].specialization": [
+    "specialization",
+    "specialisation",
+    "area of specialization"
+  ],
+  "education[].start_year": [
+    "year of admission",
+    "admission year",
+    "start year",
+    "year of joining"
+  ],
+  "education[].registration_number": [
+    "registration number",
+    "registration no",
+    "reg no",
+    "enrolment number",
+    "enrollment number",
+    "university registration number"
+  ],
+  "education[].subjects": [
+    "subjects",
+    "subjects studied",
+    "main subjects"
+  ],
+  "education[].result_status": [
+    "result",
+    "result status"
+  ],
+  "eligibility.caste": [
+    "caste",
+    "caste name"
+  ],
+  "eligibility.subcategory": [
+    "sub category",
+    "subcategory"
+  ],
+  "eligibility.obc_ncl": [
+    "obc ncl",
+    "obc non creamy layer",
+    "non creamy layer"
+  ],
+  "eligibility.ews": [
+    "ews",
+    "economically weaker section"
+  ],
+  "eligibility.pwbd": [
+    "pwbd",
+    "person with disability",
+    "benchmark disability",
+    "differently abled"
+  ],
+  "eligibility.disability_type": [
+    "type of disability",
+    "disability type",
+    "nature of disability"
+  ],
+  "eligibility.disability_percentage": [
+    "disability percentage",
+    "percentage of disability"
+  ],
+  "eligibility.udid": [
+    "udid",
+    "udid number",
+    "unique disability id"
+  ],
+  "eligibility.domicile_state": [
+    "domicile",
+    "domicile state",
+    "state of domicile"
+  ],
+  "eligibility.local_status": [
+    "local status",
+    "local non local"
+  ],
+  "eligibility.minority": [
+    "minority",
+    "minority community",
+    "religious minority"
+  ],
+  "eligibility.defence_ward": [
+    "ward of defence",
+    "defence ward",
+    "ward of armed forces"
+  ],
+  "eligibility.ex_serviceman": [
+    "ex serviceman",
+    "ex servicemen"
+  ],
+  "eligibility.sports_quota": [
+    "sports quota",
+    "sports category"
+  ],
+  "eligibility.ncc": [
+    "ncc"
+  ],
+  "eligibility.nss": [
+    "nss"
+  ],
+  "eligibility.orphan": [
+    "orphan"
+  ],
+  "eligibility.age_relaxation": [
+    "age relaxation"
+  ],
+  "emergency.name": [
+    "emergency contact name",
+    "name of emergency contact",
+    "emergency contact person"
+  ],
+  "emergency.relation": [
+    "emergency contact relation",
+    "relation with emergency contact"
+  ],
+  "emergency.mobile": [
+    "emergency contact number",
+    "emergency mobile",
+    "emergency phone",
+    "emergency contact no"
   ]
 }

@@ -45,11 +45,19 @@ export const TRAITS: Partial<Record<FieldKey, FieldTraits>> = {
   'family.guardian_name': { shape: 'text', minLength: 3, maxLength: 100 },
   'family.father_occupation': { shape: 'text', maxLength: 60 },
   'family.annual_income': { shape: 'numeric', maxLength: 12 },
+  'family.father_mobile': { shape: 'phone', exactLength: 10 },
+  'family.mother_mobile': { shape: 'phone', exactLength: 10 },
+  'family.guardian_mobile': { shape: 'phone', exactLength: 10 },
+  'family.father_email': { shape: 'email', minLength: 6 },
+  'family.mother_email': { shape: 'email', minLength: 6 },
+  'family.guardian_email': { shape: 'email', minLength: 6 },
 
   'contact.email': { shape: 'email', minLength: 6 },
   'contact.mobile': { shape: 'phone', exactLength: 10 },
   'contact.alt_mobile': { shape: 'phone', exactLength: 10 },
   'contact.landline': { shape: 'phone', minLength: 6, maxLength: 15 },
+  'contact.alt_email': { shape: 'email', minLength: 6 },
+  'contact.official_email': { shape: 'email', minLength: 6 },
 
   'address.permanent.line1': { shape: 'text', minLength: 3, maxLength: 200 },
   'address.permanent.line2': { shape: 'text', maxLength: 200 },
@@ -167,11 +175,69 @@ const COMPATIBLE: Record<ValueShape, ValueShape[]> = {
  * Returns a veto with a reason, so the review screen can explain a *miss*
  * ("this box only takes 10 characters") rather than leaving the user to wonder.
  */
+/**
+ * Value shapes a *label* can state outright, and the tokens that state them.
+ *
+ * A label is normally evidence about *which* key a field is. These tokens are
+ * stronger than that: they say what kind of value the box holds, whatever else
+ * the label contains. "Email ID (Official /college Email address)" is an email
+ * box. The word "college" in it is a qualifier — it narrows which email — and
+ * it cannot turn the field into a college name.
+ *
+ * Deliberately only two entries. Both are unambiguous in every form of English
+ * a portal uses, and both name a value shape no other key shares. Adding
+ * "date" or "name" here would be a guess about a word that genuinely appears
+ * in unrelated labels ("Name of Bank", "Date of Issue").
+ */
+const LABEL_SHAPES: ReadonlyArray<{ pattern: RegExp; shape: ValueShape }> = [
+  { pattern: /\be-?\s?mail\b/i, shape: 'email' },
+  { pattern: /\b(mobile|phone|whatsapp)\b/i, shape: 'phone' },
+];
+
+/** The shape a label declares outright, if any. */
+export function declaredShape(field: FieldDescriptor): ValueShape | null {
+  const label = `${field.labelText} ${field.placeholder ?? ''}`;
+  for (const { pattern, shape } of LABEL_SHAPES) {
+    if (pattern.test(label)) return shape;
+  }
+  return null;
+}
+
+/** Shapes that can legitimately answer a label declaring `declared`. */
+const SATISFIES: Readonly<Record<string, readonly ValueShape[]>> = {
+  email: ['email'],
+  phone: ['phone', 'numeric'],
+};
+
 export function veto(field: FieldDescriptor, key: FieldKey): VetoResult {
   const traits = TRAITS[key];
   if (!traits) return { vetoed: false };
 
   const capability = capabilityOf(field);
+
+  /*
+   * A label that names its own value shape rules out every key of another.
+   *
+   * This exists because of a real mis-fill. On a form with two email
+   * questions, `matchForm` gave the first one `contact.email`, then re-matched
+   * the second with that key excluded — and the fallback, unguarded, picked
+   * `education[].institution` at 0.82 off the word "college". A university's
+   * name was typed into a box labelled "Email ID (Official /college Email
+   * address)".
+   *
+   * The de-duplication itself is right: two fields claiming one key is a
+   * mis-match waiting to happen. What was missing is that its *second* choice
+   * has to remain the same kind of thing as its first. With no email key left
+   * to give, the honest answer is no answer — the field is left blank and the
+   * user fills it, which §6.4 ranks far above a confident wrong value.
+   */
+  const declared = declaredShape(field);
+  if (declared !== null && !SATISFIES[declared]!.includes(traits.shape)) {
+    return {
+      vetoed: true,
+      reason: `the label says this box holds ${declared === 'email' ? 'an email address' : 'a phone number'}, and this key does not`,
+    };
+  }
 
   // A file input holds a document and nothing else, in either direction.
   if (capability.shape === 'file' && traits.shape !== 'file') {

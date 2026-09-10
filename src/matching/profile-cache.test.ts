@@ -256,3 +256,48 @@ describe('same-as-permanent detection', () => {
     ).toBeNull();
   });
 });
+
+/**
+ * Semantics on every field; a profile refines it.
+ *
+ * The filling capability is canonical + semantic, not portal-specific. A profile
+ * used to replace the matcher on every field it covered, so a model's guess
+ * saved as a learned profile overrode a correct reading indefinitely.
+ */
+describe('precedence: semantics on every field, a profile refines', () => {
+  const url = 'https://portal.example.gov.in/apply';
+  const fingerprint = 'fp-abc';
+
+  function saved(key: string, confidence: number, source: 'llm' | 'rule' | 'taught'): SiteProfile {
+    return profile({ fields: [{ key, selectors: ['#q'], confidence, source }] as SiteProfile['fields'] });
+  }
+
+  function run(labelText: string, profiles: SiteProfile[]) {
+    const fields = [field({ ref: 'f0', selectors: ['#q'], labelText })];
+    return matchFormWithContext(fields, { url, fingerprint, profiles, resolve: () => true }).results[0]!;
+  }
+
+  it('keeps the semantic answer when a learned guess disagrees with it', () => {
+    const result = run('Email ID', [saved('family.father_name', 0.8, 'llm')]);
+    expect(result.key).toBe('contact.email');
+    // Below the auto-fill line (0.85): a person sees both answers and decides.
+    expect(result.confidence).toBeLessThan(0.85);
+    expect(result.rationale).toMatch(/family\.father_name instead/);
+  });
+
+  it('lets a learned mapping fill a field semantics cannot read', () => {
+    const result = run('Xyzzy plugh', [saved('identity.dob', 0.7, 'llm')]);
+    expect(result).toMatchObject({ key: 'identity.dob', source: 'profile', confidence: 0.7 });
+  });
+
+  it('keeps the semantic answer when a saved mapping agrees', () => {
+    const result = run('Email ID', [saved('contact.email', 0.6, 'rule')]);
+    expect(result.key).toBe('contact.email');
+    expect(result.rationale).toMatch(/agrees/);
+  });
+
+  it('still defers to a field the user taught', () => {
+    const result = run('Email ID', [saved('family.father_name', 1, 'taught')]);
+    expect(result).toMatchObject({ key: 'family.father_name', source: 'profile', confidence: 1 });
+  });
+});

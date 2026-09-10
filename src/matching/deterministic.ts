@@ -8,7 +8,9 @@
  *   2. Synonym match on the label — exact, then coverage, then fuzzy.
  *   3. `name`/`id` token heuristics — `txtFatherName`, `ddlState`, `hdnPan`.
  *   4. Option-set matching — a select listing every Indian state is a state field.
- *   5. Section context — "Permanent" vs "Correspondence" resolves identical labels.
+ *   5. Qualifiers (`frame.ts`) — whose value, which one, which qualification,
+ *      which address block. Signals 1–4 find the attribute; the frame decides
+ *      which canonical key that attribute becomes on *this* label.
  *
  * And one rule that is not a signal at all: **traits veto** (`traits.ts`).
  * A 10-character numeric box is not a full name, whatever its label says.
@@ -36,7 +38,17 @@ import {
   splitBilingual,
 } from './normalise';
 import { veto } from './traits';
+import {
+  compose,
+  onlySubjectInCommon,
+  ownSection,
+  readFrame,
+  unhousedReason,
+  type AddressSection,
+} from './frame';
 import rawSynonyms from './synonyms.json';
+
+export type { AddressSection } from './frame';
 
 // ---------------------------------------------------------------------------
 // Dictionary
@@ -162,19 +174,6 @@ function matchOptionSet(field: FieldDescriptor): { key: FieldKey; matched: numbe
 // Section context
 // ---------------------------------------------------------------------------
 
-const CORRESPONDENCE_HINT = /correspondence|communication|present|current|mailing|पत्राचार|वर्तमान/i;
-const PERMANENT_HINT = /permanent|native|स्थायी/i;
-
-export type AddressSection = 'permanent' | 'correspondence';
-
-/** The section this field's own text names, if it names one. */
-function ownSection(field: FieldDescriptor): AddressSection | undefined {
-  const context = `${field.nearbyText} ${field.labelText}`;
-  if (CORRESPONDENCE_HINT.test(context)) return 'correspondence';
-  if (PERMANENT_HINT.test(context)) return 'permanent';
-  return undefined;
-}
-
 /**
  * Carry a section heading forward across the address block beneath it.
  *
@@ -213,34 +212,6 @@ export function resolveAddressSections(
   });
 
   return out;
-}
-
-/**
- * Retarget an address key onto the block it actually sits in.
- *
- * A form has "Address Line 1" twice, under two headings. The label alone cannot
- * tell them apart; the section can. Without this the second block would either
- * mis-map or land in the ambiguity cap.
- *
- * `section` is the resolved answer above when the caller is `matchForm`. A
- * single-field call has no block to read, so it falls back to this field's own
- * text — the behaviour a lone `matchField` has always had.
- */
-function applyAddressContext(
-  key: FieldKey,
-  field: FieldDescriptor,
-  section: AddressSection | undefined,
-): FieldKey {
-  if (!key.startsWith('address.')) return key;
-
-  const resolved = section ?? ownSection(field);
-  if (resolved === 'correspondence') {
-    return key.replace('address.permanent.', 'address.correspondence.') as FieldKey;
-  }
-  if (resolved === 'permanent') {
-    return key.replace('address.correspondence.', 'address.permanent.') as FieldKey;
-  }
-  return key;
 }
 
 // ---------------------------------------------------------------------------
@@ -299,7 +270,7 @@ function coverageScore(synonymTokens: number): number {
 const AMBIGUITY_MARGIN = 0.15;
 
 /** Ceiling applied to an ambiguous match — below auto-fill, so a human looks. */
-const AMBIGUITY_CEILING = 0.8;
+export const AMBIGUITY_CEILING = 0.8;
 
 function collectSignals(field: FieldDescriptor): Signal[] {
   const signals: Signal[] = [];
@@ -355,8 +326,11 @@ function collectSignals(field: FieldDescriptor): Signal[] {
         entry.tokens.length >= 2 &&
         // A partial match carried only by a generic word ("code", "number")
         // is how a matcher produces confident nonsense — require at least one
-        // distinctive token in common.
-        hasDistinctiveOverlap(entry.tokens, tokens)
+        // distinctive token in common. A subject word ("father's") is not
+        // distinctive either: it says whose value the box holds, not which
+        // attribute, so "Father's Date of Birth" is not a partial "Father's Name".
+        hasDistinctiveOverlap(entry.tokens, tokens) &&
+        !onlySubjectInCommon(entry.tokens, tokens)
       ) {
         signals.push({
           key: entry.key,
@@ -451,10 +425,19 @@ export function matchField(field: FieldDescriptor, options: MatchOptions = {}): 
 
   if (field.labelText.trim() === '' && field.selectors.length === 0) return unmatched;
 
-  // Group signals by key, retargeting address keys onto their section.
+  // Group signals by key, composing each attribute with the label's qualifiers
+  // (`frame.ts`). A signal whose meaning has no home in the taxonomy — a
+  // father's date of birth — is dropped, never filled with the applicant's own.
+  const frame = readFrame(field);
+  const unhoused: string[] = [];
   const byKey = new Map<FieldKey, { score: number; reasons: string[]; count: number }>();
   for (const signal of collectSignals(field)) {
-    const key = applyAddressContext(signal.key, field, options.section);
+    const key = compose(signal.key, frame, options.section);
+    if (key === null) {
+      const reason = unhousedReason(signal.key, frame);
+      if (!unhoused.includes(reason)) unhoused.push(reason);
+      continue;
+    }
     const existing = byKey.get(key);
     if (existing) {
       existing.score = Math.max(existing.score, signal.score);
@@ -465,7 +448,9 @@ export function matchField(field: FieldDescriptor, options: MatchOptions = {}): 
     }
   }
 
-  if (byKey.size === 0) return unmatched;
+  if (byKey.size === 0) {
+    return unhoused.length > 0 ? { ...unmatched, rationale: unhoused[0]! } : unmatched;
+  }
 
   // Apply the traits veto, and record why anything strong was rejected.
   const candidates: { key: FieldKey; score: number; reasons: string[] }[] = [];
@@ -490,10 +475,13 @@ export function matchField(field: FieldDescriptor, options: MatchOptions = {}): 
   if (candidates.length === 0) {
     return {
       ...unmatched,
+      // A label asking for something with no home is a truer explanation than
+      // a weaker key failing a type check — and it tells the user the box is theirs.
       rationale:
-        vetoed.length > 0
+        unhoused[0] ??
+        (vetoed.length > 0
           ? vetoed[0]!
-          : 'Candidate keys were ruled out by the field’s type or length.',
+          : 'Candidate keys were ruled out by the field’s type or length.'),
     };
   }
 

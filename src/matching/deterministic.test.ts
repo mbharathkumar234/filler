@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { bandOf, matchField, matchForm, synonymEntries } from './deterministic';
-import { isFieldKey, type FieldKey } from './taxonomy';
-import type { FieldDescriptor } from '@/shared/types';
+import { isFieldKey, sensitivityOf, type FieldKey } from './taxonomy';
+import { CONFIDENCE, type FieldDescriptor } from '@/shared/types';
 
 /**
  * Unit behaviour of the matcher. The *acceptance* numbers (>=70% at >=0.85,
@@ -474,4 +474,258 @@ describe('address sections carry across the block beneath the heading', () => {
       'address.correspondence.line1',
     );
   });
+});
+
+/**
+ * Two mis-fills from one live Microsoft Forms campus-drive form.
+ *
+ * Both are the same class of fault: a plausible-looking key of the *wrong kind*
+ * winning a field, and filling at a confidence high enough to be written.
+ * §6.4 rates a confident mis-match above a miss in severity, so the fix in both
+ * cases is to leave the box alone rather than to guess better.
+ */
+describe('a key of the wrong kind must not win a field', () => {
+  function field(ref: string, labelText: string): FieldDescriptor {
+    return {
+      ref,
+      tag: 'input',
+      type: 'text',
+      name: '',
+      id: '',
+      labelText,
+      labelSource: 'aria-labelledby',
+      placeholder: '',
+      nearbyText: '',
+      required: true,
+      visible: true,
+      selectors: ['input'],
+    } as unknown as FieldDescriptor;
+  }
+
+  const personal = '3. Email ID (Personal Email address) Single line text.';
+  const official = '4. Email ID (Official /college Email adderess) Single line text.';
+
+  it('never answers an email box with an institution name', () => {
+    // The reported fill: "M S Ramaiah University of Applied Sciences" was
+    // written into the official-email box, because de-duplication handed the
+    // second email field its runner-up and the runner-up was a college name.
+    const results = matchForm([field('r3', personal), field('r4', official)]);
+    const second = results.find((r) => r.fieldRef === 'r4')!;
+
+    expect(second.key).not.toBe('education[].institution');
+  });
+
+  it('keeps the first email field correct', () => {
+    const results = matchForm([field('r3', personal), field('r4', official)]);
+    expect(results.find((r) => r.fieldRef === 'r3')!.key).toBe('contact.email');
+  });
+
+  it('rules out non-email keys even when the label names one', () => {
+    // "college" is a qualifier on an email box, not a change of subject - and
+    // since the frame layer, a qualifier with a key of its own.
+    const alone = matchField(field('r', 'College Email ID'));
+    expect(alone.key).toBe('contact.official_email');
+  });
+
+  it('does not offer an address line for a labelled email box', () => {
+    const alone = matchField(field('r', 'Email ID (Personal Email address)'));
+    expect(alone.rationale).not.toMatch(/address\.permanent\.line1/);
+  });
+
+  it('does not confidently call a bare "Branch" a bank branch', () => {
+    /*
+     * On a campus form "Branch" is the academic discipline, and there is no
+     * taxonomy key for that yet — so the best available outcome is that a
+     * bank's branch name never arrives unannounced. Dropping the bare synonym
+     * takes it from 0.80 (written, unflagged) to below the auto-fill line,
+     * where a human is asked to look.
+     *
+     * The complete fix is a key of its own; until then this is the safe half.
+     */
+    const alone = matchField(field('r', '5. Branch Single line text.'));
+    expect(alone.confidence).toBeLessThan(CONFIDENCE.AUTO_FILL);
+  });
+
+  it('still recognises a branch that says which kind it is', () => {
+    expect(matchField(field('r', 'Bank Branch')).key).toBe('bank.branch');
+    expect(matchField(field('r', 'Branch Name')).key).toBe('bank.branch');
+  });
+});
+
+/**
+ * The three-layer profile (Layers 1–3).
+ *
+ * Layer 2's seven qualification blocks share their field segments with the
+ * generic `education[]` block, so a level named anywhere in a label retargets
+ * the generic match onto the right block. That is the whole mechanism, and
+ * these are the cases that decide whether it is worth having.
+ */
+describe('qualification levels', () => {
+  let seq = 0;
+  function field(labelText: string, nearbyText = ''): FieldDescriptor {
+    return {
+      // Distinct: `matchForm` keys its results by ref, so a shared one would
+      // silently collapse three fields into one.
+      ref: `r${(seq += 1)}`,
+      tag: 'input',
+      type: 'text',
+      labelText,
+      labelSource: 'label',
+      placeholder: '',
+      nearbyText,
+      required: true,
+      visible: true,
+      selectors: ['input'],
+    } as unknown as FieldDescriptor;
+  }
+
+  it.each([
+    ['10th Percentage', 'education.class_10.percentage'],
+    ['SSLC Roll Number', 'education.class_10.roll_number'],
+    ['Class 12 Percentage', 'education.class_12.percentage'],
+    ['HSC Board', 'education.class_12.board_or_university'],
+    ['Diploma College Name', 'education.diploma.institution'],
+    ['B.Tech CGPA', 'education.undergraduate.cgpa'],
+    ['UG Year of Passing', 'education.undergraduate.year_of_passing'],
+    ['PG University', 'education.postgraduate.board_or_university'],
+    ['PhD Year of Passing', 'education.phd.year_of_passing'],
+  ])('reads %s as %s', (label, expected) => {
+    expect(matchField(field(label)).key).toBe(expected);
+  });
+
+  it('keeps an unqualified label on the generic block', () => {
+    // No level named, so no level is invented.
+    expect(matchField(field('Percentage')).key).toBe('education[].percentage');
+  });
+
+  it('does not let "graduation" swallow a postgraduate field', () => {
+    // "Post Graduation" contains "graduation"; order in EDUCATION_LEVELS is
+    // what stops the undergraduate pattern claiming it.
+    expect(matchField(field('Post Graduation Percentage')).key).toBe(
+      'education.postgraduate.percentage',
+    );
+  });
+
+  it('fills three separate percentage boxes from three separate keys', () => {
+    // The failure this replaces: all three matched `education[].percentage`,
+    // and a repeatable key is exempt from the duplicate check, so one stored
+    // value would have been written into all three.
+    const keys = matchForm([
+      field('10th Percentage'),
+      field('12th Percentage'),
+      field('Degree Percentage'),
+    ]).map((r) => r.key);
+
+    expect(new Set(keys).size).toBe(3);
+  });
+});
+
+describe('branch, which is two different fields', () => {
+  function field(labelText: string, nearbyText = '', selectors = ['input']): FieldDescriptor {
+    return {
+      ref: 'r',
+      tag: 'input',
+      type: 'text',
+      labelText,
+      labelSource: 'label',
+      placeholder: '',
+      nearbyText,
+      required: true,
+      visible: true,
+      selectors,
+    } as unknown as FieldDescriptor;
+  }
+
+  it('is the academic one next to education fields', () => {
+    expect(matchField(field('Branch', 'Roll No. Course CGPA')).key).toBe('education[].branch');
+  });
+
+  it('is the bank one next to bank fields', () => {
+    expect(matchField(field('Branch', 'Bank Name IFSC Account Number')).key).toBe('bank.branch');
+  });
+
+  it('takes the hint from the control name when the text is silent', () => {
+    expect(matchField(field('Branch', '', ['#txtBankBranch'])).key).toBe('bank.branch');
+  });
+});
+
+describe('eligibility and emergency contact', () => {
+  function field(labelText: string): FieldDescriptor {
+    return {
+      ref: 'r',
+      tag: 'input',
+      type: 'text',
+      labelText,
+      labelSource: 'label',
+      placeholder: '',
+      nearbyText: '',
+      required: true,
+      visible: true,
+      selectors: ['input'],
+    } as unknown as FieldDescriptor;
+  }
+
+  it.each([
+    ['Caste', 'eligibility.caste'],
+    ['EWS', 'eligibility.ews'],
+    ['UDID Number', 'eligibility.udid'],
+    ['Domicile State', 'eligibility.domicile_state'],
+    ['Type of Disability', 'eligibility.disability_type'],
+    ['Minority Community', 'eligibility.minority'],
+    ['Ex Serviceman', 'eligibility.ex_serviceman'],
+    ['Age Relaxation', 'eligibility.age_relaxation'],
+    ['Emergency Contact Name', 'emergency.name'],
+    ['Emergency Contact Number', 'emergency.mobile'],
+  ])('reads %s as %s', (label, expected) => {
+    expect(matchField(field(label)).key).toBe(expected);
+  });
+
+  it('keeps a UDID out of the auto-fill band, like every other government id', () => {
+    expect(sensitivityOf('eligibility.udid')).toBe('high');
+  });
+});
+
+/**
+ * The semantic frame, end to end (`frame.ts` composed into `matchField`).
+ *
+ * Before it, every label here that names someone other than the applicant
+ * matched the applicant's own key at 0.80 — the band that gets written — so a
+ * student's own phone number went into the box for their mother's.
+ */
+describe('whose value, which one: the frame, end to end', () => {
+  function field(labelText: string): FieldDescriptor {
+    return {
+      ref: 'r',
+      tag: 'input',
+      type: 'text',
+      labelText,
+      labelSource: 'label',
+      placeholder: '',
+      nearbyText: '',
+      required: true,
+      visible: true,
+      selectors: ['input'],
+    } as unknown as FieldDescriptor;
+  }
+
+  it.each([
+    ["Mother's Mobile Number", 'family.mother_mobile'],
+    ["Father's Email ID", 'family.father_email'],
+    ['Guardian Mobile', 'family.guardian_mobile'],
+    ['Official Email', 'contact.official_email'],
+    ['Alternate Email ID', 'contact.alt_email'],
+    ['Confirm Email', 'contact.email'],
+    ['Mother Tongue', 'identity.mother_tongue'],
+  ])('%s → %s', (label, expected) => {
+    expect(matchField(field(label)).key).toBe(expected);
+  });
+
+  it.each(["Parent's Email", "Father's Date of Birth", "Father's Aadhaar Number"])(
+    'leaves "%s" blank rather than filling the applicant’s own',
+    (label) => {
+      const result = matchField(field(label));
+      expect(result.key).toBe('unknown');
+      expect(result.rationale).toMatch(/left for you to fill/);
+    },
+  );
 });

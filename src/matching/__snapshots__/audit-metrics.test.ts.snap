@@ -12,7 +12,7 @@ exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > names the fix
 exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > reports per-fixture numbers, for the record 1`] = `
 [
   {
-    "autoFilledCorrectly": 5,
+    "autoFilledCorrectly": 6,
     "correctAtAnyConfidence": 17,
     "fields": 30,
     "fixture": "fourth-portal",
@@ -40,7 +40,7 @@ exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > reports per-f
 
 exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > reports the totals, for the record 1`] = `
 {
-  "autoFilledCorrectly": 56,
+  "autoFilledCorrectly": 57,
   "correctAtAnyConfidence": 69,
   "fields": 89,
   "highConfidenceMisMatches": 0,

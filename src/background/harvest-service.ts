@@ -37,7 +37,7 @@ export interface TabHarvest {
   fingerprint: string;
   visibleCount: number;
   labelledCount: number;
-  /** Phase 4: what each field maps to, profile first then rules. */
+  /** Phase 4: what each field maps to — semantics on every field, refined by a profile. */
   matches: MatchResult[];
   /** Site profile used, when one applied and was not stale. */
   profileUsed: { siteId: string; version: number; resolveRate: number } | null;

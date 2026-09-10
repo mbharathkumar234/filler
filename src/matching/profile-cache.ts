@@ -103,39 +103,61 @@ export function selectProfile(
   return null;
 }
 
+/** A profile's answer for one field, and whether a person gave it. */
+export interface ProfileAnswer {
+  result: MatchResult;
+  /**
+   * True when the user taught this field. The one kind of profile answer that
+   * outranks the semantic matcher — see `matchFormWithContext`.
+   */
+  taught: boolean;
+}
+
 /**
- * Turn a profile into match results for the fields it recognises.
+ * A profile's answers for the fields it recognises on this page.
  *
  * `locate` maps a profile's selector list onto a harvested field ref, which is
  * how a recorded selector becomes a specific field on this page.
  */
-export function matchFromProfile(
+export function profileAnswers(
   profile: SiteProfile,
   fields: readonly FieldDescriptor[],
   locate: (selectors: string[], fields: readonly FieldDescriptor[]) => FieldDescriptor | null,
-): MatchResult[] {
-  const results: MatchResult[] = [];
+): ProfileAnswer[] {
+  const answers: ProfileAnswer[] = [];
 
   for (const entry of profile.fields) {
     if (!isFieldKey(entry.key)) continue;
     const field = locate(entry.selectors, fields);
     if (!field) continue;
 
-    results.push({
-      fieldRef: field.ref,
-      key: entry.key,
-      // A taught mapping is a human's answer, so it is trusted fully; a
-      // recorded rule/LLM mapping keeps whatever confidence it earned.
-      confidence: entry.source === 'taught' ? 1 : entry.confidence,
-      rationale:
-        entry.source === 'taught'
+    const taught = entry.source === 'taught';
+    answers.push({
+      taught,
+      result: {
+        fieldRef: field.ref,
+        key: entry.key,
+        // A taught mapping is a human's answer, so it is trusted fully; a
+        // recorded rule/LLM mapping keeps whatever confidence it earned.
+        confidence: taught ? 1 : entry.confidence,
+        rationale: taught
           ? `you taught this field on ${profile.siteId} (profile v${profile.version})`
           : `saved mapping for ${profile.siteId} (profile v${profile.version})`,
-      source: 'profile',
+        source: 'profile',
+      },
     });
   }
 
-  return results;
+  return answers;
+}
+
+/** Just the results — for callers that do not need to know who gave them. */
+export function matchFromProfile(
+  profile: SiteProfile,
+  fields: readonly FieldDescriptor[],
+  locate: (selectors: string[], fields: readonly FieldDescriptor[]) => FieldDescriptor | null,
+): MatchResult[] {
+  return profileAnswers(profile, fields, locate).map((answer) => answer.result);
 }
 
 /**

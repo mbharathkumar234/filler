@@ -94,12 +94,46 @@ export async function storedKeys(db: VaultDb): Promise<FieldKey[]> {
 }
 
 /**
+ * Blocks that only apply to some people, and so only count once claimed.
+ *
+ * Nobody holds a diploma *and* an undergraduate degree *and* a postgraduate
+ * degree *and* a doctorate, and almost nobody claims a reservation under every
+ * heading. Counting all of them against everybody would mean a fully prepared
+ * applicant reads "18% complete" forever — a meter that can never be finished
+ * is not a meter, it is a reproach.
+ *
+ * So a conditional block joins the denominator the moment its owner puts
+ * anything in it, and is invisible until then. Filling in your Class 12 marks
+ * does not make you less complete; it adds a block you have already started.
+ */
+const CONDITIONAL_PREFIXES: readonly string[] = [
+  'education.class_10.',
+  'education.class_12.',
+  'education.diploma.',
+  'education.undergraduate.',
+  'education.postgraduate.',
+  'education.professional_degree.',
+  'education.phd.',
+  'eligibility.',
+];
+
+/**
  * Completeness over the non-document taxonomy. Documents live in Phase 2 and
  * would otherwise drag the meter down before the feature exists.
  */
 export async function completeness(db: VaultDb): Promise<Completeness> {
-  const countable = FIELD_KEYS.filter((k) => !k.startsWith('doc.'));
   const stored = new Set(await storedKeys(db));
+
+  const started = new Set(
+    CONDITIONAL_PREFIXES.filter((prefix) => [...stored].some((k) => k.startsWith(prefix))),
+  );
+
+  const countable = FIELD_KEYS.filter((key) => {
+    if (key.startsWith('doc.')) return false;
+    const conditional = CONDITIONAL_PREFIXES.find((prefix) => key.startsWith(prefix));
+    return conditional === undefined || started.has(conditional);
+  });
+
   const filled = countable.filter((k) => stored.has(k)).length;
   return {
     filled,
