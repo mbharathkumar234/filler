@@ -236,3 +236,50 @@ describe('resolveNearbyText', () => {
     expect(resolveNearbyText(field('#a'))).toBe('');
   });
 });
+
+/**
+ * Sibling elements inside one label, which `textContent` welds together.
+ *
+ * Found on a live Microsoft Forms campus-drive form. The question title and a
+ * screen-reader-only type hint are siblings with no whitespace between them,
+ * so the harvested label came back as "1.Student NameSingle line text." —
+ * `NameSingle` matched no synonym, and the "1." and "line" that survived
+ * partly matched "address line 1". The Student Name box was mapped to
+ * `address.permanent.line1` at 0.59, which is inside the fill-and-flag band.
+ */
+describe('phrases in sibling elements', () => {
+  it('does not weld two phrases into one word', () => {
+    mount(`
+      <div id="q1"><span>1.</span><span>Student Name</span><span class="sr-only">Single line text.</span></div>
+      <input aria-labelledby="q1" />
+    `);
+
+    const label = resolveLabel(field()).text;
+    expect(label).not.toMatch(/NameSingle/);
+    expect(label).toMatch(/Student Name/);
+  });
+
+  it('keeps the words a matcher needs, in order', () => {
+    mount(`
+      <div id="q2"><span>3.</span><span>Email ID (Personal Email address)</span><span>Single line text.</span></div>
+      <input aria-labelledby="q2" />
+    `);
+    expect(resolveLabel(field()).text).toContain('Email ID (Personal Email address)');
+  });
+
+  it('still does not split a word formatted mid-way', () => {
+    // The deliberate trade in INLINE_TAGS: emphasis inside a word stays whole.
+    mount(`
+      <label for="a"><b>Stu</b>dent <em>Name</em></label><input id="a" />
+    `);
+    expect(resolveLabel(field()).text).toBe('Student Name');
+  });
+
+  it('separates block siblings that a reader sees on separate lines', () => {
+    mount(`
+      <div id="q3"><div>Father's Name</div><div>Required</div></div>
+      <input aria-labelledby="q3" />
+    `);
+    expect(resolveLabel(field()).text).not.toMatch(/NameRequired/);
+  });
+});

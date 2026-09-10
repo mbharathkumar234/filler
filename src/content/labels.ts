@@ -48,6 +48,57 @@ export function cleanLabel(raw: string | null | undefined): string {
   return text.length > MAX_LABEL ? text.slice(0, MAX_LABEL).trim() : text;
 }
 
+/**
+ * Tags that format *within* a word and must not introduce a space.
+ *
+ * Everything else is treated as a separate contribution to the label, which is
+ * how a browser computes an accessible name and how a sighted reader sees the
+ * page. `span` and `a` are deliberately **not** here: in modern form UIs they
+ * are structural wrappers around whole phrases, not intra-word emphasis. The
+ * trade is stated plainly — `<span>Stu</span>dent` would become "Stu dent" —
+ * and it is the right way round, because welding two phrases together is both
+ * far more common and far more damaging than splitting one word.
+ */
+const INLINE_TAGS = new Set([
+  'b', 'i', 'em', 'strong', 'u', 's', 'sub', 'sup',
+  'mark', 'abbr', 'code', 'kbd', 'samp', 'var', 'wbr', 'font', 'tt',
+]);
+
+/**
+ * Concatenate an element's text the way it reads, not the way it is stored.
+ *
+ * `textContent` joins adjacent elements with **nothing at all**, which is fine
+ * until a page puts two separate phrases in two sibling elements. Microsoft
+ * Forms does exactly that: the question title and a screen-reader-only type
+ * hint are siblings, so `textContent` returned
+ *
+ *     "1.Student NameSingle line text. Single line text."
+ *
+ * `NameSingle` is not a word, so "student name" no longer matched anything —
+ * and what survived was the "1." from the question number and the "line" from
+ * the type hint, which together partly match the synonym "address line 1".
+ * The field was mapped to `address.permanent.line1` at 0.59, inside the
+ * fill-and-flag band. A student's street address would have been typed into
+ * the box labelled Student Name.
+ *
+ * So text nodes are collected with a separator at element boundaries. The
+ * label becomes "1. Student Name Single line text.", which matches
+ * `identity.full_name` at 0.80 — and the noise from the hint is harmless once
+ * it is no longer glued to a real word.
+ */
+function collectText(node: Node, parts: string[]): void {
+  if (node.nodeType === 3 /* text */) {
+    parts.push(node.textContent ?? '');
+    return;
+  }
+  if (node.nodeType !== 1 /* element */) return;
+
+  const separates = !INLINE_TAGS.has((node as Element).tagName.toLowerCase());
+  if (separates) parts.push(' ');
+  for (const child of node.childNodes) collectText(child, parts);
+  if (separates) parts.push(' ');
+}
+
 function textOf(el: Element | null): string {
   if (!el) return '';
   // Exclude nested form controls: a wrapping <label> containing the input
@@ -56,7 +107,11 @@ function textOf(el: Element | null): string {
   for (const control of [...clone.querySelectorAll('input, select, textarea, button, script, style')]) {
     control.remove();
   }
-  return cleanLabel(clone.textContent);
+
+  const parts: string[] = [];
+  collectText(clone, parts);
+  // `cleanLabel` collapses the runs of whitespace this deliberately creates.
+  return cleanLabel(parts.join(''));
 }
 
 /** Text of the immediately preceding sibling nodes, nearest first. */
