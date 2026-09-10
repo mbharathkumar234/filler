@@ -14,7 +14,7 @@
 
 import type { Result } from '@/shared/messages';
 import { envelope } from '@/shared/messages';
-import type { MatchResult } from '@/shared/types';
+import type { FillPlan, MatchResult, PlannedField } from '@/shared/types';
 import { CONFIDENCE } from '@/shared/types';
 import { bandOf } from '@/matching';
 import { isDocumentKey, isFieldKey, type FieldKey } from '@/matching/taxonomy';
@@ -183,6 +183,47 @@ export function __resetRunsForTests(): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * The plan the page's run state machine runs on.
+ *
+ * Built from the harvest that was just taken, so the selectors it carries are
+ * the ones the fill is about to use — which is the whole point, since drift
+ * recovery later asks "are these still here?".
+ *
+ * `submit` is deliberately null. P2 says submission happens only after an
+ * explicit approval action, and the guard is armed separately by an approval
+ * token; putting a submit selector in the plan would be the first half of a
+ * capability nothing here should have.
+ */
+function planFrom(harvest: TabHarvest, writes: readonly WriteInstruction[]): FillPlan {
+  const selectors = new Map(harvest.fields.map((field) => [field.ref, field.selectors]));
+  const matched = new Map(harvest.matches.map((match) => [match.fieldRef, match]));
+
+  const fields: PlannedField[] = [];
+  for (const write of writes) {
+    const match = matched.get(write.ref);
+    if (!match || !isFieldKey(match.key)) continue;
+    fields.push({
+      fieldRef: write.ref,
+      key: match.key,
+      selectors: selectors.get(write.ref) ?? [],
+      confidence: match.confidence,
+      source: match.source,
+    });
+  }
+
+  return {
+    siteId: harvest.profileUsed?.siteId ?? new URL(harvest.url).hostname,
+    profileVersion: harvest.profileUsed?.version ?? null,
+    formFingerprint: harvest.fingerprint,
+    tabId: harvest.tabId,
+    fields,
+    documents: [],
+    submit: null,
+    createdAt: Date.now(),
+  };
+}
+
+/**
  * Fill the active tab.
  *
  * Re-harvests first: the plan may have been built minutes ago, and a page that
@@ -245,7 +286,7 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
 
   const response = (await chrome.tabs.sendMessage(
     tabId,
-    envelope({ type: 'fill:apply', writes }),
+    envelope({ type: 'fill:apply', writes, plan: planFrom(harvest, writes) }),
     { frameId: 0 },
   )) as Result<{ records: FillOutcomeRecord[]; aborted: boolean; blocked: number }> | undefined;
 

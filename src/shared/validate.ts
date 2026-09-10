@@ -120,7 +120,13 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'harvest:tab': (r) => num(r.tabId),
   'fill:tab': (r) => num(r.tabId),
   'fill:undo:tab': (r) => num(r.tabId),
-  'fill:apply': (r) => Array.isArray(r.writes) && r.writes.length <= LIMITS.array,
+  // Worker -> content only, so this stops the absurd rather than the hostile;
+  // the plan's contents are the worker's own, and the reducer refuses any
+  // transition it does not recognise regardless.
+  'fill:apply': (r) =>
+    Array.isArray(r.writes) &&
+    r.writes.length <= LIMITS.array &&
+    (r.plan === undefined || (typeof r.plan === 'object' && r.plan !== null)),
   // Content-script originated. The worker intersects these against the run's
   // own plan (`refillTab`), so this only has to stop the absurd.
   'fill:refill': (r) => strArray(r.refs),

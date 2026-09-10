@@ -20,7 +20,7 @@ import type { HarvestResult } from './harvester';
 import { fingerprintForm } from '@/runtime/plan';
 import { envelope, isEnvelope } from '@/shared/messages';
 import type { ExtensionRequest, Result } from '@/shared/messages';
-import type { FieldDescriptor, RunState } from '@/shared/types';
+import type { FieldDescriptor, FillPlan, RunState } from '@/shared/types';
 import {
   findDependentSelects,
   runFill,
@@ -314,7 +314,10 @@ async function requestRefill(refs: string[]): Promise<{ ok: boolean; error?: str
   }
 }
 
-async function performFill(writes: PlannedWrite[]): Promise<{
+async function performFill(
+  writes: PlannedWrite[],
+  plan?: FillPlan,
+): Promise<{
   records: WriteRecord[];
   aborted: boolean;
   blocked: number;
@@ -322,9 +325,38 @@ async function performFill(writes: PlannedWrite[]): Promise<{
   abortRequested = false;
   mountOverlay();
 
+  /*
+   * Walk the run to READY before asking to write.
+   *
+   * `FILL_START` is honoured only from READY (`runtime/machine.ts`), and a
+   * freshly attached run is IDLE. Without this the reducer ignored the event,
+   * `mayWritePage` stayed false, and *every* fill aborted with the generic
+   * "waiting for you" message — a state machine doing exactly what it was told
+   * about a plan it had never been given.
+   *
+   * A refill arrives without a plan on purpose: it is recovering the run that
+   * is already attached, not starting one.
+   */
+  if (controller && plan) await controller.setPlan(plan);
+
   if (controller && !(await controller.beginFill())) {
+    /*
+     * Two very different refusals, and they used to read identically.
+     *
+     * A blocker means the *page* needs the user — a CAPTCHA, an OTP, an
+     * e-sign. That is normal, and its instruction says what to do.
+     *
+     * No blocker means the *run* would not permit a write, which is an
+     * internal fault, not something the user did. Reporting it as "this page
+     * is waiting for you" sent two rounds of debugging at the page, so the
+     * state is named: it is the one fact that distinguishes a run that was
+     * never given a plan from one that is blocked, drifted or already
+     * finished.
+     */
     const why =
-      controller.blocker?.instruction ?? 'This page is waiting for you before anything is filled.';
+      controller.blocker?.instruction ??
+      `Nothing was filled — the run was not ready (${controller.state.t}). ` +
+        'Press "Scan page", then "Fill this form" again.';
     showToast(why);
     return { records: [], aborted: true, blocked: guardState().blocked };
   }
@@ -433,7 +465,7 @@ if (!window.__autofillContentReady) {
               },
       })) as PlannedWrite[];
 
-      performFill(writes).then(
+      performFill(writes, request.plan).then(
         (result) => sendResponse({ ok: true, data: result }),
         (error: unknown) =>
           sendResponse({

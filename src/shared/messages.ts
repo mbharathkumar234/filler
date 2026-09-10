@@ -17,7 +17,7 @@
  */
 
 import type { FieldKey } from '@/matching/taxonomy';
-import type { RunState } from './types';
+import type { FillPlan, RunState } from './types';
 import type { PersistedRun } from '@/runtime/persistence';
 import type { ProfileEntry } from '@/vault/profile-store';
 import type { Completeness } from '@/vault/profile-store';
@@ -118,7 +118,19 @@ export type HarvestRequest = { type: 'harvest:tab'; tabId: number };
 export type FillRequest =
   | { type: 'fill:tab'; tabId: number }
   | { type: 'fill:undo:tab'; tabId: number }
-  | { type: 'fill:apply'; writes: WriteInstruction[] }
+  /**
+   * `plan` is what walks the tab's run state machine to READY.
+   *
+   * It travels with the writes rather than being rebuilt on the page, because
+   * only the worker knows `siteId` and `profileVersion`, and because drift
+   * recovery compares against the selectors that were *planned* — a plan the
+   * content script synthesised from its writes would have nothing to compare.
+   *
+   * Optional because a **refill** is not a new run: a postback that wiped the
+   * form is recovered against the plan already attached to it, and sending a
+   * fresh one there would quietly restart the very run being recovered.
+   */
+  | { type: 'fill:apply'; writes: WriteInstruction[]; plan?: FillPlan }
   | { type: 'fill:undo' }
   | { type: 'fill:refill'; refs: string[] }
   | { type: 'fill:submit'; token: ApprovalToken };

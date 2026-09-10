@@ -431,3 +431,61 @@ describe('what the panel is told', () => {
     controller.detach();
   });
 });
+
+/**
+ * The gap that let a wiring bug ship.
+ *
+ * Every test above hands the controller a plan before filling, because that is
+ * the documented sequence. Production did not: `adoptRun` called `attach` and
+ * nothing ever called `setPlan`, so the reducer sat in IDLE, ignored
+ * `FILL_START`, and refused every write on every page — reported to the user
+ * as "this page is waiting for you", which pointed the blame at the portal.
+ *
+ * These pin the sequence itself rather than the steps, so the same omission
+ * cannot pass again.
+ */
+describe('a run that was never given a plan', () => {
+  it('refuses to write, because IDLE is not READY', async () => {
+    const { controller } = build();
+    await controller.attach(fingerprint());
+
+    expect(controller.state.t).toBe('IDLE');
+    expect(await controller.beginFill()).toBe(false);
+    expect(controller.state.t).toBe('IDLE');
+    controller.detach();
+  });
+
+  it('reports no blocker, so the refusal is not the page\'s fault', async () => {
+    const { controller, pauses } = build();
+    await controller.attach(fingerprint());
+    await controller.beginFill();
+
+    // The distinction the user-facing message now depends on.
+    expect(controller.blocker).toBeNull();
+    expect(pauses).toEqual([]);
+    controller.detach();
+  });
+
+  it('writes as soon as it is given one', async () => {
+    const { controller } = build();
+    await controller.attach(fingerprint());
+
+    expect(await controller.beginFill()).toBe(false);
+    await controller.setPlan(plan());
+    expect(await controller.beginFill()).toBe(true);
+    expect(controller.state.t).toBe('FILLING');
+    controller.detach();
+  });
+
+  it('accepts a plan on a run already under way, for refills', async () => {
+    // A postback refill arrives with no plan and must not restart the run.
+    const { controller } = build();
+    await controller.attach(fingerprint());
+    await controller.setPlan(plan());
+    await controller.beginFill();
+
+    expect(await controller.beginFill()).toBe(true);
+    expect(controller.state.t).toBe('FILLING');
+    controller.detach();
+  });
+});
