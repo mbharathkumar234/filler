@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Documents — Google Forms style, upload through the site's own window</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 46rem; color: #202124; background: #f0ebf8; }
+      .banner { background: #e2e8f0; padding: .75rem; font-size: .8rem; margin-bottom: 1.5rem; }
+      [role="listitem"] { background: #fff; border-radius: 8px; padding: 1.25rem; margin: .75rem 0; }
+      [role="heading"] { font-size: 1rem; }
+      .desc { color: #5f6368; font-size: .85rem; margin: .5rem 0; }
+      [role="button"] { display: inline-block; border: 1px solid #dadce0; color: #1a73e8; padding: .4rem .9rem; border-radius: 4px; cursor: pointer; }
+      .dialog { position: fixed; inset: 10% 15%; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,.3); }
+      .dialog iframe { width: 100%; height: 100%; border: 0; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>Synthetic fixture.</strong> Google Forms' shape: each file question is a heading, a
+      description and an "Add file" button, with no file box on the page. The button opens the
+      site's own upload window as a same-origin frame. Not a copy of Google's markup.
+    </p>
+
+    <div role="list">
+      <div role="listitem">
+        <div role="heading" aria-level="3"><span>Upload your recent passport size photo</span><span aria-label="Required question"> *</span></div>
+        <div class="desc">Upload 1 supported file: image. Max 10 MB.</div>
+        <div role="button" tabindex="0" id="add-photo" data-expect="doc.photo"><span>Add file</span></div>
+        <input type="hidden" name="entry.1001" value="" />
+      </div>
+      <div role="listitem">
+        <div role="heading" aria-level="3"><span>Upload your Aadhaar card copy</span><span aria-label="Required question"> *</span></div>
+        <div class="desc">Upload 1 supported file: PDF. Max 10 MB.</div>
+        <div role="button" tabindex="0" id="add-aadhaar" data-expect="doc.aadhaar_card"><span>Add file</span></div>
+        <input type="hidden" name="entry.1002" value="" />
+      </div>
+      <div role="listitem">
+        <div role="heading" aria-level="3"><span>Upload your PAN card copy</span></div>
+        <div class="desc">Upload 1 supported file. Max 10 MB.</div>
+        <div role="button" tabindex="0" id="add-pan" data-expect="doc.pan_card"><span>Add file</span></div>
+        <input type="hidden" name="entry.1003" value="" />
+      </div>
+      <div role="listitem">
+        <div role="heading" aria-level="3"><span>Upload your 10th marks card</span><span aria-label="Required question"> *</span></div>
+        <div class="desc">Upload 1 supported file. Max 10 MB.</div>
+        <div role="button" tabindex="0" id="add-marks10" data-expect="doc.marksheet_10"><span>Add file</span></div>
+        <input type="hidden" name="entry.1004" value="" />
+      </div>
+    </div>
+
+    <script>
+      // An upload finished: list the file under its question, hide Add file, close the window.
+      window.__fileArrived = function (name) {
+        var dialog = document.querySelector('.dialog');
+        if (!dialog) return;
+        var button = document.getElementById(dialog.getAttribute('data-for'));
+        var question = button.closest('[role="listitem"]');
+        var chip = document.createElement('div');
+        chip.className = 'chip';
+        chip.innerHTML = '<span></span> <button type="button" aria-label="Remove">✕</button>';
+        chip.firstChild.textContent = name;
+        chip.lastChild.addEventListener('click', function () {
+          chip.remove();
+          button.style.display = '';
+        });
+        question.appendChild(chip);
+        button.style.display = 'none';
+        // The page changes around the questions, as Google's does after an
+        // upload — enough to shift a positional path recorded before it.
+        if (!document.querySelector('.saved')) {
+          var list = document.querySelector('[role="list"]');
+          var saved = document.createElement('div');
+          saved.className = 'saved';
+          saved.textContent = 'Draft saved';
+          list.insertBefore(saved, list.firstChild);
+        }
+        // Hidden, not removed — Google shows the same window again next time.
+        dialog.style.visibility = 'hidden';
+      };
+      // "Add file" opens the site's own upload window, in a dialog, as a frame.
+      (function () {
+        var buttons = document.querySelectorAll('[role="button"]');
+        for (var i = 0; i < buttons.length; i += 1) {
+          buttons[i].addEventListener('click', function (event) {
+            var open = document.querySelector('.dialog');
+            if (open) {
+              // The same window, for the next question.
+              open.setAttribute('data-for', event.currentTarget.id);
+              open.style.visibility = 'visible';
+              return;
+            }
+            var dialog = document.createElement('div');
+            dialog.className = 'dialog';
+            dialog.setAttribute('role', 'dialog');
+            dialog.setAttribute('data-for', event.currentTarget.id);
+            var frame = document.createElement('iframe');
+            frame.name = 'upload-window';
+            frame.src = 'upload-window.html';
+            dialog.appendChild(frame);
+            document.body.appendChild(dialog);
+          });
+        }
+      })();
+    </script>
+    <!-- As on the real form: a frame the extension cannot run in. Chrome answers
+         null for it on every probe, and a hold must carry on past it. -->
+    <iframe title="Another site's frame" sandbox srcdoc="<p>elsewhere</p>" style="width:0;height:0;border:0"></iframe>
+  </body>
+</html>

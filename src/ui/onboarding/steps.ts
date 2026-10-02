@@ -47,7 +47,7 @@ export const CORE_KEYS: readonly FieldKey[] = [
 /** Enough of the core to attempt a real form. */
 export const CORE_THRESHOLD = 6;
 
-export type StepId = 'vault' | 'profile' | 'documents' | 'first-fill';
+export type StepId = 'vault' | 'path' | 'profile' | 'documents' | 'first-fill';
 
 export interface StepState {
   id: StepId;
@@ -77,6 +77,12 @@ export interface SetupFacts {
   unusableDocuments: number;
   /** Has a run ever reached the review screen? */
   hasReviewedFill: boolean;
+  /**
+   * Have the questions about this person's education been answered — or
+   * deliberately declined? The vault is laid out from the answer, so it comes
+   * before the details it decides the shape of.
+   */
+  pathAnswered: boolean;
 }
 
 export function stepsFor(facts: SetupFacts): StepState[] {
@@ -90,6 +96,12 @@ export function stepsFor(facts: SetupFacts): StepState[] {
       titleKey: 'step.vault.title',
       detailKey: 'step.vault.detail',
       done: facts.vaultReady,
+    },
+    {
+      id: 'path',
+      titleKey: 'step.path.title',
+      detailKey: 'step.path.detail',
+      done: facts.pathAnswered,
     },
     {
       id: 'profile',

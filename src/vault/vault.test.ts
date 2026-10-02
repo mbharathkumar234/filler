@@ -12,7 +12,10 @@ import {
   type VaultDb,
   type VaultMeta,
 } from './db';
-import { createVerifier, deriveKey, newSalt, type KdfParams } from './crypto';
+import { createVerifier, deriveKey, newSalt, toBase64, type KdfParams } from './crypto';
+import { countVariants, getMasterByKey, listMasters, putMaster, putVariant } from './document-store';
+import { getSetting, putSetting } from './settings-store';
+import type { DocumentMeta } from '@/shared/types';
 import {
   completeness,
   deleteField,
@@ -22,7 +25,13 @@ import {
   setFields,
   storedKeys,
 } from './profile-store';
-import { BackupFormatError, exportVault, importVault, parseBackup } from './backup';
+import {
+  BackupFormatError,
+  chunkBackup,
+  exportVault,
+  importVault,
+  parseBackup,
+} from './backup';
 import { estimateStrength, MINIMUM_BITS, MINIMUM_LENGTH } from './passphrase';
 
 const PASSPHRASE = 'correct horse battery staple';
@@ -172,6 +181,17 @@ describe('profile store', () => {
     await setField(db, key, 'doc.photo', 'blob-ref');
     await expect(completeness(db)).resolves.toMatchObject({ filled: 1 });
   });
+
+  it('leaves the level-less education block out until something is in it', async () => {
+    // Nobody fills it any more — a form that names no qualification is
+    // answered from the most recent one — so counting its fifteen fields
+    // against everybody would put 100% out of reach.
+    const before = await completeness(db);
+    await setField(db, key, 'education[].roll_number', 'old entry');
+    const after = await completeness(db);
+    expect(after.total).toBeGreaterThan(before.total);
+    expect(after.filled).toBe(1);
+  });
 });
 
 /**
@@ -288,6 +308,176 @@ describe('backup export / import', () => {
     const result = await importVault(db, JSON.stringify(file), PASSPHRASE);
     expect(result?.imported).toBe(1);
     expect(result?.skippedKeys).toEqual(['identity.from_the_future']);
+  });
+
+  /**
+   * Documents in the backup (§ Phase 1 export, extended).
+   *
+   * A backup that held only the text fields was a backup of the easy half: the
+   * photo, the signature and forty scans — the part that takes an afternoon
+   * and a scanner to replace — stayed on the old device. The bytes are
+   * already sealed in the vault, so they travel as ciphertext exactly as the
+   * profile records do, and export still never decrypts anything.
+   */
+  describe('documents', () => {
+    const PDF = new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0x99]);
+
+    async function seedWithDocument(): Promise<VaultMeta> {
+      const meta = await seedVault();
+      await putMaster(db, key, {
+        key: 'doc.marksheet_10',
+        label: 'Class 10 marks card',
+        bytes: PDF,
+        meta: {
+          mime: 'application/pdf',
+          bytes: PDF.length,
+          width: 0,
+          height: 0,
+          capturedAt: '2026-01-01T00:00:00.000Z',
+        },
+      });
+      return meta;
+    }
+
+    it('carries the file, still sealed', async () => {
+      const meta = await seedWithDocument();
+
+      const text = await exportVault(db, meta);
+      const file = parseBackup(text);
+
+      expect(file.documents).toHaveLength(1);
+      expect(file.documents?.[0]).toMatchObject({
+        key: 'doc.marksheet_10',
+        label: 'Class 10 marks card',
+        meta: { mime: 'application/pdf' },
+      });
+      // The bytes are in there as ciphertext and nowhere as themselves.
+      expect(text).not.toContain('%PDF-1.4');
+      expect(text).not.toContain(toBase64(PDF));
+    });
+
+    it('round-trips the file itself, byte for byte', async () => {
+      const meta = await seedWithDocument();
+      const text = await exportVault(db, meta);
+
+      await clearVault(db);
+      const result = await importVault(db, text, PASSPHRASE);
+      expect(result?.documents).toBe(1);
+
+      const restoredKey = await deriveKey(PASSPHRASE, (await readMeta(db))!.kdf);
+      const restored = await getMasterByKey(db, restoredKey, 'doc.marksheet_10');
+      expect(restored?.label).toBe('Class 10 marks card');
+      expect([...(restored?.bytes ?? [])]).toEqual([...PDF]);
+    });
+
+    it('skips a document whose key this build does not have', async () => {
+      const meta = await seedWithDocument();
+      const file = parseBackup(await exportVault(db, meta));
+      file.documents!.push({ ...file.documents![0]!, id: 'x', key: 'doc.from_the_future' });
+
+      await clearVault(db);
+      const result = await importVault(db, JSON.stringify(file), PASSPHRASE);
+      expect(result?.documents).toBe(1);
+      expect(result?.skippedKeys).toContain('doc.from_the_future');
+    });
+
+    it('refuses a document entry that is not shaped like one, rather than storing it', async () => {
+      const meta = await seedWithDocument();
+      const file = parseBackup(await exportVault(db, meta));
+      file.documents!.push({
+        ...file.documents![0]!,
+        id: 'broken',
+        meta: { mime: 'application/pdf' } as unknown as DocumentMeta,
+      });
+
+      await clearVault(db);
+      const result = await importVault(db, JSON.stringify(file), PASSPHRASE);
+      expect(result?.documents).toBe(1);
+    });
+
+    it('leaves the derived-variant cache out: it is a cache, and it rebuilds', async () => {
+      const meta = await seedWithDocument();
+      const [master] = await listMasters(db);
+      await putVariant(db, key, master!.id, 'doc.marksheet_10', { mime: ['application/pdf'] }, PDF, {
+        mime: 'application/pdf',
+        bytes: PDF.length,
+        width: 0,
+        height: 0,
+        capturedAt: '2026-01-01T00:00:00.000Z',
+      });
+
+      const file = parseBackup(await exportVault(db, meta));
+      expect(JSON.stringify(file)).not.toContain('variant');
+      expect(await countVariants(db)).toBe(1);
+    });
+
+    it('carries the settings, so a restored vault is laid out as it was left', async () => {
+      const meta = await seedWithDocument();
+      await putSetting(db, key, 'vault.path', '{"version":1,"board10":"cbse"}');
+
+      const text = await exportVault(db, meta);
+      expect(text).not.toContain('cbse');
+
+      await clearVault(db);
+      await importVault(db, text, PASSPHRASE);
+
+      const restoredKey = await deriveKey(PASSPHRASE, (await readMeta(db))!.kdf);
+      await expect(getSetting(db, restoredKey, 'vault.path')).resolves.toBe(
+        '{"version":1,"board10":"cbse"}',
+      );
+    });
+
+    it('replaces the settings it finds rather than leaving one behind', async () => {
+      // A restore is "this file is my vault now". A leftover key or an old
+      // academic path would be the one thing in there nobody chose.
+      const meta = await seedVault();
+      const text = await exportVault(db, meta);
+      await putSetting(db, key, 'llm.apiKey', 'from-the-vault-being-replaced');
+
+      await importVault(db, text, PASSPHRASE);
+
+      const restoredKey = await deriveKey(PASSPHRASE, (await readMeta(db))!.kdf);
+      await expect(getSetting(db, restoredKey, 'llm.apiKey')).resolves.toBeNull();
+    });
+
+    it('still opens a backup written before documents were carried', async () => {
+      // A version 1 file: the format this build wrote until now.
+      const meta = await seedVault();
+      await setField(db, key, 'identity.full_name', 'Ravi Kumar');
+      const file = parseBackup(await exportVault(db, meta));
+      const old = { ...file, version: 1 };
+      delete (old as { documents?: unknown }).documents;
+
+      await clearVault(db);
+      const result = await importVault(db, JSON.stringify(old), PASSPHRASE);
+      expect(result?.imported).toBe(1);
+      expect(result?.documents).toBe(0);
+    });
+  });
+
+  describe('cutting a backup up to send it', () => {
+    it('joins back to exactly the file that went in', () => {
+      const text = JSON.stringify({ hello: 'world', padding: 'x'.repeat(5_000) });
+      expect(chunkBackup(text, 512).join('')).toBe(text);
+      expect(chunkBackup(text, 512).length).toBeGreaterThan(1);
+    });
+
+    it('never cuts a character in half', () => {
+      // A document labelled in Kannada, or with an emoji: both are pairs in a
+      // JavaScript string, and half a pair in each of two messages is a label
+      // that comes back broken.
+      const text = `${'a'.repeat(9)}\u{1F600}${'b'.repeat(10)}`;
+      const pieces = chunkBackup(text, 10);
+
+      expect(pieces.join('')).toBe(text);
+      for (const piece of pieces) {
+        expect(piece).not.toMatch(/[\uD800-\uDBFF]$/);
+      }
+    });
+
+    it('answers with nothing for an empty file', () => {
+      expect(chunkBackup('', 10)).toEqual([]);
+    });
   });
 
   it('rejects a file that is not a backup', async () => {

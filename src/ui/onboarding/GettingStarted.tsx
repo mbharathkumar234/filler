@@ -21,6 +21,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { send } from '@/ui/lib/client';
 import { useT, type Translate } from '@/ui/lib/LocaleProvider';
 import { isUsable } from '@/documents/intake';
+import { hasSkippedPath } from '@/ui/lib/path-skip';
 import { CORE_KEYS, currentStep, shouldShowChecklist, stepsFor, type SetupFacts, type StepState } from './steps';
 
 const DISMISS_KEY = 'onboarding:dismissed';
@@ -39,11 +40,13 @@ export function openPracticeForm(): void {
  * a flag this component wrote earlier.
  */
 export async function readSetupFacts(): Promise<SetupFacts> {
-  const [status, fields, documents, audit] = await Promise.all([
+  const [status, fields, documents, audit, path, skippedPath] = await Promise.all([
     send({ type: 'vault:status' }),
     send({ type: 'vault:list' }).catch(() => []),
     send({ type: 'doc:list' }).catch(() => []),
     send({ type: 'audit:read', limit: 200 }).catch(() => []),
+    send({ type: 'vault:path' }).catch(() => null),
+    hasSkippedPath(),
   ]);
 
   const usable = documents.filter((doc) => isUsable(doc.meta));
@@ -57,6 +60,7 @@ export async function readSetupFacts(): Promise<SetupFacts> {
     // practice form, reads the review screen and closes it has learnt the
     // thing this step exists to teach.
     hasReviewedFill: audit.some((entry) => entry.event.t === 'fill.completed'),
+    pathAnswered: path !== null || skippedPath,
   };
 }
 

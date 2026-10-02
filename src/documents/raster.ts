@@ -212,6 +212,30 @@ export function createRasterBackend(): RasterBackend {
       return { width: cropped.width, height: cropped.height, handle: cropped };
     },
 
+    async turn(source, turns) {
+      const bitmap = bitmapOf(source);
+      const sideways = turns !== 2;
+      const canvas = new OffscreenCanvas(
+        sideways ? bitmap.height : bitmap.width,
+        sideways ? bitmap.width : bitmap.height,
+      );
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('OffscreenCanvas 2D context unavailable.');
+
+      ctx.fillStyle = PAD_COLOUR;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Move the origin to where the picture's own top-left corner lands, then
+      // turn about it.
+      if (turns === 1) ctx.translate(canvas.width, 0);
+      else if (turns === 2) ctx.translate(canvas.width, canvas.height);
+      else ctx.translate(0, canvas.height);
+      ctx.rotate((turns * Math.PI) / 2);
+      ctx.drawImage(bitmap, 0, 0);
+
+      const turned = canvas.transferToImageBitmap();
+      return { width: turned.width, height: turned.height, handle: turned };
+    },
+
     async resize(source, box) {
       const bitmap = bitmapOf(source);
       const canvas = new OffscreenCanvas(box.width, box.height);

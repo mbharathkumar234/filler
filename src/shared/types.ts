@@ -43,7 +43,13 @@ export interface FieldDescriptor {
    * field holds rather than us inferring it.
    */
   autocomplete?: string;
-  /** Trimmed, for LLM context. */
+  /**
+   * The headings that govern this field — its fieldset's legend and the nearest
+   * heading before it — nearest first, joined by `NEARBY_SEPARATOR`. Trimmed.
+   *
+   * The matcher reads it as section context: which address block, which
+   * qualification, whose details. The LLM receives it as structure.
+   */
   nearbyText: string;
   options?: FieldOption[];
   maxLength?: number;
@@ -57,6 +63,24 @@ export interface FieldDescriptor {
    * beside `pattern` because it serves exactly the same purpose.
    */
   inputmode?: string;
+  /**
+   * A file box's own `accept` list, verbatim. File boxes only.
+   *
+   * Added with document attachment: it is the portal's machine-readable
+   * statement of which formats *this* box takes, and it narrows whatever the
+   * prose around the box says (`documents/field-constraint.ts`).
+   */
+  accept?: string;
+  /**
+   * The hint beside a file box — "JPEG, 20–50 KB", "Max 10 MB" — capped at a
+   * few sentences. File boxes only.
+   *
+   * It decides the size and format the document is derived to. Page text,
+   * never a value, and deliberately absent from the LLM payload:
+   * `redaction.ts` builds that from a fixed list of fields, and this is not
+   * on it.
+   */
+  requirementText?: string;
   required: boolean;
   /** iframes are first-class. */
   frameId: number;
@@ -81,6 +105,14 @@ export interface MatchResult {
   rationale: string;
   source: MatchSource;
 }
+
+/**
+ * Joins the headings in `FieldDescriptor.nearbyText`, nearest first.
+ *
+ * A character that does not occur in form headings, so a heading that itself
+ * contains a dash — "Part B — Father's Particulars" — is never split in two.
+ */
+export const NEARBY_SEPARATOR = ' › ';
 
 export const CONFIDENCE = {
   /** At or above this, fill without flagging. */

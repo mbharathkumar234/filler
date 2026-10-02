@@ -283,7 +283,37 @@ export async function verifyPassphrase(key: CryptoKey, verifier: SealedRecord): 
 // Uint8Array natively).
 // ---------------------------------------------------------------------------
 
-const BASE64_RE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
+/**
+ * Is this string base64? Read character by character, never by pattern.
+ *
+ * It was `/^(?:[A-Za-z0-9+\/]{4})*(?:[A-Za-z0-9+\/]{2}==|[A-Za-z0-9+\/]{3}=)?$/`,
+ * and V8 recurses on a quantified group like that: past a few megabytes it
+ * throws "Maximum call stack size exceeded" rather than answering. A backup is
+ * made of exactly such strings — a real one carried a 5.7 MB document — so
+ * restoring a vault died on the first document it reached, every time, which
+ * is why "replace this vault" had never once worked.
+ *
+ * A scan is O(n) with no stack at all, and says the same thing: the alphabet,
+ * a length that is a multiple of four, and padding only at the very end.
+ */
+function isBase64(value: string): boolean {
+  if (value.length % 4 !== 0) return false;
+
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    const alphabet =
+      (code >= 65 && code <= 90) || // A-Z
+      (code >= 97 && code <= 122) || // a-z
+      (code >= 48 && code <= 57) || // 0-9
+      code === 43 || // +
+      code === 47; // /
+    if (alphabet) continue;
+    // '=' pads, and only the last two places of the string.
+    if (code === 61 && i >= value.length - 2) continue;
+    return false;
+  }
+  return true;
+}
 
 export function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -296,7 +326,7 @@ export function toBase64(bytes: Uint8Array): string {
 }
 
 export function fromBase64(value: string): Uint8Array {
-  if (!BASE64_RE.test(value)) {
+  if (!isBase64(value)) {
     throw new Error('Invalid base64 input.');
   }
   const binary = atob(value);

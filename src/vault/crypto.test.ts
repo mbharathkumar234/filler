@@ -256,6 +256,30 @@ describe('base64 codec', () => {
     expect(fromBase64(toBase64(new Uint8Array(0)))).toHaveLength(0);
   });
 
+  it('reads a document-sized string, which is what a backup is made of', () => {
+    /*
+     * The bug that made "replace this vault" impossible: the check that a
+     * string *is* base64 was a regular expression, and V8 recurses on one of
+     * that shape. A real backup — 110 fields, nine documents — carried a
+     * 5.7 MB value, and importing it died with "Maximum call stack size
+     * exceeded" before a single record was restored.
+     */
+    const bytes = new Uint8Array(4 * 1024 * 1024);
+    for (let i = 0; i < bytes.length; i += 1) bytes[i] = (i * 31 + (i >> 7)) & 0xff;
+    const encoded = toBase64(bytes);
+
+    expect(encoded.length).toBeGreaterThan(5_000_000);
+    const decoded = fromBase64(encoded);
+    expect(decoded.length).toBe(bytes.length);
+    expect(decoded[0]).toBe(bytes[0]);
+    expect(decoded[decoded.length - 1]).toBe(bytes[bytes.length - 1]);
+  });
+
+  it('rejects padding that is not at the end, however long the string', () => {
+    expect(() => fromBase64('QQ==QQ==')).toThrow();
+    expect(() => fromBase64(`${'QUJD'.repeat(100)}=QQ=`)).toThrow();
+  });
+
   it('rejects input that is not valid base64', () => {
     expect(() => fromBase64('not base64!!!')).toThrow();
   });

@@ -33,6 +33,9 @@ import { isFieldKey } from '@/matching/taxonomy';
 import { PRIVILEGED_TYPES, type ExtensionRequest, type RequestType } from './messages';
 
 /** Caps. Anything past these is a bug or an attack; both should be refused. */
+import { MAX_BACKUP_CHUNKS } from '@/vault/backup-format';
+import { parsePath } from '@/matching/pathway';
+
 export const LIMITS = {
   /** Longest string any message field may carry. */
   string: 20_000,
@@ -42,6 +45,13 @@ export const LIMITS = {
   array: 1_000,
   /** Most bytes in a document upload (10 MB, matching the derivation cap). */
   bytes: 10 * 1024 * 1024,
+  /**
+   * One piece of a backup, with slack over `BACKUP_CHUNK_BYTES`.
+   *
+   * The ceiling that matters is the number of pieces (`MAX_BACKUP_CHUNKS`):
+   * together they bound how much a restore can ask the worker to hold.
+   */
+  backupChunk: 5 * 1024 * 1024,
 } as const;
 
 export interface ValidationResult {
@@ -82,6 +92,16 @@ function key(value: unknown): boolean {
   return typeof value === 'string' && isFieldKey(value);
 }
 
+/** Question ref -> document key, as the user picked them. Documents only, and few. */
+function docPicks(value: unknown): boolean {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  return (
+    entries.length <= 50 &&
+    entries.every(([ref, pick]) => str(ref, 200) && key(pick) && String(pick).startsWith('doc.'))
+  );
+}
+
 // ---------------------------------------------------------------------------
 // The table
 // ---------------------------------------------------------------------------
@@ -101,7 +121,21 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'vault:set': (r) =>
     key(r.key) && str(r.value) && (r.fromDocument === undefined || typeof r.fromDocument === 'boolean'),
   'vault:delete': (r) => key(r.key),
-  'vault:import': (r) => str(r.text, LIMITS.bytes) && str(r.passphrase, LIMITS.passphrase),
+  'vault:export-chunk': (r) => num(r.index) && (r.index as number) >= 0,
+  'vault:import-chunk': (r) =>
+    num(r.index) &&
+    (r.index as number) >= 0 &&
+    (r.index as number) < MAX_BACKUP_CHUNKS &&
+    str(r.text, LIMITS.backupChunk),
+  'vault:import-commit': (r) => str(r.passphrase, LIMITS.passphrase),
+  // The path shapes the whole editor, so the bus checks it is one rather than
+  // letting the worker store whatever arrived. `parsePath` is the same reader
+  // the worker uses on the way out.
+  'vault:set-path': (r) => r.path === null || parsePath(r.path) !== null,
+
+  // The image is base64 of a page the worker rendered; the ceiling is the
+  // document upload cap with room for base64's third.
+  'ocr:recognise': (r) => str(r.image, Math.ceil(LIMITS.bytes * 1.4)) && str(r.mime, 100),
 
   'doc:put': (r) =>
     key(r.key) &&
@@ -116,6 +150,12 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'doc:derive': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,
   'doc:preflight': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,
   'doc:extract': (r) => str(r.id, 200),
+  // Names a question, never a document or a file: the worker decides both.
+  'doc:to-window': (r) =>
+    num(r.tabId) &&
+    str(r.slotRef, 200) &&
+    (r.mode === undefined || r.mode === 'drop') &&
+    (r.key === undefined || (key(r.key) && String(r.key).startsWith('doc.'))),
 
   'harvest:tab': (r) => num(r.tabId),
   'fill:tab': (r) => num(r.tabId),
@@ -131,6 +171,7 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   // own plan (`refillTab`), so this only has to stop the absurd.
   'fill:refill': (r) => strArray(r.refs),
   'fill:submit': (r) => typeof r.token === 'object' && r.token !== null,
+  'fill:press-upload': (r) => typeof r.token === 'object' && r.token !== null && str(r.ref, 200),
 
   'review:build': (r) => num(r.tabId),
   'review:collect': (r) => strArray(r.refs),
@@ -144,6 +185,10 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'approval:submit': (r) => num(r.tabId),
   'approval:revoke': (r) => num(r.tabId),
   'approval:status': (r) => num(r.tabId),
+  // Names the file box only; which button that is comes from the worker's own
+  // harvest, so a panel bug cannot point an approval at "Final Submit".
+  'approval:upload': (r) => num(r.tabId) && str(r.ref, 200),
+  'approval:upload-all': (r) => num(r.tabId) && (r.picks === undefined || docPicks(r.picks)),
 
   'audit:read': (r) => r.limit === undefined || num(r.limit),
   'audit:configure': (r) => typeof r.logValues === 'boolean',
@@ -204,12 +249,15 @@ export const NO_PAYLOAD_TYPES: readonly RequestType[] = [
   'vault:lock',
   'vault:list',
   'vault:completeness',
-  'vault:export',
+  'vault:export-begin',
   'vault:touch',
+  'vault:path',
   'doc:list',
   'harvest:request',
   'harvest:ready',
   'run:hello',
+  'run:active',
+  'run:release',
   'run:continue',
   'fill:undo',
   'audit:settings',

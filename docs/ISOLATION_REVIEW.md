@@ -122,6 +122,36 @@ it does. P2 still holds there: nothing of ours had been filled.
 
 **Tests.** `fill.spec.ts`, the whole "against a page that fights back" block.
 
+**Scope: the frame we write to.** Every write addresses the top frame —
+`fill:apply`, a refill, a review edit, an approved submit or upload all go to
+`frameId: 0` — so the gesture-injected guard installs there and nowhere else,
+matching the `document_start` guard's `allFrames: false`. A guard in a sub-frame
+protected nothing of ours and blocked the user's own press on Upload inside a
+site's upload window (Google Forms' is a same-origin frame).
+`extension.spec.ts` → "the guard stays out of sub-frames", proved to fail with
+the old behaviour restored.
+
+**A document's own Upload button.** Many portals put a submit-type Upload beside
+each file box, and it posts the whole form. It goes through this same guard: the
+user holds to approve one document, the worker issues a token naming exactly
+that button — read from its own harvest, never from the panel, and never the
+recorded final submit — and burns it before the press (`approval-service.ts`
+→ `uploadWithApproval`, `content/upload-press.ts`). The form's other file boxes
+are emptied first, so an approval for one document cannot carry another.
+`documents.spec.ts` → "is blocked unapproved … and posts once, with one
+document, approved"; `approval-upload.test.ts`.
+
+**Upload windows get no guard and no listener.** Putting a document into a
+site's upload window runs self-contained functions in that one frame
+(`content/upload-window.ts`): one counts, one sets a file box or dispatches a
+drop, and neither clicks. With one hold the user can approve every upload
+window on a form; the presses that follow — each question's Add file, and a
+window's own Upload or Insert if it waits for one — live in `submit-guard.ts`
+(`openUploadWindowWithApproval`, `pressUploadInWindowWithApproval`) and each
+refuses without a live single-use token issued from that hold
+(`uploadAllWithApproval`). `documents.spec.ts` runs them from their own source
+text: with a lapsed token neither presses anything.
+
 ## Claim 8 — a malformed message cannot reach a handler
 
 **Mechanism.** `validateRequest` runs after the sender checks and before
@@ -129,6 +159,54 @@ routing. Default-deny: an unrecognised type is refused. Every privileged type is
 covered, asserted by a test that diffs the two lists.
 
 **Tests.** `validate.test.ts`, in full.
+
+## Claim 9 — the document reader never runs in a page
+
+**Mechanism.** The document reader — PaddleOCR's text detector and English
+recogniser, run on ONNX Runtime — lives in a dedicated Web Worker, and a service
+worker cannot start one, so the worker is started from an **offscreen document**
+(`chrome.offscreen`, reason `WORKERS`) that the service worker opens on demand and
+closes, with the reader in it, when the last reading is done. Three properties
+matter for isolation:
+
+- The offscreen page is one of the extension's own pages. It is never injected
+  into a tab, has no `web_accessible_resources` entry, and a site cannot address
+  it: `ocr:recognise` is refused from anything with a `sender.tab`.
+- The recognition engine is **not in the content script**. `dist/content.js` is
+  checked after every build for the reader's own names (`readPage`,
+  `uprightPage`, `findTextBoxes`, `decodeCtc`, `layoutText`), for `onnxruntime` and
+  `InferenceSession`, and for the names of the engines it replaced.
+  All zero.
+- The extension's pages are cross-origin isolated (`cross_origin_embedder_policy:
+  require-corp`, `cross_origin_opener_policy: same-origin`), which is what lets
+  the reader's threads share memory. It is also a narrowing: an isolated page
+  cannot embed a cross-origin resource that has not opted in, and cannot keep a
+  window reference to a cross-origin page that opened it or that it opened.
+  Each thread is the runtime's own file loaded again from this package — never
+  a blob, never another origin.
+- Nothing is fetched. ONNX Runtime's wasm and the three models are files in the
+  package; the worker is started from its own URL, never a blob, and fetches its
+  models only from the extension's own `ocr/` folder, so the only
+  paths it is given are `chrome-extension://` ones. `connect-src` (`'self'` and
+  `api.anthropic.com`) would refuse anything else, and an e2e test asserts that a
+  real recognition makes **no request outside the extension's own origin**.
+
+**Tests.** `no-ocr-in-content.test.ts` (the bundle), `sender-checks.test.ts`
+(privileged type), `release-gates.test.ts` → "points the document reader at this
+package, never at a CDN" (local paths, a URL-started worker, the CPU build of
+the runtime, in the source) and "builds with the models it was measured with"
+(pinned hashes) and "the reader’s threads" (the two manifest keys; the runtime
+in a file of its own; the thread count taken from `crossOriginIsolated`), and
+`e2e/ocr.spec.ts` (offscreen opened, answered, closed; the page isolated and
+the runtime's file loaded once per thread, all from the package; the
+reader's own model fetches observed, all local; no outside requests; no CSP
+violations).
+
+**Residual.** The document's decrypted bytes exist in three of the extension's
+own background contexts while it is being read — the service worker that
+decrypted it, the offscreen page that relays it, and the reader worker that
+recognises it — rather than one. All three are the extension's, none is a page,
+and the offscreen page is closed afterwards, ending the reader worker with it.
 
 ## What this review does not cover
 

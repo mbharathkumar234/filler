@@ -9,7 +9,9 @@
 
 import type { Result, VaultRequest, ResponseMap } from '@/shared/messages';
 import { openVaultDb, readMeta } from '@/vault/db';
-import { exportVault, importVault } from '@/vault/backup';
+import { chunkBackup, exportVault, importVault } from '@/vault/backup';
+import { deleteSetting, getSetting, putSetting, PATH_SETTING } from '@/vault/settings-store';
+import { parsePath } from '@/matching/pathway';
 import {
   completeness,
   deleteField,
@@ -27,6 +29,22 @@ import {
   unlockVault,
   withKey,
 } from '@/vault/session';
+
+/**
+ * A backup in transit, held only between its first piece and its last.
+ *
+ * Both are ciphertext: the export is the sealed file itself, and the import is
+ * the file the user chose. A worker restart drops them, which is why every
+ * handler below says so plainly rather than resuming into a half file.
+ */
+let pendingExport: string[] | null = null;
+let pendingImport: string[] | null = null;
+
+/** Dropped when the vault locks, so nothing outlives the session that made it. */
+export function forgetBackupsInFlight(): void {
+  pendingExport = null;
+  pendingImport = null;
+}
 
 function ok<T>(data: T): Result<T> {
   return { ok: true, data };
@@ -70,6 +88,7 @@ export async function handleVaultRequest(
         return ok(await unlockVault(request.passphrase));
 
       case 'vault:lock':
+        forgetBackupsInFlight();
         lockVault();
         return ok(null);
 
@@ -100,19 +119,90 @@ export async function handleVaultRequest(
         if (!isUnlocked()) throw new VaultLockedError();
         return ok(await completeness(await openVaultDb()));
 
-      case 'vault:export': {
+      /*
+       * A backup now carries the documents, so it is far too big for one
+       * message. The worker writes the whole file, keeps it while the panel
+       * collects it piece by piece, and lets it go with the last piece.
+       *
+       * Nothing here decrypts: the pieces are ciphertext, as the file is.
+       */
+      /*
+       * The academic path: read and written like any other sealed setting.
+       *
+       * It is read back through `parsePath`, so a value written by a later
+       * build — or by anything else that reached the vault — is refused here
+       * rather than shaping the editor into something nobody chose.
+       */
+      case 'vault:path': {
+        if (!isUnlocked()) throw new VaultLockedError();
+        const stored = await withKey((db, key) => getSetting(db, key, PATH_SETTING));
+        if (stored === null) return ok(null);
+        try {
+          return ok(parsePath(JSON.parse(stored)));
+        } catch {
+          return ok(null);
+        }
+      }
+
+      case 'vault:set-path': {
+        if (!isUnlocked()) throw new VaultLockedError();
+        await withKey(async (db, key) => {
+          if (request.path === null) await deleteSetting(db, PATH_SETTING);
+          else await putSetting(db, key, PATH_SETTING, JSON.stringify(request.path));
+        });
+        touch();
+        return ok(null);
+      }
+
+      case 'vault:export-begin': {
         if (!isUnlocked()) throw new VaultLockedError();
         const db = await openVaultDb();
         const meta = await readMeta(db);
         if (!meta) return err('There is no vault to export.');
         touch();
-        return ok(await exportVault(db, meta));
+
+        const text = await exportVault(db, meta);
+        pendingExport = chunkBackup(text);
+        return ok({
+          chunks: pendingExport.length,
+          bytes: text.length,
+          documents: await db.count('documents'),
+        });
       }
 
-      case 'vault:import': {
+      case 'vault:export-chunk': {
+        if (!isUnlocked()) throw new VaultLockedError();
+        const piece = pendingExport?.[request.index];
+        if (pendingExport === null || piece === undefined) {
+          return err('That export is no longer in progress. Start it again.');
+        }
+        touch();
+        // The last piece completes the file; the worker keeps nothing after it.
+        if (request.index === pendingExport.length - 1) pendingExport = null;
+        return ok(piece);
+      }
+
+      case 'vault:import-chunk': {
+        // Piece 0 starts a restore; anything out of order is refused rather
+        // than stitched into a file the user never had.
+        if (request.index === 0) pendingImport = [];
+        if (pendingImport === null || request.index !== pendingImport.length) {
+          return err('The backup arrived out of order. Choose the file again.');
+        }
+        pendingImport.push(request.text);
+        return ok({ received: pendingImport.length });
+      }
+
+      case 'vault:import-commit': {
+        if (pendingImport === null || pendingImport.length === 0) {
+          return err('There is no backup waiting to be restored.');
+        }
         const db = await openVaultDb();
-        const result = await importVault(db, request.text, request.passphrase);
+        const result = await importVault(db, pendingImport.join(''), request.passphrase);
+        // A wrong passphrase keeps the pieces, so the user can try again
+        // without reading the whole file a second time.
         if (result === null) return ok(null);
+        pendingImport = null;
         // The imported vault has different KDF params; force a fresh unlock.
         lockVault();
         return ok(result);
@@ -129,6 +219,47 @@ export async function handleVaultRequest(
   }
 }
 
+/**
+ * Every vault message, listed rather than matched by prefix.
+ *
+ * `startsWith('vault:')` routed anything spelled that way and silently dropped
+ * anything not — which is what happened to `path:get`: a real handler existed
+ * below, the panel called it, and the router answered "Unhandled request"
+ * because the name did not start with the right five characters.
+ *
+ * The list is checked against the union by the compiler below, so a message
+ * added to `VaultRequest` and forgotten here fails the build instead of
+ * failing in front of a user.
+ */
+const VAULT_REQUEST_TYPES = [
+  'vault:status',
+  'vault:create',
+  'vault:unlock',
+  'vault:lock',
+  'vault:list',
+  'vault:set',
+  'vault:delete',
+  'vault:completeness',
+  'vault:export-begin',
+  'vault:export-chunk',
+  'vault:import-chunk',
+  'vault:import-commit',
+  'vault:touch',
+  'vault:path',
+
+  'vault:set-path',
+  'vault:reauth',
+] as const;
+
+/** A vault message this module can handle but nothing would route to it. */
+type Unrouted = Exclude<VaultRequest['type'], (typeof VAULT_REQUEST_TYPES)[number]>;
+/** A name in the list that is not a vault message at all. */
+type NotAMessage = Exclude<(typeof VAULT_REQUEST_TYPES)[number], VaultRequest['type']>;
+const ROUTING_IS_COMPLETE: [Unrouted, NotAMessage] extends [never, never] ? true : never = true;
+void ROUTING_IS_COMPLETE;
+
+const VAULT_TYPE_SET: ReadonlySet<string> = new Set(VAULT_REQUEST_TYPES);
+
 export function isVaultRequest(type: string): type is VaultRequest['type'] {
-  return type.startsWith('vault:');
+  return VAULT_TYPE_SET.has(type);
 }

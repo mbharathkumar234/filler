@@ -25,6 +25,8 @@ let vaultFields: Array<{ key: string }> = [];
 let documents: Array<{ meta: DocumentMeta }> = [];
 let auditEntries: Array<{ event: { t: string } }> = [];
 const storage: Record<string, unknown> = {};
+/** The academic path the vault is laid out from; null until it is answered. */
+let academicPath: unknown = null;
 
 function meta(over: Partial<DocumentMeta> = {}): DocumentMeta {
   return {
@@ -50,6 +52,8 @@ vi.mock('@/ui/lib/client', () => ({
         return Promise.resolve(documents);
       case 'audit:read':
         return Promise.resolve(auditEntries);
+      case 'vault:path':
+        return Promise.resolve(academicPath);
       default:
         return Promise.reject(new Error(`unexpected ${request.type}`));
     }
@@ -62,6 +66,7 @@ beforeEach(() => {
   documents = [];
   auditEntries = [];
   for (const k of Object.keys(storage)) delete storage[k];
+  academicPath = null;
 
   vi.stubGlobal('chrome', {
     storage: {
@@ -125,7 +130,7 @@ describe('what the checklist shows', () => {
     await waitFor(() => expect(screen.getByText('Getting set up')).toBeTruthy());
     // The vault is open — that step is genuinely done, and saying otherwise
     // would be the exact dishonesty this checklist is built to avoid.
-    expect(screen.getByText('1 of 4 done')).toBeTruthy();
+    expect(screen.getByText('1 of 5 done')).toBeTruthy();
     expect(screen.getByText('Add your details')).toBeTruthy();
   });
 
@@ -133,13 +138,14 @@ describe('what the checklist shows', () => {
     vaultStatus = { exists: false, unlocked: false };
     render(<GettingStarted />);
     await waitFor(() => expect(screen.getByText('Getting set up')).toBeTruthy());
-    expect(screen.getByText('0 of 4 done')).toBeTruthy();
+    expect(screen.getByText('0 of 5 done')).toBeTruthy();
   });
 
   it('shows nothing at all to somebody already set up', async () => {
     vaultFields = CORE_KEYS.map((key) => ({ key }));
     documents = [{ meta: meta() }];
     auditEntries = [{ event: { t: 'fill.completed' } }];
+    storage['path:skipped'] = true;
 
     const { container } = render(<GettingStarted />);
     // Give the effect a chance to resolve and *not* render.
@@ -157,6 +163,7 @@ describe('what the checklist shows', () => {
   it('offers the practice form once the details are in', async () => {
     vaultFields = CORE_KEYS.map((key) => ({ key }));
     documents = [{ meta: meta() }];
+    storage['path:skipped'] = true;
     render(<GettingStarted />);
     await waitFor(() => expect(screen.getByText('Open the practice form')).toBeTruthy());
   });
@@ -164,6 +171,7 @@ describe('what the checklist shows', () => {
   it('opens the practice form from inside the extension, not from a dev server', async () => {
     vaultFields = CORE_KEYS.map((key) => ({ key }));
     documents = [{ meta: meta() }];
+    storage['path:skipped'] = true;
     render(<GettingStarted />);
     const button = await screen.findByText('Open the practice form');
     button.click();

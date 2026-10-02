@@ -15,8 +15,15 @@
  * below connects those ports to the real `chrome.*` and the real overlay.
  */
 
-import { harvest } from './harvester';
+import { harvest, isVisible } from './harvester';
 import type { HarvestResult } from './harvester';
+import {
+  findUploadButton,
+  findUploadSlots,
+  type UploadButton,
+  type UploadSlot,
+} from './upload-slots';
+import { base64ToBytes } from '@/shared/base64';
 import { fingerprintForm } from '@/runtime/plan';
 import { envelope, isEnvelope } from '@/shared/messages';
 import type { ExtensionRequest, Result } from '@/shared/messages';
@@ -42,9 +49,13 @@ import {
   guardState,
   arm,
   disarm,
+  disengage,
+  engage,
   submitWithApproval,
   type ApprovalToken,
 } from './submit-guard';
+import { isTerminal } from '@/runtime/machine';
+import { pressUpload } from './upload-press';
 import {
   hidePause,
   mountOverlay,
@@ -58,6 +69,11 @@ import {
 
 /** Latest harvest, so a plan ref can be resolved back to a live element. */
 let current: HarvestResult | null = null;
+/** Upload slots from the latest harvest (`u0`…), resolved the same way. */
+let currentSlots: { slots: UploadSlot[]; elements: Map<string, Element> } = {
+  slots: [],
+  elements: new Map(),
+};
 /** Pre-fill snapshots for Undo. */
 let lastSnapshots: FieldSnapshot[] = [];
 let abortRequested = false;
@@ -83,6 +99,17 @@ export interface HarvestReport {
   dependentSelects: string[];
   /** The submit control, recorded so approval can name exactly one element. */
   submit: { selector: string; label: string } | null;
+  /**
+   * Upload questions with no file box of their own — a Google Forms "Add
+   * file", a drag-and-drop area. Kept apart from `fields`: they never enter
+   * the fill plan, the review's value rows, or the LLM payload.
+   */
+  uploadSlots: UploadSlot[];
+  /**
+   * Each file box's own Upload button, by field ref. Recorded so an approval
+   * can name it; pressed only by `submit-guard.ts`, only with a token.
+   */
+  uploadButtons: Record<string, UploadButton>;
   /** § Phase 6: human-only steps found on this page. */
   humanSteps: { type: string; instruction: string }[];
   /** § Phase 6: the run state, after any rehydration. */
@@ -99,13 +126,22 @@ function identifiers(result: HarvestResult): string[] {
   );
 }
 
-/** Locate the form's final submit control, for the Phase 7 approval token. */
-function findSubmit(): { selector: string; label: string } | null {
+/**
+ * Locate the form's final submit control, for the Phase 7 approval token.
+ *
+ * A file box's own Upload button is never it. On a page with no "Submit" in
+ * any button's text the last candidate used to win, and that could be the
+ * Upload beside the last file box — an approval for the whole application
+ * would then have named a single document's upload.
+ */
+function findSubmit(exclude: ReadonlySet<Element> = new Set()): { selector: string; label: string } | null {
   const candidates = [
     ...document.querySelectorAll<HTMLElement>(
       'button[type="submit"], input[type="submit"], button:not([type])',
     ),
-  ].filter((el) => el.offsetParent !== null || el.getClientRects().length > 0);
+  ].filter(
+    (el) => !exclude.has(el) && (el.offsetParent !== null || el.getClientRects().length > 0),
+  );
 
   const preferred =
     candidates.find((el) =>
@@ -131,8 +167,36 @@ function findSubmit(): { selector: string; label: string } | null {
   };
 }
 
+/**
+ * Each file box's Upload button, keyed by the box's ref.
+ *
+ * Found before the final submit is chosen, so that choice can exclude them.
+ * The final submit is then excluded here in turn — `findUploadButton` never
+ * returns it, but the exclusion is stated rather than trusted.
+ */
+function uploadButtonsFor(result: HarvestResult): {
+  buttons: Record<string, UploadButton>;
+  elements: Set<Element>;
+} {
+  const buttons: Record<string, UploadButton> = {};
+  const elements = new Set<Element>();
+  for (const field of result.fields) {
+    if (field.tag !== 'file') continue;
+    const input = result.elements.get(field.ref);
+    if (!input) continue;
+    const found = findUploadButton(input, null);
+    if (!found) continue;
+    buttons[field.ref] = found.button;
+    elements.add(found.element);
+  }
+  return { buttons, elements };
+}
+
 export async function runHarvest(): Promise<HarvestReport> {
   current = harvest(document, { shadowDom: true, frameId: 0 });
+  currentSlots = findUploadSlots(document, isVisible);
+  const uploads = uploadButtonsFor(current);
+  const submit = findSubmit(uploads.elements);
 
   const visible = current.fields.filter((f) => f.visible);
   const fingerprint = await fingerprintForm({
@@ -143,8 +207,11 @@ export async function runHarvest(): Promise<HarvestReport> {
     step: current.wizard?.step ?? null,
   });
 
-  // § Phase 6: adopt (or resume) the run for this form before reporting.
-  await adoptRun(fingerprint);
+  // § Phase 6: adopt (or resume) the run for this form before reporting — in
+  // the top frame only, where every write goes. A run controller in a
+  // sub-frame watched mutations and raised overlays inside a site's own upload
+  // window, which is no place for either.
+  if (isTopFrame(window)) await adoptRun(fingerprint);
 
   return {
     url: location.href,
@@ -157,7 +224,9 @@ export async function runHarvest(): Promise<HarvestReport> {
     visibleCount: visible.length,
     labelledCount: visible.filter((f) => f.labelText.trim() !== '').length,
     dependentSelects: [...findDependentSelects(document)],
-    submit: findSubmit(),
+    submit,
+    uploadSlots: currentSlots.slots,
+    uploadButtons: uploads.buttons,
     humanSteps: detectBlockers(document).map((finding) => ({
       type: finding.type,
       instruction: finding.instruction,
@@ -168,11 +237,13 @@ export async function runHarvest(): Promise<HarvestReport> {
 
 /** Resolve a descriptor ref to its live element, re-resolving by selector. */
 export function elementFor(ref: string): Element | null {
-  const known = current?.elements.get(ref);
+  const known = current?.elements.get(ref) ?? currentSlots.elements.get(ref);
   if (known?.isConnected) return known;
 
   // The element may have been replaced by a postback; fall back to selectors.
-  const descriptor = current?.fields.find((field) => field.ref === ref);
+  const descriptor =
+    current?.fields.find((field) => field.ref === ref) ??
+    currentSlots.slots.find((slot) => slot.ref === ref);
   for (const selector of descriptor?.selectors ?? []) {
     const found = resolveSelector(selector);
     if (found) return found;
@@ -289,7 +360,11 @@ async function adoptRun(fingerprint: string): Promise<void> {
     onResume: hidePause,
   });
 
-  await controller.attach(fingerprint);
+  const state = await controller.attach(fingerprint);
+  // A run still in progress on this page — a postback that came back carrying
+  // our values — is exactly what the guard is for. An idle or finished one is
+  // not, and a scan of a page is not a reason to lock its buttons.
+  if (state.t !== 'IDLE' && !isTerminal(state)) engage();
 }
 
 /**
@@ -363,6 +438,10 @@ async function performFill(
 
   setStatus('filling', `0 of ${writes.length} fields`);
 
+  // From here the page carries our values: nothing leaves it unapproved (P2).
+  // Before this point the guard is dormant, and the page is the user's.
+  engage();
+
   const result = await runFill(writes, {
     resolve: elementFor,
     onProgress: setProgress,
@@ -388,6 +467,30 @@ async function performFill(
   return { records: result.records, aborted: result.aborted, blocked: guardState().blocked };
 }
 
+/** Disengage the document_start guard unless the worker holds a live run for this tab. */
+async function standDownUnlessRunLive(): Promise<void> {
+  try {
+    const response = (await chrome.runtime.sendMessage(envelope({ type: 'run:active' }))) as
+      | { ok: true; data: boolean }
+      | { ok: false }
+      | undefined;
+    if (!(response?.ok === true && response.data === true)) disengage();
+  } catch {
+    // The worker could not be asked. Guarding a page nobody is filling is the
+    // failure the user notices — their own login refused — so hand it back.
+    disengage();
+  }
+}
+
+function isTopFrame(win: Window): boolean {
+  try {
+    return win.top === win;
+  } catch {
+    // Unreadable `top` means we are nested somewhere foreign: not the top.
+    return false;
+  }
+}
+
 // The script is injected repeatedly across a session; wire listeners once.
 declare global {
   interface Window {
@@ -410,13 +513,38 @@ declare global {
 if (!window.__autofillContentReady) {
   window.__autofillContentReady = true;
   try {
-  // P2 first: the guard is live before anything can be written.
+  /*
+   * P2 first: the guard is live before anything can be written — in the one
+   * frame anything is ever written to.
+   *
+   * Every write addresses the top frame: `fill:apply`, a refill, a review
+   * edit, an approved submit or upload all go to `frameId: 0`, and
+   * `elementFor` resolves in this document only. The document_start guard is
+   * registered with `allFrames: false` for the same reason (`early-guard.ts`).
+   * A guard in a sub-frame protects nothing of ours, and it did harm: a site's
+   * own upload window is often a same-origin frame (Google Forms' is), and the
+   * guard there blocked the user's own press on its Upload button.
+   */
   setToastHandler((message) => {
     mountOverlay();
     setStatus('blocked', 'Nothing was submitted.');
     showToast(message);
   });
-  installSubmitGuard(document);
+  if (isTopFrame(window)) {
+    installSubmitGuard(document);
+    /*
+     * Loaded before the page itself: the per-origin document_start script,
+     * which exists only while a run is live on this site (`early-guard.ts`).
+     * It is there for one case — a postback that comes back carrying our
+     * values and submits during load — so it starts engaged, before the page
+     * can act, and asks the worker whether *this tab* has that run. Any other
+     * tab of the same site is handed back within a round trip.
+     */
+    if (document.readyState === 'loading') {
+      engage();
+      void standDownUnlessRunLive();
+    }
+  }
 
   setAbortHandler(() => {
     abortRequested = true;
@@ -424,7 +552,7 @@ if (!window.__autofillContentReady) {
     // § Phase B: an abort leaves no armed state behind. The worker revokes its
     // own grant when it sees `run:abort`; this is the page side of the same
     // thing, and it happens first because it is the half that can act.
-    disarm();
+    disengage();
     void controller?.abort('user pressed Abort');
     void chrome.runtime.sendMessage(envelope({ type: 'run:abort', why: 'user pressed Abort' }));
   });
@@ -439,6 +567,13 @@ if (!window.__autofillContentReady) {
     if (sender.id !== chrome.runtime.id) return false;
 
     const request = message.payload as ExtensionRequest;
+
+    if (request.type === 'run:release') {
+      // The run is over; the page is the user's again.
+      disengage();
+      sendResponse({ ok: true, data: null });
+      return false;
+    }
 
     if (request.type === 'harvest:request') {
       runHarvest().then(
@@ -459,7 +594,7 @@ if (!window.__autofillContentReady) {
           typeof write.value === 'string'
             ? write.value
             : {
-                bytes: Uint8Array.from(write.value.bytes),
+                bytes: base64ToBytes(write.value.base64),
                 mime: write.value.mime,
                 filename: write.value.filename,
               },
@@ -536,6 +671,8 @@ if (!window.__autofillContentReady) {
         sendResponse({ ok: false, error: 'That field is no longer on the page.' });
         return true;
       }
+      // A correction from the review screen writes our value into the page.
+      engage();
       const outcome = applyEdit(el, request.value);
       // A correction is a fill: the run must remember it, or re-verification
       // would decide the page had reset the field and put our value back.
@@ -577,6 +714,16 @@ if (!window.__autofillContentReady) {
       const ok = submitWithApproval(token, document);
       setStatus(ok ? 'done' : 'blocked', ok ? 'Submitted.' : 'Could not submit.');
       sendResponse({ ok: true, data: { submitted: ok } });
+      return true;
+    }
+
+    if (request.type === 'fill:press-upload') {
+      // One document's approved upload: same guard, same token discipline as
+      // the final submit. See `upload-press.ts` for the one thing it adds.
+      const ok = pressUpload(request.token, elementFor(request.ref), document);
+      mountOverlay();
+      setStatus(ok ? 'review' : 'blocked', ok ? 'Upload pressed.' : 'Could not press Upload.');
+      sendResponse({ ok: true, data: { pressed: ok } });
       return true;
     }
 

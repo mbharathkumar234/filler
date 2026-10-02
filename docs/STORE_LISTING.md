@@ -40,6 +40,16 @@ AutoFill Assistant — Indian portal forms
 > When a form reaches one of those, it stops and hands the page back to you with
 > a note about what is needed. Those steps are yours.
 >
+> **Your documents, sized for each form**
+>
+> Save your photograph, signature and certificates once. When a form asks for
+> one, the extension resizes or converts your copy to what that form says it
+> accepts — "JPEG, 20–50 KB, 3.5 × 4.5 cm" — and puts it into the form's upload
+> box. Where a portal has its own Upload button beside the box, you approve each
+> upload with the same press-and-hold, and the extension presses it for you. On
+> forms that upload through their own window, such as Google Forms, you open the
+> window, the extension puts the file in, and you press Upload.
+>
 > **Where your details live**
 >
 > On this device, in encrypted storage, under a passphrase only you know. There
@@ -81,6 +91,21 @@ time. Nothing is synced.
 
 **`sidePanel`** — The side panel is the extension's entire user interface.
 
+**`offscreen`** — Used only to read a document the user has saved. The
+reader runs in a dedicated Web Worker, and a service worker cannot start one, so
+the extension opens one of its own hidden pages (`chrome.offscreen`, reason
+`WORKERS`), starts the reader there, and closes the page — and the worker with
+it — when the reading is done. The offscreen page is never a web page, is not
+injected anywhere, and cannot be reached by a site.
+
+**`cross_origin_embedder_policy` / `cross_origin_opener_policy`** — not
+permissions, and they grant nothing: they make every page of the extension
+cross-origin isolated. The document reader runs its models on several CPU
+threads, threads share memory, and Chrome allows shared memory only on an
+isolated page. The extension's pages load nothing from another origin (the CSP
+already forbids it), so isolation changes nothing they do; it only narrows what
+they may embed.
+
 **No host permissions are requested.** The extension has no standing access to
 any website. `host_permissions` in the manifest is an empty array.
 
@@ -96,15 +121,40 @@ extension. That is late enough to matter in exactly one case — if a portal
 reloads the page with the previously filled values still in it and submits them
 during `load`, they would go before the guard exists. Granting the origin lets
 the guard register as a `document_start` content script **for that origin only**,
-with `persistAcrossSessions: false`, and the panel lists every granted origin
-with a one-click revoke.
+**only while a fill is in progress there**: it is unregistered the moment the run
+ends (approved, aborted, timed out, or the tab closed), and on a page load where
+this tab has no live run it stands down within one message round trip. It is
+`persistAcrossSessions: false`, and the panel lists every granted origin with a
+one-click revoke.
+
+**The guard never touches a page the extension has not filled.** It stops
+submissions only while the page carries a fill of ours; the user's own sign-in
+on any other page, on any site, goes through untouched.
 
 If a reviewer would prefer the feature removed rather than the pattern narrowed,
 it can be: the extension works without it, with that one window left open.
 
-**Remote code:** none. All code is bundled. The one WebAssembly module is the
-Argon2id password-hashing implementation, embedded in the package rather than
-fetched, which is why the CSP includes `wasm-unsafe-eval` and nothing else.
+**Remote code:** none. All code is bundled. There are two WebAssembly modules,
+both embedded in the package rather than fetched — the Argon2id
+password-hashing implementation, and ONNX Runtime, which runs the document
+reader. The reader's three models (PaddleOCR's PP-OCRv5 text detector, its
+English recogniser, and its page-orientation classifier, which turns a sideways
+photograph upright before it is read — all Apache-2.0) ship as files in the
+package too; they are
+fetched once when the extension is *built*, checked against pinned SHA-256
+hashes, and never at run time. Nothing is downloaded at any point while the
+extension runs, which is why the CSP includes `wasm-unsafe-eval` and nothing
+else; `connect-src` would refuse such a fetch anyway. (PaddleOCR's own browser
+SDK is not used: its OpenCV.js dependency needs `new Function`, which this CSP
+does not permit.)
+
+**Reading a document happens on the device.** When the user presses "Read
+details from this" on a document they have saved, the file is decrypted in the
+extension's own background context, recognised there, and the recognised text is
+discarded once values have been proposed. No document, no image and no page of
+text is sent anywhere — there is no service involved and no network request
+is made. The proposed values are shown for the user to tick; nothing is saved
+until they do.
 
 **Network access:** one host, `api.anthropic.com`, only when the user has
 supplied their own API key, and only carrying redacted form structure. This is

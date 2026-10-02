@@ -40,6 +40,14 @@
 
 import type { FieldKey } from '@/matching/taxonomy';
 import { detectScripts, normaliseDigits, type IndicScript } from './indic';
+import { latinise, trimNoise } from './bilingual';
+import { extractEducation } from './extract-education';
+import { extractClaims } from './extract-claims';
+import { extractAddress } from './extract-address';
+import { extractAadhaarLetter } from './extract-aadhaar';
+import { extractCertifiedPerson } from './extract-certify';
+import { extractEntrance } from './extract-entrance';
+import { extractBankDetails, extractDrivingLicence } from './extract-bank';
 
 export type DocumentType =
   | 'aadhaar'
@@ -73,6 +81,8 @@ export interface ExtractionResult {
   scripts: IndicScript[];
   /** Things worth telling the user that are not candidates — e.g. a misread. */
   warnings: string[];
+  /** Things read and deliberately not offered, so the omission is not silent. */
+  notes: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -177,9 +187,15 @@ function identify(text: string): DocumentType {
 const BOILERPLATE =
   /government of india|भारत सरकार|income tax|आयकर|unique identification|आधार|election commission|republic of india|passport|permanent account number|identity card|govt\.? of india|department|आम आदमी/i;
 
-const NAME_LABEL = /^(?:name|नाम|पूरा नाम|full name|நபர்|பெயர்)\s*[:-]?\s*(.*)$/i;
-const FATHER_LABEL = /^(?:father'?s?\s*name|पिता का नाम|पिता)\s*[:-]?\s*(.*)$/i;
-const MOTHER_LABEL = /^(?:mother'?s?\s*name|माता का नाम|माता)\s*[:-]?\s*(.*)$/i;
+// "Candidate Name", "Student Name" — what a marks card calls the person it is
+// about, and what an application form calls them too.
+const NAME_LABEL =
+  /^(?:name|नाम|पूरा नाम|full name|candidate'?s?\s*name|student'?s?\s*name|name of (?:the )?(?:candidate|student)|நபர்|பெயர்)\s*[:-]?\s*(.*)$/i;
+// "Father Name" with no apostrophe is how most cards print it.
+const FATHER_LABEL =
+  /^(?:father'?s?\s*(?:\/\s*guardian'?s?\s*)?name|name of (?:the )?father|पिता का नाम|पिता)\s*[:-]?\s*(.*)$/i;
+const MOTHER_LABEL =
+  /^(?:mother'?s?\s*name|name of (?:the )?mother|माता का नाम|माता)\s*[:-]?\s*(.*)$/i;
 const DOB_LABEL = /\b(?:dob|date\s+of\s+birth|birth)\b|जन्म|பிறந்த/i;
 
 /** Looks like a person's name rather than a caption or a number. */
@@ -200,12 +216,37 @@ function isLatin(text: string): boolean {
 // The extractors
 // ---------------------------------------------------------------------------
 
-interface Ctx {
+/**
+ * What the vault knows about this document, which the text cannot say.
+ *
+ * A marks card does not reliably print whose marks card it is — "S.S.L.C." is
+ * a Karnataka word, "CLASS X" a CBSE one, and a semester card says neither.
+ * The user filed it under a slot, so the slot is the answer: without it the
+ * education rules stay silent rather than file Class 10 marks under Class 12.
+ */
+export interface ExtractionHint {
+  /** The `doc.*` slot this document is saved in. */
+  documentKey?: FieldKey;
+}
+
+export interface Ctx {
   lines: string[];
   joined: string;
   type: DocumentType;
+  /** The slot the document is filed under, when the caller knows it. */
+  hint: ExtractionHint;
   push: (c: Omit<Candidate, 'confirmed' | 'suggestChecked'>) => void;
   warn: (message: string) => void;
+  /**
+   * Something read and deliberately not offered.
+   *
+   * Distinct from `warn`, which means *something may be wrong*. A note means
+   * *nothing is wrong and here is what I did not save*: the school's address on
+   * a marks card, the marks of each separate subject. Without it the screen
+   * silently omits things the user can see on the card in their hand, and
+   * silence there reads as a misread.
+   */
+  note: (message: string) => void;
   /** Has an earlier extractor already claimed this key? */
   candidatesHave: (key: FieldKey) => boolean;
 }
@@ -214,8 +255,23 @@ function extractAadhaar(ctx: Ctx): void {
   const hasContext = /a[au]dhaar|आधार|unique identification/i.test(ctx.joined);
 
   ctx.lines.forEach((line, index) => {
-    // 12 digits, optionally grouped 4-4-4, and not part of a longer run.
-    for (const match of line.matchAll(/(?<![\d])(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?![\d])/g)) {
+    /*
+     * A VID is not an Aadhaar number.
+     *
+     * "VID : 4417 0290 6831 5502" is sixteen digits in four groups, and its
+     * first twelve are a 4-4-4 run followed by a *space* — so the "not part of
+     * a longer run" guard below never noticed, the checksum failed on a number
+     * that had been read perfectly, and the user was told their photograph was
+     * bad. The VID is printed on every downloaded e-Aadhaar, so this is the
+     * common case, not an edge one.
+     */
+    if (/\bvid\b/i.test(line)) return;
+
+    // 12 digits, optionally grouped 4-4-4, and not part of a longer run —
+    // including a fourth group of four, which makes it a VID.
+    for (const match of line.matchAll(
+      /(?<![\d])(\d{4})[ -]?(\d{4})[ -]?(\d{4})(?![ -]?\d)/g,
+    )) {
       const digits = `${match[1]}${match[2]}${match[3]}`;
 
       if (isValidAadhaar(digits)) {
@@ -409,6 +465,36 @@ function extractGender(ctx: Ctx): void {
   });
 }
 
+/**
+ * A value that follows a label — on the label's own line, or the next one.
+ *
+ * The shape nearly every Indian document is printed in: "Father's Name :
+ * MOHAN KUMAR", or the label on one line with the value under it. The label
+ * regex must capture the inline value as group 1.
+ *
+ * Was private to `extractNames`; a marks card needs the same reading for its
+ * board, its school and its register number, and two copies of this would be
+ * two sets of edge cases.
+ */
+export function labelledValue(
+  ctx: Ctx,
+  label: RegExp,
+  accept: (value: string) => boolean,
+): { value: string; line: number; evidence: string } | null {
+  for (const [index, raw] of ctx.lines.entries()) {
+    const line = raw.trim();
+    const match = label.exec(line);
+    if (!match) continue;
+
+    const inline = (match[1] ?? '').trim();
+    const value = inline !== '' ? inline : (ctx.lines[index + 1] ?? '').trim();
+    if (!accept(value)) continue;
+
+    return { value, line: inline !== '' ? index : index + 1, evidence: line };
+  }
+  return null;
+}
+
 function extractNames(ctx: Ctx): void {
   const claimed = new Set<number>();
 
@@ -475,32 +561,65 @@ function extractNames(ctx: Ctx): void {
 // ---------------------------------------------------------------------------
 
 /**
+ * A zero the engine read as the letter O.
+ *
+ * Only where the digits around it make that certain: inside a run of digits
+ * ("2O22"), or ending a run of two or more with no letter after it — "3000o (",
+ * the income on the user's own certificate as it was read. A word is never
+ * touched: an O with a letter beside it stays an O.
+ */
+export function zeroesForOs(text: string): string {
+  return text.replace(/(?<=\d)[oO](?=\d)/g, '0').replace(/(?<=\d{2})[oO](?![A-Za-z0-9])/g, '0');
+}
+
+/**
  * Read what we can out of a document's text.
  *
  * Every value is normalised on the way in — Indic digits to ASCII, dates to
  * ISO — so the rest of the system never has to know which script the card was
  * printed in.
  */
-export function extractFromText(raw: string): ExtractionResult {
-  const normalised = normaliseDigits(raw);
-  const lines = normalised.split(/\r?\n/).map((line) => line.trim());
+export function extractFromText(raw: string, hint: ExtractionHint = {}): ExtractionResult {
+  const normalised = zeroesForOs(normaliseDigits(raw));
+  /*
+   * Every rule below reads English. A Karnataka document prints each label
+   * twice — once in Kannada, once in English, usually on one line — and an
+   * office form prints the label in Kannada alone with the value in English
+   * beside it. `latinise` reduces a line to what it says in English, so no rule
+   * needs a second alphabet; `trimNoise` drops the fragments a misread leaves at
+   * the ends of a line. Neither invents a word: only labels are translated,
+   * never values.
+   */
+  const lines = normalised.split(/\r?\n/).map((line) => trimNoise(latinise(line.trim())));
   const joined = lines.join('\n');
 
   const candidates: Array<Omit<Candidate, 'confirmed' | 'suggestChecked'>> = [];
   const warnings: string[] = [];
+  const notes: string[] = [];
 
   const ctx: Ctx = {
     lines,
     joined,
     type: identify(joined),
+    hint,
     push: (candidate) => {
-      // One value per key: the first extractor to speak wins, and they run in
-      // order of how much evidence they have.
-      if (candidates.some((existing) => existing.key === candidate.key)) return;
-      candidates.push(candidate);
+      // One value per key. The extractors run in rough order of evidence, but
+      // order alone is not enough: a guess from position (the line above a date
+      // of birth) runs before a name the document certifies in a sentence, and
+      // is weaker. So a strictly better-evidenced reading replaces a weaker
+      // one; an equal one does not, and the first to speak keeps its place.
+      const existing = candidates.findIndex((c) => c.key === candidate.key);
+      if (existing === -1) {
+        candidates.push(candidate);
+      } else if (candidate.confidence > candidates[existing]!.confidence) {
+        candidates[existing] = candidate;
+      }
     },
     warn: (message) => {
       if (!warnings.includes(message)) warnings.push(message);
+    },
+    note: (message) => {
+      if (!notes.includes(message)) notes.push(message);
     },
     candidatesHave: (key) => candidates.some((c) => c.key === key),
   };
@@ -512,11 +631,23 @@ export function extractFromText(raw: string): ExtractionResult {
   extractDob(ctx);
   extractGender(ctx);
   extractNames(ctx);
+  // A name certified in a sentence, where no label named it.
+  extractCertifiedPerson(ctx);
+  // Last: it reads the qualification blocks, and it wants the names above to
+  // have claimed the person first.
+  extractAadhaarLetter(ctx);
+  extractEducation(ctx);
+  extractEntrance(ctx);
+  extractClaims(ctx);
+  extractBankDetails(ctx);
+  extractDrivingLicence(ctx);
+  extractAddress(ctx);
 
   return {
     documentType: ctx.type,
     scripts: detectScripts(raw),
     warnings,
+    notes,
     candidates: candidates
       .sort((a, b) => b.confidence - a.confidence)
       .map((candidate) => ({

@@ -13,6 +13,12 @@
 import type { FieldDescriptor, FieldOption, FieldTag } from '@/shared/types';
 import { resolveLabel, resolveNearbyText, type ResolvedLabel } from './labels';
 import { buildSelectors } from './selectors';
+import {
+  isUploadCaption,
+  questionContainer,
+  questionLabelFor,
+  requirementTextFor,
+} from './upload-slots';
 
 /** Input types that are not user-fillable data, or that we must never touch. */
 const SKIPPED_INPUT_TYPES = new Set([
@@ -203,8 +209,8 @@ export function harvest(
       const ref = `f${index}`;
       index += 1;
 
-      const label = resolveLabel(el);
       const tag = classify(el);
+      const label = labelFor(el, tag);
       const options =
         tag === 'radio-group' ? radioGroupOptions(el, scope) : optionsOf(el);
 
@@ -242,6 +248,19 @@ export function harvest(
       const inputmode = el.getAttribute('inputmode');
       if (inputmode) descriptor.inputmode = inputmode;
 
+      // A file box's requirement is what decides the size and format of the
+      // document that goes into it — see `documents/field-constraint.ts`.
+      if (tag === 'file') {
+        const accept = el.getAttribute('accept');
+        if (accept) descriptor.accept = accept;
+        const requirement = requirementTextFor(
+          el,
+          label.text,
+          questionContainer(el, new Set(scope.querySelectorAll('input[type="file"]'))),
+        );
+        if (requirement) descriptor.requirementText = requirement;
+      }
+
       fields.push(descriptor);
       elements.set(ref, el);
       labelSources.set(ref, label.source);
@@ -261,6 +280,44 @@ export function harvest(
   blockers.push(...findFrameBlockers(root));
 
   return { fields, elements, blockers, wizard: detectWizard(root), labelSources };
+}
+
+/** Label sources that are a guess rather than the page naming the field. */
+const WEAK_SOURCES: ReadonlySet<ResolvedLabel['source']> = new Set([
+  'placeholder',
+  'title',
+  'name-attribute',
+  'none',
+]);
+
+/**
+ * A field's label, with fallbacks that only file boxes need.
+ *
+ * A file box hidden behind a styled "Choose file" button, or inside a
+ * drag-and-drop widget, rarely has a label of its own — the caption belongs to
+ * the question around it. So for a file box these readings are not trusted:
+ *
+ *  - a guessed source (placeholder, title, a humanised id);
+ *  - a label that is only a button's caption — "Choose file", "Browse";
+ *  - text that merely precedes a box nobody can see. Dropzone appends its
+ *    input to the end of `<body>`, where the "preceding text" is the entire
+ *    form, and a box named after the entire form could be given any document.
+ *
+ * The question's own heading replaces them when there is one. When there is
+ * not, the invisible box stays unnamed: a document that goes nowhere is better
+ * than one that goes into the wrong box.
+ */
+function labelFor(el: Element, tag: FieldTag): ResolvedLabel {
+  const label = resolveLabel(el);
+  if (tag !== 'file') return label;
+
+  const strayText = label.source === 'preceding-text' && !isVisible(el);
+  const guessed = WEAK_SOURCES.has(label.source) || isUploadCaption(label.text) || strayText;
+  if (!guessed) return label;
+
+  const heading = questionLabelFor(el);
+  if (heading) return { text: heading, source: 'question-heading' };
+  return strayText ? { text: '', source: 'none' } : label;
 }
 
 function isRequired(el: Element): boolean {

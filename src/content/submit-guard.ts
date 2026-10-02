@@ -43,13 +43,30 @@ export interface ApprovalToken {
 
 export interface GuardState {
   installed: boolean;
+  /**
+   * Is there a fill of ours on this page to protect?
+   *
+   * The guard exists so that *our* fill never leaves the page unapproved (P2).
+   * A page we have not written to carries only what its user typed, and
+   * stopping its submit protects nothing — it only breaks the site. It did:
+   * the login of an unrelated local project and a government hostel portal
+   * refused the user's own press of "Sign In", on pages the extension had
+   * never filled, because the guard switched on the moment the content script
+   * arrived — after a scan, or from the per-origin document_start script an
+   * earlier run had left registered.
+   *
+   * So the listeners still go in early, capture phase, the one position from
+   * which a submit can be stopped — but they act only while engaged: from the
+   * first write of a fill, or the adoption of a live run, until the run ends.
+   */
+  engaged: boolean;
   /** Set only between approval and the single permitted click. */
   armed: ApprovalToken | null;
   /** Number of activations blocked, for the audit log (P5). */
   blocked: number;
 }
 
-const state: GuardState = { installed: false, armed: null, blocked: 0 };
+const state: GuardState = { installed: false, engaged: false, armed: null, blocked: 0 };
 
 /**
  * Everything installed on the page, so it can be removed again.
@@ -92,6 +109,20 @@ export function arm(token: ApprovalToken): void {
 }
 
 export function disarm(): void {
+  state.armed = null;
+}
+
+/** A fill of ours is on this page now: stop every submission that is not approved. */
+export function engage(): void {
+  state.engaged = true;
+}
+
+/**
+ * The run is over, or there never was one: the page is the user's again.
+ * Disarms as well — an approval belongs to the run it was given for.
+ */
+export function disengage(): void {
+  state.engaged = false;
   state.armed = null;
 }
 
@@ -169,6 +200,7 @@ export function installSubmitGuard(doc: Document = document): void {
   };
 
   on('click', ((event: Event) => {
+      if (!state.engaged) return;
       const target = event.target as Element | null;
       if (!isSubmitish(target)) return;
       // A click is permitted but does not spend the token; the submission it
@@ -178,12 +210,13 @@ export function installSubmitGuard(doc: Document = document): void {
   }) as EventListener);
 
   on('submit', ((event: Event) => {
+    if (!state.engaged) return;
     if (isPermitted(event.target as Element | null, true)) return;
     block(event, 'The page tried to submit a form.');
   }) as EventListener);
 
   on('keydown', ((event: KeyboardEvent) => {
-      if (event.key !== 'Enter') return;
+      if (!state.engaged || event.key !== 'Enter') return;
       const target = event.target as Element | null;
       // Enter in a textarea is a newline, not a submit.
       if (target?.tagName.toLowerCase() === 'textarea') return;
@@ -205,6 +238,7 @@ export function uninstallSubmitGuard(): void {
     installed = null;
   }
   state.installed = false;
+  state.engaged = false;
   state.armed = null;
 }
 
@@ -275,6 +309,11 @@ function patchFormSubmit(doc: Document): void {
   if ((original as { __afGuarded?: boolean }).__afGuarded) return;
 
   const guarded = function guardedSubmit(this: HTMLFormElement): void {
+    // Nothing of ours on the page: the form is the page's to send.
+    if (!state.engaged) {
+      original.call(this);
+      return;
+    }
     const token = state.armed;
     if (tokenValid(token)) {
       burn();
@@ -352,4 +391,126 @@ export function __resetGuardForTests(): void {
   uninstallSubmitGuard();
   state.blocked = 0;
   showToast = () => {};
+}
+
+// ---------------------------------------------------------------------------
+// Approved presses in a site's own upload window (§ document attachment)
+// ---------------------------------------------------------------------------
+
+/**
+ * The approval a batch upload carries into the page.
+ *
+ * The worker has already checked the user's hold and burned the grant; this
+ * travels with each press so the page side refuses anything stale.
+ */
+export interface WindowPressToken {
+  value: string;
+  expiresAt: number;
+}
+
+/**
+ * Press a question's own "Add file" control, to open the site's upload window.
+ *
+ * Here, rather than anywhere else, because this file is where every press the
+ * extension makes on a page lives (CLAUDE.md rule 1), and each one needs a
+ * live token. Opening a window sends nothing; it is here for the audit trail,
+ * not because it is dangerous.
+ *
+ * Run through `chrome.scripting.executeScript({ func })`, so it is
+ * self-contained: no imports, nothing from module scope.
+ */
+export function openUploadWindowWithApproval(
+  label: string,
+  selectors: string[],
+  token: WindowPressToken,
+): 'by caption' | 'by selector' | '' {
+  if (!token.value || token.expiresAt <= Date.now()) return '';
+
+  const drawn = (el: Element): boolean => el.getClientRects().length > 0;
+  const captionOf = (el: Element): string => {
+    const aria = el.getAttribute('aria-label');
+    if (aria && aria.trim()) return aria.replace(/\s+/g, ' ').trim();
+    const clone = el.cloneNode(true) as Element;
+    for (const icon of Array.from(clone.querySelectorAll('svg, i, [aria-hidden="true"]'))) icon.remove();
+    return (clone.textContent ?? '').replace(/\s+/g, ' ').trim();
+  };
+  const readsAsAddFile = (text: string): boolean =>
+    text.length <= 40 &&
+    /(^|\s)(add|upload|attach|browse|choose|select)(\s+(a|an|your|the|new))?(\s+(files?|documents?|photos?|images?|attachments?))?\s*(\.\.\.|…)?$/i.test(text);
+
+  /*
+   * Found now, by the question's own words — not by a path recorded at scan
+   * time. The first upload changes the page (a file chip appears, the site's
+   * window is added), and a positional path recorded before it can then point
+   * at the wrong element: the first document went, and the rest pressed
+   * nothing.
+   */
+  const wanted = label.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (wanted && document.body) {
+    const walker = document.createTreeWalker(document.body, 4 /* SHOW_TEXT */);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if ((node.textContent ?? '').replace(/\s+/g, ' ').trim().toLowerCase() !== wanted) continue;
+      for (let block = node.parentElement; block && block !== document.body; block = block.parentElement) {
+        const controls = Array.from(
+          block.querySelectorAll('button, [role="button"], input[type="button"]'),
+        ).filter((el) => readsAsAddFile(captionOf(el)));
+        if (controls.length > 1) break; // Past this question: another one's button is in here.
+        const control = controls[0];
+        if (control instanceof HTMLElement) {
+          // Not drawn: the question already has its file (Google hides Add file then).
+          if (!drawn(control)) return '';
+          control.click();
+          return 'by caption';
+        }
+        const tag = block.tagName.toLowerCase();
+        if (block.getAttribute('role') === 'listitem' || tag === 'fieldset' || tag === 'li' || tag === 'form') break;
+      }
+    }
+  }
+
+  for (const selector of selectors) {
+    let el: Element | null;
+    try {
+      el =
+        selector.startsWith('//') || selector.startsWith('(/')
+          ? (document.evaluate(selector, document, null, 9, null).singleNodeValue as Element | null)
+          : document.querySelector(selector);
+    } catch {
+      el = null;
+    }
+    // Only a control that still reads as this kind of button: a stale path
+    // can land on anything.
+    if (el instanceof HTMLElement && drawn(el) && readsAsAddFile(captionOf(el))) {
+      el.click();
+      return 'by selector';
+    }
+  }
+  return '';
+}
+
+/**
+ * Press the upload window's own Upload or Insert button, if it is waiting for one.
+ *
+ * Many windows upload the moment a file lands and close by themselves; then
+ * there is nothing to press and this returns false. Only a visible control
+ * whose whole caption is "Upload" or "Insert" qualifies — nothing that could
+ * be a form's own submit. Self-contained, like the one above.
+ */
+export function pressUploadInWindowWithApproval(token: WindowPressToken): boolean {
+  if (!token.value || token.expiresAt <= Date.now()) return false;
+  const candidates = Array.from(
+    document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]'),
+  );
+  for (const el of candidates) {
+    const text = (el.getAttribute('aria-label') || el.textContent || el.getAttribute('value') || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!/^(upload|insert)$/i.test(text)) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    if ((el as HTMLButtonElement).disabled || el.getAttribute('aria-disabled') === 'true') continue;
+    (el as HTMLElement).click();
+    return true;
+  }
+  return false;
 }

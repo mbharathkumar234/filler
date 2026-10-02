@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Documents Portal — every upload shape a fill has to handle</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 46rem; color: #0f172a; }
+      .banner { background: #e2e8f0; padding: .75rem; font-size: .8rem; margin-bottom: 1.5rem; }
+      table { border-collapse: collapse; width: 100%; }
+      td { padding: .35rem .5rem; vertical-align: top; }
+      h2 { font-size: 1rem; margin-top: 1.5rem; border-bottom: 1px solid #cbd5e1; }
+      .q { border: 1px solid #cbd5e1; border-radius: 6px; padding: .75rem; margin: .75rem 0; }
+      .q-title { font-weight: 600; }
+      .hint { color: #475569; font-size: .8rem; margin: .25rem 0; }
+      .btn { display: inline-block; border: 1px solid #1d4ed8; color: #1d4ed8; padding: .25rem .6rem; border-radius: 4px; cursor: pointer; }
+      .drop { border: 2px dashed #94a3b8; padding: 1.25rem; text-align: center; color: #475569; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>Synthetic fixture.</strong> The upload shapes real portals use: a table-cell file box
+      with a submit-style Upload beside it, a styled "Choose file" label hiding its box, the
+      Karnataka "marks card" wording, and a drag-and-drop widget whose real input sits at the end
+      of <code>&lt;body&gt;</code>. Not a copy of any real portal; contains no personal data.
+    </p>
+
+    <h1>Upload Documents</h1>
+
+    <!-- GET, so the fixtures server can serve the landing page; a file box submits its name. -->
+    <form id="docs" action="uploaded.html" method="get">
+      <!-- Case 1: the ASP.NET classic. Every Upload posts the whole form. -->
+      <h2>Photograph and Signature</h2>
+      <table>
+        <tr>
+          <td>Upload your recent passport size photo *</td>
+          <td>
+            <input type="file" id="fuPhoto" name="fuPhoto" accept=".jpg,.jpeg" data-expect="doc.photo" />
+            <input type="submit" id="btnUploadPhoto" name="btnUploadPhoto" value="Upload" />
+            <small>JPEG only, 20 KB to 50 KB, 3.5 cm x 4.5 cm</small>
+          </td>
+        </tr>
+        <tr>
+          <td>Upload Signature *</td>
+          <td>
+            <input type="file" id="fuSign" name="fuSign" accept="image/jpeg" data-expect="doc.signature" />
+            <input type="submit" id="btnUploadSign" name="btnUploadSign" value="Upload" />
+            <small>JPEG only, 10 KB to 20 KB</small>
+          </td>
+        </tr>
+      </table>
+
+      <!-- Case 2: a styled label wrapping a hidden box. "Choose file" names the button, not the question. -->
+      <h2>Identity Documents</h2>
+      <div class="q">
+        <div class="q-title">Upload your Aadhaar card copy</div>
+        <p class="hint">PDF only, maximum 2 MB</p>
+        <label class="btn">Choose file<input type="file" name="aadhaarDoc" accept="application/pdf" hidden data-expect="doc.aadhaar_card" /></label>
+      </div>
+      <div class="q">
+        <div class="q-title">Upload your PAN card copy</div>
+        <p class="hint">PDF or JPEG, up to 1 MB</p>
+        <label class="btn">Browse<input type="file" name="panDoc" accept=".pdf,.jpg,.jpeg" hidden data-expect="doc.pan_card" /></label>
+      </div>
+
+      <!-- Case 3: marks cards — the wording Karnataka's boards and colleges use. -->
+      <h2>Education Documents</h2>
+      <div class="q">
+        <label for="sslc">Upload your 10th marks card</label>
+        <input type="file" id="sslc" name="sslc" accept="application/pdf" data-expect="doc.marksheet_10" />
+        <p class="hint">PDF, max 500 KB</p>
+      </div>
+      <div class="q">
+        <label for="puc">Upload your 12th / PUC marks card</label>
+        <input type="file" id="puc" name="puc" accept="application/pdf" data-expect="doc.marksheet_12" />
+      </div>
+
+      <!-- Case 4: a drag-and-drop widget. Its real input is at the end of <body>. -->
+      <div class="q" id="degree-q">
+        <h3>Upload Degree Certificate</h3>
+        <p class="hint">PDF only, up to 2 MB</p>
+        <div class="drop" id="degree-drop"><span>Drop files here to upload</span></div>
+      </div>
+
+      <!-- A trap: a text box that mentions a photograph is not a file box. -->
+      <p>
+        <label for="photoRef">Photograph reference number</label>
+        <input type="text" id="photoRef" name="photoRef" maxlength="12" data-expect="unknown" />
+      </p>
+
+      <p><input type="submit" id="btnFinal" name="btnFinal" value="Final Submit" /></p>
+    </form>
+
+    <!--
+      Dropzone appends its own input here, nowhere near its question. With no
+      label, the text before it is the whole form — and a box named after the
+      whole form could be given any document. It must stay unnamed.
+    -->
+    <input type="file" id="degree-input" class="dz-hidden-input" style="display:none" data-expect="unknown" />
+
+    <script>
+      // The drop widget: takes a dropped file and lists it, as Dropzone does.
+      (function () {
+        var zone = document.getElementById('degree-drop');
+        var received = [];
+        window.__dropped = received;
+        zone.addEventListener('dragover', function (event) { event.preventDefault(); });
+        zone.addEventListener('drop', function (event) {
+          event.preventDefault();
+          var files = event.dataTransfer.files;
+          for (var i = 0; i < files.length; i += 1) {
+            received.push({ name: files[i].name, type: files[i].type, size: files[i].size });
+          }
+          zone.setAttribute('data-files', String(received.length));
+        });
+      })();
+    </script>
+  </body>
+</html>

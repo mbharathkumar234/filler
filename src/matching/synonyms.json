@@ -214,6 +214,17 @@
     "जिला",
     "जिला नाम"
   ],
+  "address.permanent.taluk": [
+    "taluk",
+    "taluka",
+    "tehsil",
+    "taluk tehsil",
+    "mandal",
+    "sub district",
+    "subdivision taluk",
+    "तहसील",
+    "तालुका"
+  ],
   "address.permanent.state": [
     "state",
     "state ut",
@@ -255,6 +266,11 @@
   "address.correspondence.district": [
     "correspondence district",
     "present district"
+  ],
+  "address.correspondence.taluk": [
+    "correspondence taluk",
+    "present taluk",
+    "correspondence tehsil"
   ],
   "address.correspondence.state": [
     "correspondence state",
@@ -436,6 +452,7 @@
     "upload photo",
     "upload photograph",
     "passport size photograph",
+    "passport size photo",
     "recent photograph",
     "candidate photo",
     "फोटो",
@@ -465,7 +482,15 @@
     "matriculation certificate",
     "sslc marksheet",
     "tenth marksheet",
-    "10th certificate"
+    "10th certificate",
+    "10th marks card",
+    "sslc marks card",
+    "class 10 marks card",
+    "class x marks card",
+    "class x marksheet",
+    "class x academic record",
+    "secondary examination marksheet",
+    "10th academic record"
   ],
   "doc.marksheet_12": [
     "12th marksheet",
@@ -473,7 +498,14 @@
     "intermediate marksheet",
     "hsc marksheet",
     "twelfth marksheet",
-    "12th certificate"
+    "12th certificate",
+    "12th marks card",
+    "puc marks card",
+    "class 12 marks card",
+    "class xii marks card",
+    "class xii marksheet",
+    "class xii academic record",
+    "12th academic record"
   ],
   "doc.degree_certificate": [
     "degree certificate",
@@ -488,7 +520,13 @@
   "doc.caste_certificate": [
     "caste certificate",
     "community certificate",
-    "जाति प्रमाण पत्र"
+    "जाति प्रमाण पत्र",
+    "category certificate",
+    "st category certificate",
+    "sc category certificate",
+    "social category certificate",
+    "caste category certificate",
+    "reserved category certificate"
   ],
   "doc.domicile_certificate": [
     "domicile certificate",
@@ -640,5 +678,466 @@
     "emergency mobile",
     "emergency phone",
     "emergency contact no"
+  ],
+  "doc.voter_id": [
+    "voter id card",
+    "voter identity card",
+    "voter id copy",
+    "epic card",
+    "election id card"
+  ],
+  "doc.birth_certificate": [
+    "birth certificate",
+    "date of birth certificate",
+    "dob certificate",
+    "जन्म प्रमाण पत्र"
+  ],
+  "doc.passport": [
+    "passport copy",
+    "passport first page",
+    "passport scan"
+  ],
+  "doc.driving_licence": [
+    "driving licence copy",
+    "driving license copy",
+    "driving licence scan",
+    "dl copy"
+  ],
+  "doc.passing_certificate": [
+    "passing certificate",
+    "pass certificate",
+    "passing certificate copy"
+  ],
+  "doc.study_certificate": [
+    "study certificate",
+    "study certificate copy"
+  ],
+  "doc.transfer_certificate": [
+    "transfer certificate",
+    "school leaving certificate",
+    "leaving certificate",
+    "tc copy"
+  ],
+  "doc.migration_certificate": [
+    "migration certificate",
+    "migration cum transfer certificate"
+  ],
+  "doc.conduct_certificate": [
+    "conduct certificate",
+    "character certificate",
+    "good conduct certificate"
+  ],
+  "doc.marksheet_11": [
+    "1st puc marks card",
+    "first puc marks card",
+    "1st year puc marks card",
+    "11th marksheet",
+    "class 11 marks card",
+    "first year marks card"
+  ],
+  "doc.article_371j_certificate": [
+    "371j certificate",
+    "371(j) certificate",
+    "371j eligibility certificate",
+    "annexure a",
+    "annexure-a certificate",
+    "kalyana karnataka eligibility certificate",
+    "hyderabad karnataka eligibility certificate"
+  ],
+  "doc.entrance_application_form": [
+    "kcet application form",
+    "cet application form",
+    "entrance application form",
+    "neet application form",
+    "jee application form",
+    "comedk application form"
+  ],
+  "doc.entrance_fee_receipt": [
+    "application fee receipt",
+    "exam fee receipt",
+    "kcet fee receipt",
+    "entrance fee receipt",
+    "examination fee receipt"
+  ],
+  "doc.entrance_admission_ticket": [
+    "admission ticket",
+    "hall ticket",
+    "admit card",
+    "kcet admission ticket",
+    "entrance hall ticket"
+  ],
+  "doc.entrance_result": [
+    "kcet result",
+    "cet result",
+    "entrance result",
+    "result sheet",
+    "entrance exam result",
+    "score card"
+  ],
+  "doc.entrance_rank_card": [
+    "rank card",
+    "kcet rank card",
+    "cet rank card",
+    "rank certificate",
+    "rank list copy"
+  ],
+  "doc.entrance_verification_slip": [
+    "verification slip",
+    "document verification slip",
+    "kcet verification slip"
+  ],
+  "doc.entrance_claim_verification": [
+    "claim verification",
+    "claim verification slip",
+    "claim verification report"
+  ],
+  "doc.entrance_option_entry": [
+    "option entry",
+    "option entry printout",
+    "option entry sheet"
+  ],
+  "doc.seat_allotment_letter": [
+    "seat allotment letter",
+    "allotment letter",
+    "seat allotment order",
+    "allotment order"
+  ],
+  "doc.admission_fee_receipt": [
+    "admission fee receipt",
+    "fee payment receipt",
+    "fee paid receipt",
+    "college fee receipt",
+    "fee receipt"
+  ],
+  "doc.admission_order": [
+    "admission order",
+    "admission order copy"
+  ],
+  "doc.thumb_impression": [
+    "thumb impression",
+    "left thumb impression",
+    "right thumb impression",
+    "thumb print",
+    "अंगूठे का निशान"
+  ],
+  "doc.scholarship_application": [
+    "scholarship application",
+    "scholarship application copy",
+    "ssp application",
+    "scholarship form",
+    "scholarship sanction letter"
+  ],
+  "eligibility.caste_certificate_number": [
+    "caste certificate rd number",
+    "caste certificate number",
+    "caste rd number",
+    "rd number of caste certificate"
+  ],
+  "eligibility.income_certificate_number": [
+    "income certificate rd number",
+    "income certificate number",
+    "income rd number",
+    "rd number of income certificate"
+  ],
+  "eligibility.article_371j_number": [
+    "371j rd number",
+    "annexure a rd number",
+    "371(j) certificate number",
+    "annexure-a number",
+    "371j certificate rd number"
+  ],
+  "doc.semester_marksheet": [
+    "semester marks card",
+    "semester marksheet",
+    "sem marks card",
+    "semester grade card",
+    "semester mark sheet"
+  ],
+  "doc.consolidated_marksheet": [
+    "consolidated marks card",
+    "consolidated marksheet",
+    "consolidated grade card",
+    "cumulative marks card"
+  ],
+  "doc.bonafide_certificate": [
+    "bonafide certificate",
+    "bona fide certificate",
+    "bonafide student certificate"
+  ],
+  "doc.college_id_card": [
+    "college id card",
+    "student id card",
+    "college identity card",
+    "institute id card"
+  ],
+  "doc.admission_letter": [
+    "admission letter",
+    "provisional admission letter",
+    "offer of admission",
+    "enrollment letter"
+  ],
+  "doc.caste_certificate_form_d": [
+    "form d caste certificate",
+    "form-d certificate",
+    "caste certificate form d",
+    "form d certificate"
+  ],
+  "doc.ews_certificate": [
+    "ews certificate",
+    "economically weaker section certificate"
+  ],
+  "doc.obc_certificate": [
+    "obc certificate",
+    "non creamy layer certificate",
+    "obc non creamy layer certificate"
+  ],
+  "doc.resume": [
+    "resume",
+    "cv",
+    "curriculum vitae",
+    "upload resume"
+  ],
+  "doc.internship_offer_letter": [
+    "internship offer letter",
+    "internship offer",
+    "internship appointment letter"
+  ],
+  "doc.internship_certificate": [
+    "internship certificate",
+    "internship completion certificate"
+  ],
+  "doc.experience_certificate": [
+    "experience certificate",
+    "work experience certificate",
+    "service certificate",
+    "relieving letter"
+  ],
+  "doc.recommendation_letter": [
+    "recommendation letter",
+    "letter of recommendation",
+    "reference letter"
+  ],
+  "doc.course_certificate": [
+    "course certificate",
+    "online course certificate",
+    "completion certificate of course",
+    "mooc certificate"
+  ],
+  "doc.training_certificate": [
+    "training certificate",
+    "industrial training certificate",
+    "skill training certificate"
+  ],
+  "doc.workshop_certificate": [
+    "workshop certificate",
+    "seminar certificate",
+    "workshop participation certificate"
+  ],
+  "doc.professional_certification": [
+    "professional certification",
+    "professional certificate",
+    "industry certification"
+  ],
+  "doc.hackathon_certificate": [
+    "hackathon certificate",
+    "hackathon participation certificate",
+    "hackathon winner certificate"
+  ],
+  "doc.competition_certificate": [
+    "competition certificate",
+    "contest certificate",
+    "competition participation certificate"
+  ],
+  "doc.achievement_certificate": [
+    "achievement certificate",
+    "merit certificate",
+    "prize certificate",
+    "award certificate"
+  ],
+  "doc.project_report": [
+    "project report",
+    "project thesis",
+    "dissertation"
+  ],
+  "doc.project_certificate": [
+    "project certificate",
+    "project completion certificate"
+  ],
+  "doc.publication": [
+    "published paper",
+    "publication",
+    "research paper",
+    "journal publication",
+    "conference paper"
+  ],
+  "doc.patent_document": [
+    "patent document",
+    "patent certificate",
+    "patent filing"
+  ],
+  "doc.sports_certificate": [
+    "sports certificate",
+    "games certificate",
+    "sports participation certificate"
+  ],
+  "doc.ncc_certificate": [
+    "ncc certificate",
+    "ncc a certificate",
+    "ncc b certificate",
+    "ncc c certificate"
+  ],
+  "doc.nss_certificate": [
+    "nss certificate",
+    "national service scheme certificate"
+  ],
+  "doc.volunteering_certificate": [
+    "volunteering certificate",
+    "volunteer certificate",
+    "community service certificate"
+  ],
+  "doc.iti_marksheet": [
+    "iti marks card",
+    "iti marksheet",
+    "iti mark sheet",
+    "trade marks card"
+  ],
+  "doc.iti_certificate": [
+    "iti certificate",
+    "national trade certificate",
+    "ncvt certificate",
+    "trade certificate"
+  ],
+  "education[].semester": [
+    "semester",
+    "current semester",
+    "present semester",
+    "semester studying"
+  ],
+  "education[].year_of_study": [
+    "year of study",
+    "current year of study",
+    "study year",
+    "present year of study"
+  ],
+  "entrance.exam_name": [
+    "entrance exam",
+    "entrance exam written",
+    "name of entrance exam",
+    "entrance test",
+    "competitive exam written"
+  ],
+  "entrance.registration_number": [
+    "cet registration number",
+    "kcet registration number",
+    "entrance registration number",
+    "cet number",
+    "entrance application number"
+  ],
+  "entrance.roll_number": [
+    "entrance roll number",
+    "hall ticket number",
+    "admission ticket number",
+    "cet roll number"
+  ],
+  "entrance.rank": [
+    "kcet rank",
+    "cet rank",
+    "entrance rank",
+    "rank obtained",
+    "general rank"
+  ],
+  "entrance.score": [
+    "entrance score",
+    "cet score",
+    "entrance exam score",
+    "neet score",
+    "entrance marks"
+  ],
+  "entrance.year": [
+    "year of entrance exam",
+    "entrance exam year",
+    "cet year",
+    "year of the entrance exam"
+  ],
+  "eligibility.article_371j": [
+    "371j",
+    "371(j)",
+    "article 371j",
+    "article 371(j)",
+    "kalyana karnataka reservation",
+    "hyderabad karnataka reservation"
+  ],
+  "education[].marks_physics": [
+    "physics marks",
+    "marks in physics",
+    "physics marks obtained",
+    "marks obtained in physics",
+    "marks secured in physics"
+  ],
+  "education[].marks_chemistry": [
+    "chemistry marks",
+    "marks in chemistry",
+    "chemistry marks obtained",
+    "marks obtained in chemistry",
+    "marks secured in chemistry"
+  ],
+  "education[].marks_mathematics": [
+    "mathematics marks",
+    "marks in mathematics",
+    "mathematics marks obtained",
+    "marks obtained in mathematics",
+    "marks secured in mathematics",
+    "maths marks",
+    "marks in maths",
+    "maths marks obtained",
+    "marks obtained in maths",
+    "marks secured in maths"
+  ],
+  "education[].marks_biology": [
+    "biology marks",
+    "marks in biology",
+    "biology marks obtained",
+    "marks obtained in biology",
+    "marks secured in biology"
+  ],
+  "education[].marks_computer_science": [
+    "computer science marks",
+    "marks in computer science",
+    "computer science marks obtained",
+    "marks obtained in computer science",
+    "marks secured in computer science"
+  ],
+  "education[].marks_english": [
+    "english marks",
+    "marks in english",
+    "english marks obtained",
+    "marks obtained in english",
+    "marks secured in english"
+  ],
+  "education[].marks_language": [
+    "first language marks",
+    "marks in first language",
+    "first language marks obtained",
+    "marks obtained in first language",
+    "marks secured in first language"
+  ],
+  "education[].marks_science": [
+    "science marks",
+    "marks in science",
+    "science marks obtained",
+    "marks obtained in science",
+    "marks secured in science"
+  ],
+  "education[].marks_social_science": [
+    "social science marks",
+    "marks in social science",
+    "social science marks obtained",
+    "marks obtained in social science",
+    "marks secured in social science",
+    "social studies marks",
+    "marks in social studies",
+    "social studies marks obtained",
+    "marks obtained in social studies",
+    "marks secured in social studies"
   ]
 }

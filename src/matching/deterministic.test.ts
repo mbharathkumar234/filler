@@ -226,6 +226,32 @@ describe('the traits veto — the zero-mis-match guard', () => {
     expect(result.key).toBe('doc.photo');
   });
 
+  it('refuses a file input for a composed key that has no traits entry', () => {
+    // "10th" and "marks" compose `education.class_10.marks_obtained`, a key
+    // with no traits of its own — and the veto used to wave any such key
+    // through, so a file box became a marks box. What a file box holds is
+    // decided by the kind of key, not by whether its traits were written down.
+    const result = matchField(field({ tag: 'file', labelText: 'Upload your 10th marks card' }));
+    expect(result.key.startsWith('education.')).toBe(false);
+  });
+
+  it('reads the Karnataka "marks card" wording as the marksheet it is', () => {
+    expect(matchField(field({ tag: 'file', labelText: 'Upload your 10th marks card' })).key).toBe(
+      'doc.marksheet_10',
+    );
+    expect(matchField(field({ tag: 'file', labelText: 'SSLC Marks Card' })).key).toBe(
+      'doc.marksheet_10',
+    );
+    expect(matchField(field({ tag: 'file', labelText: '2nd PUC Marks Card' })).key).toBe(
+      'doc.marksheet_12',
+    );
+  });
+
+  it('reads "passport size photo" as the photograph', () => {
+    const result = matchField(field({ tag: 'file', labelText: 'Upload your recent passport size photo' }));
+    expect(result.key).toBe('doc.photo');
+  });
+
   it('refuses Aadhaar in a field too short to hold it', () => {
     const result = matchField(field({ labelText: 'Aadhaar Number', maxLength: 6 }));
     expect(result.key).toBe('unknown');
@@ -728,4 +754,169 @@ describe('whose value, which one: the frame, end to end', () => {
       expect(result.rationale).toMatch(/left for you to fill/);
     },
   );
+});
+
+/**
+ * A key naming one family member, meeting a box about another (`frame.ts`).
+ *
+ * The dictionary's occupation phrases are the father's, so "Mother's
+ * Occupation" matched `family.father_occupation` at 0.63 — inside the band
+ * that is written, putting the father's occupation in the mother's box. There
+ * is no saved occupation for a mother, so the honest answer is blank.
+ */
+describe('a key for a different family member', () => {
+  function field(labelText: string): FieldDescriptor {
+    return {
+      ref: 'r',
+      tag: 'input',
+      type: 'text',
+      labelText,
+      labelSource: 'label',
+      placeholder: '',
+      nearbyText: '',
+      required: true,
+      visible: true,
+      selectors: ['input'],
+    } as unknown as FieldDescriptor;
+  }
+
+  it('does not give the mother the father’s occupation', () => {
+    const result = matchField(field("Mother's Occupation"));
+    expect(result.key).toBe('unknown');
+    expect(result.rationale).toMatch(/your mother/);
+  });
+
+  it('keeps a key the label itself names, when it names two people', () => {
+    // "Father or Guardian Name" is an exact guardian synonym. Naming the father
+    // as well must not turn the guardian reading into a stand-in for him.
+    expect(matchField(field('Father or Guardian Name')).key).toBe('family.guardian_name');
+  });
+
+  it('still reads a bare Occupation as the father’s, as the dictionary does', () => {
+    expect(matchField(field('Occupation')).key).toBe('family.father_occupation');
+  });
+});
+
+describe('the taluk, which every Karnataka portal asks for', () => {
+  /*
+   * A key added when an Aadhaar letter turned out to carry it ("Sub District")
+   * and nothing in the vault could hold it. It sits between the village and the
+   * district and is neither, so the test that matters is the one that keeps it
+   * from being answered with either.
+   */
+  const matchOf = (labelText: string) => matchField(field({ labelText }));
+
+  it('matches the words a form uses for it', () => {
+    for (const label of ['Taluk', 'Taluka', 'Tehsil', 'Taluk / Tehsil', 'Mandal']) {
+      expect(matchOf(label).key, label).toBe('address.permanent.taluk');
+    }
+  });
+
+  it('is confident enough to fill without being asked twice', () => {
+    expect(matchOf('Taluk').confidence).toBeGreaterThanOrEqual(CONFIDENCE.AUTO_FILL);
+  });
+
+  it('does not take the district’s box, nor the village’s', () => {
+    expect(matchOf('District').key).toBe('address.permanent.district');
+    expect(matchOf('Village / Town / City').key).toBe('address.permanent.city');
+  });
+
+  it('keeps the correspondence taluk separate from the permanent one', () => {
+    expect(matchOf('Correspondence Taluk').key).toBe('address.correspondence.taluk');
+  });
+});
+
+describe('each subject’s own marks', () => {
+  /*
+   * An entrance application asks for Physics, Chemistry and Mathematics by
+   * name. The vault holds them per subject, read off the marks card; these are
+   * the words that find them, and the ones that must not.
+   */
+  const matchOf = (labelText: string, nearbyText = '') =>
+    matchField(field({ labelText, nearbyText }));
+
+  it('matches a subject named with its marks', () => {
+    expect(matchOf('Physics Marks').key).toBe('education[].marks_physics');
+    expect(matchOf('Marks obtained in Chemistry').key).toBe('education[].marks_chemistry');
+    expect(matchOf('Maths Marks').key).toBe('education[].marks_mathematics');
+    expect(matchOf('Biology Marks Obtained').key).toBe('education[].marks_biology');
+    expect(matchOf('English Marks').key).toBe('education[].marks_english');
+  });
+
+  it('moves onto the qualification the form names', () => {
+    expect(matchOf('Physics Marks', '2nd PUC / Class 12 Details').key).toBe(
+      'education.class_12.marks_physics',
+    );
+    expect(matchOf('Mathematics Marks', 'SSLC / Class 10 Details').key).toBe(
+      'education.class_10.marks_mathematics',
+    );
+  });
+
+  it('never files Social Science as Science, nor Computer Science', () => {
+    expect(matchOf('Social Science Marks').key).toBe('education[].marks_social_science');
+    expect(matchOf('Computer Science Marks').key).toBe('education[].marks_computer_science');
+    expect(matchOf('Science Marks').key).toBe('education[].marks_science');
+  });
+
+  it('holds one language, and it is the first', () => {
+    expect(matchOf('First Language Marks').key).toBe('education[].marks_language');
+    expect(matchOf('Marks obtained in First Language').key).toBe('education[].marks_language');
+  });
+
+  it('never answers a second or third language with the first', () => {
+    // An SSLC card has three languages and the vault has a box for one. Which
+    // of them a form means by "Kannada" or plain "Language" depends on what
+    // the person sat, so those are left for the person too.
+    for (const label of [
+      'Second Language Marks',
+      'Third Language Marks',
+      'Language Marks',
+      'Kannada Marks',
+      'Hindi Marks',
+    ]) {
+      expect(bandOf(matchOf(label)), label).toBe('unmapped');
+    }
+  });
+
+  it('leaves the total alone', () => {
+    // "Marks obtained" is the total, and must not become any one subject.
+    expect(matchOf('Marks Obtained').key).toBe('education[].marks_obtained');
+    expect(matchOf('Total Marks Obtained').key).toBe('education[].marks_obtained');
+    expect(matchOf('Maximum Marks').key).toBe('education[].max_marks');
+  });
+
+  it('does not fill a box that names a subject and nothing else', () => {
+    // "Physics" alone is as likely a box to tick as a mark to type.
+    for (const label of ['Physics', 'Chemistry', 'Mathematics', 'English']) {
+      expect(bandOf(matchOf(label)), label).toBe('unmapped');
+    }
+  });
+});
+
+describe('partial matches that are one observation', () => {
+  /*
+   * Several phrases of one key partly matching a label through the same word
+   * used to corroborate each other into the fill band. These are the fourth
+   * portal's own traps, and the one label that is rightly found that way.
+   */
+  const matchOf = (labelText: string) => matchField(field({ labelText }));
+
+  it('does not fill an office box because one word of it is in the dictionary', () => {
+    for (const label of ['Ward Inspector’s Remarks', 'Licence Serial (allotted by this office)']) {
+      expect(bandOf(matchOf(label)), label).toBe('unmapped');
+    }
+  });
+
+  it('still fills a label found through two different words of it', () => {
+    const match = matchOf('Appellation of the Applicant (in full, as per record)');
+    expect(match.key).toBe('identity.full_name');
+    expect(bandOf(match)).toBe('fill-and-flag');
+  });
+
+  it('leaves a key the label names outright exactly as sure as it was', () => {
+    // "e mail" is contained whole; its longer phrases still add their weight.
+    const match = matchOf('Electronic Mail Identifier');
+    expect(match.key).toBe('contact.email');
+    expect(bandOf(match)).toBe('auto-fill');
+  });
 });

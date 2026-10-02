@@ -187,3 +187,62 @@ describe('the guess is discounted, and the certainty is not', () => {
     expect(result.read.engineConfidence).toBe(0.9);
   });
 });
+
+describe('where on the page the text was', () => {
+  /*
+   * The suggestion screen shows the piece of the card each value was read
+   * from. That is only honest if a line's box really is that line's — so the
+   * boxes are passed on only when they are provably in step with the text.
+   */
+  const box = { x0: 0.1, y0: 0.2, x1: 0.6, y1: 0.22 };
+  const two = [
+    { text: 'Roll No. : 18315726', box },
+    { text: 'Name : RAVI KUMAR', box },
+  ];
+
+  it('passes on each line’s place when the engine knows it', async () => {
+    const read = await readDocumentText(new Uint8Array(), { mime: 'image/jpeg' }, {
+      ocr: engine('', {
+        recognise: async () => ({ text: two.map((l) => l.text).join('\n'), lines: two }),
+      }),
+    });
+    expect(read.lines).toHaveLength(2);
+    expect(read.lines?.[0]?.box).toEqual(box);
+  });
+
+  it('shows no piece of the card rather than the wrong one, if boxes and text disagree', async () => {
+    const read = await readDocumentText(new Uint8Array(), { mime: 'image/jpeg' }, {
+      ocr: engine('', {
+        recognise: async () => ({ text: 'Roll No. : 18315726', lines: two }),
+      }),
+    });
+    expect(read.lines).toBeUndefined();
+  });
+
+  it('passes on how far the page was turned, since the boxes are places on the upright page', async () => {
+    const read = await readDocumentText(new Uint8Array(), { mime: 'image/jpeg' }, {
+      ocr: engine('', {
+        recognise: async () => ({ text: two.map((l) => l.text).join('\n'), lines: two, turns: 3 }),
+      }),
+    });
+    expect(read.turns).toBe(3);
+  });
+
+  it('forgets the turn along with the boxes it belongs to', async () => {
+    const read = await readDocumentText(new Uint8Array(), { mime: 'image/jpeg' }, {
+      ocr: engine('', {
+        recognise: async () => ({ text: 'Roll No. : 18315726', lines: two, turns: 3 }),
+      }),
+    });
+    expect(read.lines).toBeUndefined();
+    expect(read.turns).toBeUndefined();
+  });
+
+  it('has no boxes for text taken from a PDF’s own text layer', async () => {
+    const read = await readDocumentText(new Uint8Array(), { mime: 'application/pdf' }, {
+      pdfText: async () => 'Permanent Account Number ABCPE1234F and enough text to be a text layer',
+    });
+    expect(read.source).toBe('pdf-text-layer');
+    expect(read.lines).toBeUndefined();
+  });
+});

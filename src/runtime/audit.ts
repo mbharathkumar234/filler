@@ -52,7 +52,13 @@ export type AuditEvent =
   | { t: 'submit.approved'; target: string }
   | { t: 'submit.done' }
   | { t: 'submit.refused'; why: string }
-  | { t: 'run.aborted'; why: string };
+  | { t: 'run.aborted'; why: string }
+  /** A document put somewhere a fill does not reach: a site's own upload window. */
+  | { t: 'document.placed'; key: FieldKey; route: 'window' | 'drop' }
+  /** One document's Upload button, approved and pressed (or refused). */
+  | { t: 'upload.approved'; key: FieldKey; target: string }
+  | { t: 'upload.done'; key: FieldKey }
+  | { t: 'upload.refused'; key: FieldKey; why: string };
 
 export type AuditEventType = AuditEvent['t'];
 
@@ -237,5 +243,13 @@ export function describeEntry(entry: AuditEntry): string {
       return `Submission refused: ${event.why}`;
     case 'run.aborted':
       return `Run stopped: ${event.why}`;
+    case 'document.placed':
+      return `Put ${event.key} into the form’s ${event.route === 'window' ? 'upload window' : 'drop area'}.`;
+    case 'upload.approved':
+      return `You approved uploading ${event.key} with ${event.target}.`;
+    case 'upload.done':
+      return `Pressed Upload for ${event.key}.`;
+    case 'upload.refused':
+      return `Upload of ${event.key} refused: ${event.why}`;
   }
 }

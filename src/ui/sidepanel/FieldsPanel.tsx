@@ -17,6 +17,9 @@ import { RequestFailed, errorMessage, send } from '@/ui/lib/client';
 import { originPatternOf } from '@/background/injection-failure';
 import { TeachPanel } from '@/ui/review/TeachPanel';
 import { EarlyGuardPanel } from '@/ui/review/EarlyGuardPanel';
+import { ReauthPrompt } from '@/ui/lib/ReauthPrompt';
+import { labelFor } from '@/ui/lib/field-groups';
+import { DocumentSlots } from './DocumentSlots';
 
 const SOURCE_LABELS: Record<string, string> = {
   'label-for': 'label',
@@ -29,8 +32,15 @@ const SOURCE_LABELS: Record<string, string> = {
   placeholder: 'placeholder',
   title: 'title attribute',
   'name-attribute': 'field name',
+  'question-heading': 'question heading',
   none: 'no label found',
 };
+
+/** A document that did not go in, as something the user can act on. */
+function remedyFor(doc: FillReport['documents'][number]): string {
+  if (doc.code === 'no-master') return `No ${labelFor(doc.key)} saved yet — add it under Documents.`;
+  return doc.reason ?? 'It could not be attached.';
+}
 
 export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }) {
   const [harvest, setHarvest] = useState<TabHarvest | null>(null);
@@ -48,6 +58,8 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
   const [needsHost, setNeedsHost] = useState<string | null>(null);
   /** Origin we could be granted permanently, offered after a successful scan. */
   const [offerAlways, setOfferAlways] = useState<string | null>(null);
+  /** The worker's re-auth sentence, while the passphrase prompt is up. */
+  const [reauth, setReauth] = useState<string | null>(null);
 
   const scan = useCallback(async () => {
     setBusy(true);
@@ -112,6 +124,7 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
   const runFill = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setReauth(null);
     try {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab?.id) {
@@ -123,7 +136,10 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
       // there is something to review rather than waiting to be asked for.
       onFilled?.(tab.id);
     } catch (err) {
-      setError(errorMessage(err));
+      // A signature or an Aadhaar card on the form, and the passphrase last
+      // entered a while ago: ask for it here, then fill.
+      if (err instanceof RequestFailed && err.code === 'REAUTH_REQUIRED') setReauth(err.message);
+      else setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -204,7 +220,9 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
         </div>
       )}
 
-      {harvest && harvest.matches.some((m) => bandOf(m) !== 'unmapped') && (
+      {harvest &&
+        (harvest.matches.some((m) => bandOf(m) !== 'unmapped') ||
+          harvest.uploadSlots.some((slot) => slot.kind === 'drop' && slot.key !== null)) && (
         <div className="mt-2 flex gap-2">
           <button
             type="button"
@@ -262,7 +280,56 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
               Blocked {fill.blocked} submission attempt(s) during the run.
             </p>
           )}
+          {fill.documents.length + fill.unrecognisedUploads.length > 0 && (
+            <div className="mt-1.5 border-t border-emerald-200 pt-1.5">
+              {/*
+                The denominator is every upload the page has, not the ones the
+                extension could name: "3 of 3" on a page with five read as done.
+              */}
+              <p className="font-medium">
+                Attached {fill.documents.filter((d) => d.attached).length} of{' '}
+                {fill.documents.length + fill.unrecognisedUploads.length} upload
+                {fill.documents.length + fill.unrecognisedUploads.length === 1 ? '' : 's'} on this
+                page
+              </p>
+              <ul className="mt-0.5 space-y-0.5">
+                {fill.documents.map((doc) => (
+                  <li key={doc.ref} className={doc.attached ? 'text-emerald-800' : 'text-amber-800'}>
+                    {doc.attached ? '✓' : '✗'} {doc.portalLabel}
+                    {doc.attached && doc.variant
+                      ? ` — ${Math.round(doc.variant.bytes / 1024)} KB, fitted to ${doc.requirement}`
+                      : doc.attached
+                        ? ''
+                        : ` — ${remedyFor(doc)}`}
+                  </li>
+                ))}
+                {fill.unrecognisedUploads.map((upload) => (
+                  <li key={upload.ref} className="text-amber-800">
+                    ? {upload.label} — could not tell which document this asks for. Nothing was
+                    attached; use the page's own button to add it.
+                  </li>
+                ))}
+              </ul>
+              {fill.documents.some((d) => d.attached && d.uploadButton) && (
+                <p className="mt-0.5 text-emerald-800">
+                  This form has its own Upload buttons. Approve each upload on the review screen and
+                  the extension presses it for you.
+                </p>
+              )}
+            </div>
+          )}
         </div>
+      )}
+
+      {reauth !== null && (
+        <ReauthPrompt
+          message={reauth}
+          onConfirmed={() => {
+            setReauth(null);
+            void runFill();
+          }}
+          onCancel={() => setReauth(null)}
+        />
       )}
 
       {error && (
@@ -343,6 +410,8 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
               </ul>
             </div>
           )}
+
+          <DocumentSlots tabId={harvest.tabId} slots={harvest.uploadSlots} />
 
           {harvest.llmNotice && (
             <p className="mt-2 rounded border border-slate-200 bg-slate-50 p-2 text-[11px] text-slate-600">

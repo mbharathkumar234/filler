@@ -4,6 +4,9 @@ import tailwind from '@tailwindcss/vite';
 import { crx } from '@crxjs/vite-plugin';
 import { fileURLToPath, URL } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
+import { parse as parseYaml } from 'yaml';
+import { OCR_MODELS, archivePath } from './scripts/fetch-ocr-models.mjs';
+import { modelConfigFrom } from './src/documents/paddle.ts';
 import manifest from './manifest.config.ts';
 
 /**
@@ -25,6 +28,75 @@ function practiceForm() {
         fileName: 'practice/first-fill.html',
         source: readFileSync(source, 'utf8'),
       });
+    },
+  };
+}
+
+/**
+ * Put the document reader's models in the package (§ reading a document).
+ *
+ * PaddleOCR's text detector and English recogniser, from the archives
+ * `scripts/fetch-ocr-models.mjs` pinned by SHA-256 into `vendor/ocr-models/`.
+ * Each archive holds an `inference.onnx` and an `inference.yml`; the model goes
+ * in as it is, and the settings go in as **JSON**, parsed here by a real YAML
+ * parser. The recogniser's character list alone has hundreds of entries in
+ * every quoting style YAML allows, and one entry misread makes every character
+ * after it read as its neighbour — so it is parsed once, at build time, by a
+ * parser that gets it right, and the extension carries no YAML parser at all.
+ *
+ * ONNX Runtime's WebAssembly needs no copying: the runtime refers to it with
+ * `new URL(..., import.meta.url)`, which Vite emits as an asset of this package.
+ * `verify-dist.mjs` fails the build if any of it did not arrive.
+ */
+function ocrAssets() {
+  /** The two files wanted from a PaddleX model archive (uncompressed ustar). */
+  function unpack(tar: Buffer): { onnx: Buffer; yml: string } {
+    const found: Record<string, Buffer> = {};
+    let longName: string | null = null;
+    for (let at = 0; at + 512 <= tar.length; ) {
+      const header = tar.subarray(at, at + 512);
+      if (header.every((byte) => byte === 0)) break;
+      const field = (from: number, length: number) =>
+        header.subarray(from, from + length).toString('utf8').replace(/\0.*$/s, '');
+      const size = parseInt(field(124, 12).trim() || '0', 8);
+      const type = field(156, 1);
+      const prefix = field(345, 155);
+      const body = tar.subarray(at + 512, at + 512 + size);
+      const name = longName ?? (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
+      longName = null;
+
+      if (type === 'L') longName = body.toString('utf8').replace(/\0.*$/s, '');
+      else if (type === '0' || type === '') found[name.split('/').pop()!] = Buffer.from(body);
+
+      at += 512 + Math.ceil(size / 512) * 512;
+    }
+    const onnx = found['inference.onnx'];
+    const yml = found['inference.yml'];
+    if (!onnx || !yml) throw new Error('A model archive is missing inference.onnx or inference.yml.');
+    return { onnx, yml: yml.toString('utf8') };
+  }
+
+  return {
+    name: 'autofill:ocr-assets',
+    generateBundle(this: {
+      emitFile: (f: { type: 'asset'; fileName: string; source: Uint8Array | string }) => void;
+    }) {
+      for (const model of OCR_MODELS) {
+        const path = archivePath(model.name);
+        if (!existsSync(path)) {
+          throw new Error(
+            `${model.name} is missing from vendor/ocr-models. Run \`npm run ocr:models\`; ` +
+              'without it the extension ships a document reader that cannot read.',
+          );
+        }
+        const { onnx, yml } = unpack(readFileSync(path));
+        const config = modelConfigFrom(parseYaml(yml));
+        if (config.modelName !== model.name) {
+          throw new Error(`${path} declares model ${config.modelName}, not ${model.name}.`);
+        }
+        this.emitFile({ type: 'asset', fileName: `ocr/${model.name}.onnx`, source: onnx });
+        this.emitFile({ type: 'asset', fileName: `ocr/${model.name}.json`, source: JSON.stringify(config) });
+      }
     },
   };
 }
@@ -93,11 +165,18 @@ function buildContentScript() {
 }
 
 export default defineConfig({
+  /*
+   * The document reader's worker is an ES module: ONNX Runtime finds its own
+   * WebAssembly with `new URL(..., import.meta.url)`, which only means
+   * something in a module, and Vite then emits that file into the package.
+   */
+  worker: { format: 'es' },
   plugins: [
     react(),
     tailwind(),
     crx({ manifest }),
     practiceForm(),
+    ocrAssets(),
     workerSafePreload(),
     buildContentScript(),
   ],
@@ -141,6 +220,14 @@ export default defineConfig({
      * `vite.content.config.ts`, `lib` mode, `iife`, self-contained.
      */
     rollupOptions: {
+      /*
+       * The offscreen reader page. It is not in the manifest — an offscreen
+       * document is opened by URL at runtime — so it has to be named here or
+       * Rollup never builds it.
+       */
+      input: {
+        ocr: fileURLToPath(new URL('./src/offscreen/ocr.html', import.meta.url)),
+      },
       output: {
         entryFileNames: 'assets/[name]-[hash].js',
       },

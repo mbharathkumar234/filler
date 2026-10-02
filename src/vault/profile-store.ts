@@ -107,6 +107,10 @@ export async function storedKeys(db: VaultDb): Promise<FieldKey[]> {
  * does not make you less complete; it adds a block you have already started.
  */
 const CONDITIONAL_PREFIXES: readonly string[] = [
+  // The level-less block is nobody's to fill: `matching/qualifications.ts`
+  // answers a question that names no qualification from the most recent one.
+  // It counts only for a vault that still holds values typed before that.
+  'education[].',
   'education.class_10.',
   'education.class_12.',
   'education.diploma.',

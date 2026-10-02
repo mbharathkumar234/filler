@@ -61,6 +61,13 @@ export interface RasterBackend {
    * about cropping. When it is absent, derivation simply does not trim.
    */
   crop?(source: RasterSource, box: ContentBox): Promise<RasterSource>;
+  /**
+   * Turn `source` clockwise by quarter turns, returning a new source.
+   *
+   * Optional for the same reason `crop` is. When it is absent, a piece cut
+   * from a sideways photograph is shown sideways.
+   */
+  turn?(source: RasterSource, turns: 1 | 2 | 3): Promise<RasterSource>;
   /** Release any native resources held by a source. */
   release?(source: RasterSource): void;
 }

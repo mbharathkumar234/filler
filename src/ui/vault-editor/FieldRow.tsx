@@ -28,9 +28,15 @@ interface Props {
   fieldKey: FieldKey;
   value: string;
   onSave: (key: FieldKey, value: string) => Promise<void>;
+  /**
+   * Values a portal is likely to want written exactly — degree and branch
+   * names. Offered through a `datalist`, so the box stays free text: the list
+   * is a spelling aid, not a set of permitted answers.
+   */
+  suggestions?: readonly string[];
 }
 
-export function FieldRow({ fieldKey, value, onSave }: Props) {
+export function FieldRow({ fieldKey, value, onSave, suggestions }: Props) {
   const [draft, setDraft] = useState(value);
   const [revealed, setRevealed] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -38,6 +44,9 @@ export function FieldRow({ fieldKey, value, onSave }: Props) {
   const [saving, setSaving] = useState(false);
   const inputId = useId();
 
+  // Never on a masked field: a dropdown of past answers beside a password-type
+  // box is a way to read one without revealing it.
+  const offered = sensitivityOf(fieldKey) === 'high' ? [] : (suggestions ?? []);
   const sensitivity = sensitivityOf(fieldKey);
   const isHigh = sensitivity === 'high';
   const label = labelFor(fieldKey);
@@ -95,12 +104,20 @@ export function FieldRow({ fieldKey, value, onSave }: Props) {
             setError(null);
           }}
           onBlur={() => void commit()}
+          list={offered.length > 0 ? `${inputId}-list` : undefined}
           aria-invalid={error !== null}
           aria-describedby={error ? `${inputId}-error` : undefined}
           className={`w-full rounded border px-2 py-1 text-sm focus:outline-none ${
             error ? 'border-red-400 focus:border-red-500' : 'border-slate-300 focus:border-slate-500'
           }`}
         />
+        {offered.length > 0 && (
+          <datalist id={`${inputId}-list`}>
+            {offered.map((option) => (
+              <option key={option} value={option} />
+            ))}
+          </datalist>
+        )}
         {isHigh && (
           <button
             type="button"

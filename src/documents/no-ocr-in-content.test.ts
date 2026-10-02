@@ -56,11 +56,25 @@ const FORBIDDEN = [
   'reconstructLines',
   'SCHEDULED_LANGUAGES',
   'availableScripts',
-  // Engine names, so a future OCR dependency cannot arrive here unnoticed.
+  // The reader that ships: PaddleOCR's pipeline on ONNX Runtime.
+  'readPage',
+  'uprightPage',
+  'normaliseForOrientation',
+  'findTextBoxes',
+  'cropForRecognition',
+  'decodeCtc',
+  'layoutText',
+  'onnxruntime',
+  'InferenceSession',
+  'PP-OCRv5',
+  'PP-LCNet',
+  // Engine names, so a future or former OCR dependency cannot arrive here
+  // unnoticed.
   'tesseract',
   'Tesseract',
   'traineddata',
   'createWorker',
+  'paddleocr',
 ];
 
 describe('the content script cannot read text from pixels', () => {

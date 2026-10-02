@@ -172,15 +172,81 @@ test.describe('the extension as Chrome actually loads it', () => {
     expect(ready).toBe(true);
   });
 
-  test('the submit guard is live in the real bundle, not just the harness', async () => {
+  /*
+   * The guard in the artefact that ships, against the bug that made it matter.
+   *
+   * It used to switch on the moment the content script arrived, and refuse
+   * every submit until an approval. On pages the extension had never filled
+   * that meant refusing the user's own "Sign In" — the login of an unrelated
+   * local project and a government hostel portal, neither of which the
+   * extension had been opened on. The guard is for *our* fill (P2); a page we
+   * have not written to is the user's.
+   *
+   * The required fields are filled first, and that is not incidental: the
+   * practice form has three, and an empty required field makes the browser
+   * refuse the submit on its own, so a test of "the submit went through"
+   * would pass for the wrong reason.
+   */
+  const fillRequired = () => {
+    for (const input of document.querySelectorAll<HTMLInputElement>('input[required]')) {
+      input.value = input.type === 'email' ? 'someone@example.test' : '1234567890';
+    }
+  };
+  const trySubmit = () => {
+    const form = document.getElementById('practice') as HTMLFormElement;
+    let submitted = false;
+    form.addEventListener('submit', (event) => {
+      submitted = true;
+      event.preventDefault();
+    });
+    (document.getElementById('p-submit') as HTMLButtonElement).click();
+    return submitted;
+  };
+
+  test('leaves the user’s own submit alone on a page it has not filled', async () => {
+    const launched = await launch();
+    context = launched.context;
+
+    const page = await launched.context.newPage();
+    await page.goto(`chrome-extension://${launched.id}/practice/first-fill.html`);
+    await page.waitForSelector('#p-submit');
+    // The content script as a scan leaves it: loaded, wired, nothing filled.
+    await page.addScriptTag({ url: '/content.js' });
+    await page.waitForFunction(() => (window as { __autofillContentReady?: boolean }).__autofillContentReady);
+    await page.evaluate(fillRequired);
+
+    expect(await page.evaluate(trySubmit), 'the user pressed Submit and was refused').toBe(true);
+    await expect(page.getByText('Submission blocked')).toHaveCount(0);
+  });
+
+  test('hands the page back when it loads before the page and no run is live', async () => {
     /*
-     * P2, in the artefact that actually ships.
+     * The per-origin document_start script, as one earlier fill left it
+     * registered: it loads before the page, on a site nobody is filling now.
+     * It starts engaged — the one case it exists for is a postback carrying
+     * our values — asks the worker about this tab, and must stand down.
+     */
+    const launched = await launch();
+    context = launched.context;
+    await launched.context.addInitScript({ path: `${DIST}/content.js` });
+
+    const page = await launched.context.newPage();
+    await page.goto(`chrome-extension://${launched.id}/practice/first-fill.html`);
+    await page.waitForSelector('#p-submit');
+    await page.evaluate(fillRequired);
+
+    // The round trip to the worker, then the user presses Sign In.
+    await expect.poll(() => page.evaluate(trySubmit), { timeout: 5_000 }).toBe(true);
+  });
+
+  test('the guard stays out of sub-frames, where nothing is ever written', async () => {
+    /*
+     * Every write addresses the top frame, so a guard in a sub-frame protects
+     * nothing of ours — and inside a site's own upload window (Google Forms'
+     * is a same-origin frame) it blocked the user's own press on Upload.
      *
-     * The required fields are filled first, and that is not incidental: the
-     * practice form has three, and an empty required field makes the browser
-     * refuse the submit on its own. Without filling them this test passes
-     * whether or not the guard exists — it did, in its first version, and
-     * against a content script that could not even parse.
+     * Both halves are shown in one page: the same bundle, injected into the
+     * top document and into a frame, guards the first and not the second.
      */
     const launched = await launch();
     context = launched.context;
@@ -188,45 +254,56 @@ test.describe('the extension as Chrome actually loads it', () => {
     const page = await launched.context.newPage();
     await page.goto(`chrome-extension://${launched.id}/practice/first-fill.html`);
     await page.waitForSelector('#p-submit');
+    await page.evaluate(() => {
+      const frame = document.createElement('iframe');
+      frame.name = 'window';
+      frame.src = '/practice/first-fill.html';
+      document.body.append(frame);
+    });
+    const frame = await (async () => {
+      for (;;) {
+        const found = page.frame({ name: 'window' });
+        if (found) {
+          await found.waitForSelector('#p-submit');
+          return found;
+        }
+        await page.waitForTimeout(50);
+      }
+    })();
 
-    const fillRequired = () => {
+    await page.addScriptTag({ url: '/content.js' });
+    await frame.addScriptTag({ url: '/content.js' });
+
+    // A fill reaches the page — with nothing to write, which is still the
+    // moment the page starts carrying a fill of ours and the guard engages.
+    // Both copies hear it; only the top frame has a guard to engage.
+    await launched.worker.evaluate(() =>
+      chrome.runtime
+        .sendMessage({ __af: true, at: Date.now(), payload: { type: 'fill:apply', writes: [] } })
+        .catch(() => null),
+    );
+
+    const trySubmit = () => {
       for (const input of document.querySelectorAll<HTMLInputElement>('input[required]')) {
         input.value = input.type === 'email' ? 'someone@example.test' : '1234567890';
       }
+      const form = document.getElementById('practice') as HTMLFormElement;
+      let submitted = false;
+      form.addEventListener('submit', (event) => {
+        submitted = true;
+        event.preventDefault();
+      });
+      form.requestSubmit();
+      return submitted;
     };
 
-    // First establish that the page *would* submit. A guard test that never
-    // demonstrates the attack proves nothing about the guard.
-    await page.evaluate(fillRequired);
-    const withoutGuard = await page.evaluate(() => {
-      const form = document.getElementById('practice') as HTMLFormElement;
-      let submitted = false;
-      form.addEventListener('submit', (event) => {
-        submitted = true;
-        event.preventDefault();
-      });
-      form.requestSubmit();
-      return submitted;
-    });
-    expect(withoutGuard, 'the fixture cannot submit at all; this proves nothing').toBe(true);
-
-    // Now with the real content script in place.
-    await page.reload();
-    await page.waitForSelector('#p-submit');
-    await page.addScriptTag({ url: '/content.js' });
-    await page.evaluate(fillRequired);
-
-    const withGuard = await page.evaluate(() => {
-      const form = document.getElementById('practice') as HTMLFormElement;
-      let submitted = false;
-      form.addEventListener('submit', (event) => {
-        submitted = true;
-        event.preventDefault();
-      });
-      form.requestSubmit();
-      return submitted;
-    });
-
-    expect(withGuard, 'an unarmed scripted submit reached the form').toBe(false);
+    expect(
+      await frame.evaluate(() => (window as { __autofillContentReady?: boolean }).__autofillContentReady),
+      'the frame copy must have wired itself, or this proves nothing',
+    ).toBe(true);
+    await expect
+      .poll(() => page.evaluate(trySubmit), { message: 'the top frame lost its guard' })
+      .toBe(false);
+    expect(await frame.evaluate(trySubmit), 'a guard was installed in a sub-frame').toBe(true);
   });
 });

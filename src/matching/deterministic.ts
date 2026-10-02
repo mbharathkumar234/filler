@@ -29,6 +29,7 @@ import type { FieldDescriptor, MatchResult } from '@/shared/types';
 import { CONFIDENCE } from '@/shared/types';
 import { FIELD_KEYS, isFieldKey, type FieldKey } from './taxonomy';
 import {
+  GENERIC_TOKENS,
   canonicalForm,
   coverage,
   hasDistinctiveOverlap,
@@ -121,7 +122,7 @@ const AUTOCOMPLETE_MAP: Record<string, FieldKey> = {
 // Option-set fingerprints
 // ---------------------------------------------------------------------------
 
-const INDIAN_STATES = [
+export const INDIAN_STATES = [
   'andhra pradesh', 'arunachal pradesh', 'assam', 'bihar', 'chhattisgarh', 'goa',
   'gujarat', 'haryana', 'himachal pradesh', 'jharkhand', 'karnataka', 'kerala',
   'madhya pradesh', 'maharashtra', 'manipur', 'meghalaya', 'mizoram', 'nagaland',
@@ -230,10 +231,47 @@ const SCORES = {
   optionSet: 0.9,
   labelExact: 0.9,
   labelCoverage: 0.78,
+  // Below the label: an alias is the portal's word, but its second one.
+  aliasExact: 0.86,
+  aliasCoverage: 0.74,
   identifierExact: 0.8,
   identifierCoverage: 0.66,
   fuzzy: 0.55,
 } as const;
+
+/** A phrase that shares some of its words with the label, and which words. */
+interface PartialMatch extends Signal {
+  carriedBy: string;
+}
+
+/**
+ * The partial matches that are evidence in their own right.
+ *
+ * Two phrases of one key that partly match a label through the *same* word are
+ * one observation made twice. Counted twice they corroborated each other, and
+ * that lifted a key past the single-weak-signal cap on nothing but how many
+ * ways the dictionary happens to say it: "Ward Inspector's Remarks" was filled
+ * as a defence ward, and a box labelled only "Physics" would have been filled
+ * with the Physics marks the moment that key had five phrases.
+ *
+ * So a key with nothing but partial matches keeps one per distinct set of
+ * shared words — "full" and "applicant" are two observations, "licence" and
+ * "licence" are one. A key the label also names outright keeps all of them,
+ * as it always has: there the question is how sure, not whether.
+ */
+function distinct(partial: readonly PartialMatch[], whole: ReadonlySet<FieldKey>): Signal[] {
+  const seen = new Set<string>();
+  const kept: Signal[] = [];
+  for (const { carriedBy, ...signal } of partial) {
+    if (!whole.has(signal.key)) {
+      const observation = `${signal.key}|${carriedBy}`;
+      if (seen.has(observation)) continue;
+      seen.add(observation);
+    }
+    kept.push(signal);
+  }
+  return kept;
+}
 
 /** Each corroborating signal beyond the first adds this much. */
 const CORROBORATION_BONUS = 0.04;
@@ -272,6 +310,37 @@ const AMBIGUITY_MARGIN = 0.15;
 /** Ceiling applied to an ambiguous match — below auto-fill, so a human looks. */
 export const AMBIGUITY_CEILING = 0.8;
 
+/**
+ * "Also known as: 10th Marks Card / SSLC Marks Card / Secondary Examination
+ * Marksheet" — the portal naming its own document in the words other portals
+ * use.
+ *
+ * Found on a test portal whose labels were deliberately opaque ("Class X
+ * Academic Record", "ST Category Certificate") and whose alias lines said
+ * plainly what each one was. The matcher read only the label and left both
+ * unmatched. An alias list is read from the text that describes the box, up
+ * to where the rules begin ("Accepts .pdf …"), and each entry is scored like
+ * a label — a little lower, so that where the label is clear, it decides.
+ */
+const ALIAS_LEAD = /\b(?:also\s+known\s+as|also\s+called|a\.k\.a\.?|aka)\s*[:\-–]?\s*/i;
+const ALIAS_END = /\s(?:accepts?|allowed|formats?|max(?:imum)?|min(?:imum)?|size|upload)\b|[|\n]/i;
+
+export function aliasesOf(field: Pick<FieldDescriptor, 'requirementText'>): string[] {
+  const text = field.requirementText ?? '';
+  const lead = ALIAS_LEAD.exec(text);
+  if (lead === null) return [];
+
+  let list = text.slice(lead.index + lead[0].length);
+  const end = ALIAS_END.exec(list);
+  if (end !== null) list = list.slice(0, end.index);
+
+  return list
+    .split(/\s*[/,;]\s*|\s+or\s+/i)
+    .map((alias) => alias.trim())
+    .filter((alias) => alias.length > 2)
+    .slice(0, 8);
+}
+
 function collectSignals(field: FieldDescriptor): Signal[] {
   const signals: Signal[] = [];
 
@@ -301,6 +370,11 @@ function collectSignals(field: FieldDescriptor): Signal[] {
   }
 
   // 3. Label against the synonym dictionary, per bilingual half.
+  //
+  // Partial matches are held back until the whole label has been read, because
+  // how many of them count depends on what else the label said (`distinct`).
+  const whole = new Set<FieldKey>();
+  const partial: PartialMatch[] = [];
   for (const half of splitBilingual(field.labelText)) {
     const tokens = labelTokens(half);
     if (tokens.length === 0) continue;
@@ -308,14 +382,17 @@ function collectSignals(field: FieldDescriptor): Signal[] {
     const exact = BY_CANONICAL.get(canonicalForm(half));
     if (exact) {
       for (const key of exact) {
+        whole.add(key);
         signals.push({ key, score: SCORES.labelExact, rationale: `label matches "${half}"` });
       }
       continue;
     }
 
+    const inLabel = new Set(tokens);
     for (const entry of DICTIONARY) {
       const covered = coverage(entry.tokens, tokens);
       if (covered === 1 && entry.tokens.length > 0) {
+        whole.add(entry.key);
         signals.push({
           key: entry.key,
           score: coverageScore(entry.tokens.length),
@@ -332,10 +409,40 @@ function collectSignals(field: FieldDescriptor): Signal[] {
         hasDistinctiveOverlap(entry.tokens, tokens) &&
         !onlySubjectInCommon(entry.tokens, tokens)
       ) {
-        signals.push({
+        partial.push({
           key: entry.key,
           score: SCORES.fuzzy,
           rationale: `label partly matches "${entry.phrase}"`,
+          carriedBy: entry.tokens
+            .filter((token) => inLabel.has(token) && !GENERIC_TOKENS.has(token))
+            .sort()
+            .join(' '),
+        });
+      }
+    }
+  }
+  signals.push(...distinct(partial, whole));
+
+  // 3b. The portal's own other names for it (`aliasesOf`). Exact matches and
+  //     fully-contained phrases only: a partial match on a second name is two
+  //     steps from anything the page actually said.
+  for (const alias of aliasesOf(field)) {
+    const tokens = labelTokens(alias);
+    if (tokens.length === 0) continue;
+
+    const exact = BY_CANONICAL.get(canonicalForm(alias));
+    if (exact) {
+      for (const key of exact) {
+        signals.push({ key, score: SCORES.aliasExact, rationale: `the page also calls it "${alias}"` });
+      }
+      continue;
+    }
+    for (const entry of DICTIONARY) {
+      if (entry.tokens.length >= 2 && coverage(entry.tokens, tokens) === 1) {
+        signals.push({
+          key: entry.key,
+          score: SCORES.aliasCoverage,
+          rationale: `the page also calls it "${alias}", which contains "${entry.phrase}"`,
         });
       }
     }

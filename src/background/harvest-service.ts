@@ -10,12 +10,20 @@
 import type { Result } from '@/shared/messages';
 import { envelope } from '@/shared/messages';
 import type { HarvestReport } from '@/content/index';
-import type { MatchResult } from '@/shared/types';
+import type { UploadButton, UploadSlot } from '@/content/upload-slots';
+import type {
+  DocConstraint,
+  FieldDescriptor,
+  MatchResult,
+  SiteProfileDocument,
+} from '@/shared/types';
 import { explainInjectionFailure } from './injection-failure';
 import { bundledProfiles, locateBySelector } from '@/matching/profile-cache';
 import { profileHealth, type ProfileHealth } from '@/matching/teach';
 import { loadLearned } from '@/matching/learned-profiles';
-import { matchFormWithContext } from '@/matching';
+import { bandOf, matchField, matchFormWithContext } from '@/matching';
+import { isDocumentKey, isFieldKey, type FieldKey } from '@/matching/taxonomy';
+import { constraintForField } from '@/documents/field-constraint';
 import { enrichWithLlm, recordUsage } from './llm-service';
 
 /** Built by Vite as a separate entry; see vite.config.ts rollupOptions. */
@@ -23,6 +31,22 @@ const CONTENT_SCRIPT = 'content.js';
 
 export interface FrameReport extends HarvestReport {
   frameId: number;
+}
+
+/**
+ * An upload question with no file box, and the document it asks for.
+ *
+ * Matched by the same matcher as every field, as a file field — so the traits
+ * admit only `doc.*` keys, and "Upload your Aadhaar card copy" can never become
+ * an Aadhaar *number*.
+ */
+export interface MatchedSlot extends UploadSlot {
+  frameId: number;
+  /** Null when the matcher could not tell which document this is. */
+  key: FieldKey | null;
+  confidence: number;
+  /** What the question's own words ask for — size, format. */
+  constraint: DocConstraint;
 }
 
 export interface TabHarvest {
@@ -51,6 +75,56 @@ export interface TabHarvest {
   llmUsed: boolean;
   /** § Phase 9: how much of the applicable profile still resolves, if any. */
   profileHealth: ProfileHealth | null;
+  /** Upload questions with no file box of their own (top frame). */
+  uploadSlots: MatchedSlot[];
+  /** Each file box's own Upload button, by field ref (top frame). */
+  uploadButtons: Record<string, UploadButton>;
+  /** Document rules the user taught for this form, from the profile that applied. */
+  documentRules: SiteProfileDocument[];
+}
+
+/**
+ * The last harvest of each tab.
+ *
+ * Kept for one reader: "Put … in the upload window", which must act on the
+ * questions the panel is showing, and must not re-inject into a page whose
+ * upload window is open (`upload-window-service.ts`). Everything else
+ * re-harvests, and should.
+ */
+const lastHarvests = new Map<number, TabHarvest>();
+
+export function lastHarvest(tabId: number): TabHarvest | null {
+  return lastHarvests.get(tabId) ?? null;
+}
+
+export function forgetHarvest(tabId: number): void {
+  lastHarvests.delete(tabId);
+}
+
+/** Which document an upload question asks for, read the way a file field is. */
+export function matchSlot(slot: UploadSlot, frameId: number): MatchedSlot {
+  const descriptor: FieldDescriptor = {
+    ref: slot.ref,
+    selectors: slot.selectors,
+    tag: 'file',
+    type: 'file',
+    labelText: slot.label,
+    nearbyText: '',
+    required: slot.required,
+    frameId,
+    visible: true,
+    enabled: true,
+  };
+  const match = matchField(descriptor);
+  const key =
+    isFieldKey(match.key) && isDocumentKey(match.key) && bandOf(match) !== 'unmapped'
+      ? match.key
+      : null;
+  const { constraint } = constraintForField({
+    labelText: slot.label,
+    requirementText: slot.requirementText,
+  });
+  return { ...slot, frameId, key, confidence: match.confidence, constraint };
 }
 
 /**
@@ -173,40 +247,44 @@ export async function harvestTab(tabId: number): Promise<Result<TabHarvest>> {
     });
   }
 
-  return {
-    ok: true,
-    data: {
-      tabId,
-      url,
-      title: tab?.title ?? top.title,
-      frames,
-      fields,
-      blockers: frames.flatMap((f) => f.blockers),
-      wizard: top.wizard,
-      fingerprint: top.fingerprint,
-      visibleCount: frames.reduce((sum, f) => sum + f.visibleCount, 0),
-      labelledCount: frames.reduce((sum, f) => sum + f.labelledCount, 0),
-      matches: enriched.results,
-      profileUsed: matched.profile
-        ? {
-            siteId: matched.profile.profile.siteId,
-            version: matched.profile.profile.version,
-            resolveRate: matched.profile.resolveRate,
-          }
-        : null,
-      profileStale: matched.staleProfile
-        ? {
-            siteId: matched.staleProfile.profile.siteId,
-            version: matched.staleProfile.profile.version,
-            resolveRate: matched.staleProfile.resolveRate,
-          }
-        : null,
-      sameAsPermanent: matched.sameAsPermanent,
-      llmNotice: enriched.notice ?? null,
-      llmUsed: enriched.called && enriched.results.some((r) => r.source === 'llm'),
-      profileHealth: health,
-    },
+  const data: TabHarvest = {
+    tabId,
+    url,
+    title: tab?.title ?? top.title,
+    frames,
+    fields,
+    blockers: frames.flatMap((f) => f.blockers),
+    wizard: top.wizard,
+    fingerprint: top.fingerprint,
+    visibleCount: frames.reduce((sum, f) => sum + f.visibleCount, 0),
+    labelledCount: frames.reduce((sum, f) => sum + f.labelledCount, 0),
+    matches: enriched.results,
+    profileUsed: matched.profile
+      ? {
+          siteId: matched.profile.profile.siteId,
+          version: matched.profile.profile.version,
+          resolveRate: matched.profile.resolveRate,
+        }
+      : null,
+    profileStale: matched.staleProfile
+      ? {
+          siteId: matched.staleProfile.profile.siteId,
+          version: matched.staleProfile.profile.version,
+          resolveRate: matched.staleProfile.resolveRate,
+        }
+      : null,
+    sameAsPermanent: matched.sameAsPermanent,
+    llmNotice: enriched.notice ?? null,
+    llmUsed: enriched.called && enriched.results.some((r) => r.source === 'llm'),
+    profileHealth: health,
+    // Top frame only, like the fill itself: `fill:apply` addresses frame 0.
+    uploadSlots:
+      top.frameId === 0 ? (top.uploadSlots ?? []).map((slot) => matchSlot(slot, 0)) : [],
+    uploadButtons: top.frameId === 0 ? (top.uploadButtons ?? {}) : {},
+    documentRules: matched.profile?.profile.documents ?? [],
   };
+  lastHarvests.set(tabId, data);
+  return { ok: true, data };
 }
 
 /**

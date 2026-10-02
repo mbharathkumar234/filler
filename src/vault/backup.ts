@@ -35,10 +35,16 @@ import {
   BACKUP_FORMAT,
   BACKUP_VERSION,
   BackupFormatError,
+  READABLE_BACKUP_VERSIONS,
   type BackupFile,
   type ImportResult,
+  type SerializedDocument,
   type SerializedSealed,
+  type SerializedSetting,
 } from './backup-format';
+import type { StoredDocument, StoredSetting } from './db';
+import type { DocumentMeta } from '@/shared/types';
+import { isDocumentKey } from '@/matching/taxonomy';
 
 export * from './backup-format';
 
@@ -56,6 +62,19 @@ function unseal(value: SerializedSealed): SealedRecord {
  */
 export async function exportVault(db: VaultDb, meta: VaultMeta): Promise<string> {
   const records = await db.getAll('profile');
+  /*
+   * The masters, not the variants.
+   *
+   * A variant is a copy of a master resized to one portal's requirement; it is
+   * a cache, it rebuilds from the master in a second, and including it would
+   * multiply the size of the backup by however many portals the user has
+   * visited.
+   */
+  const documents = await db.getAll('documents');
+  // Sealed, like everything else here. This is what carries the academic path
+  // the vault is laid out from, so a restored vault comes back arranged the
+  // way its owner left it rather than as a hundred unexplained slots.
+  const settings = await db.getAll('settings');
 
   const file: BackupFile = {
     format: BACKUP_FORMAT,
@@ -75,6 +94,19 @@ export async function exportVault(db: VaultDb, meta: VaultMeta): Promise<string>
       ...seal(r.sealed),
       verifiedAt: r.verifiedAt,
       source: r.source,
+    })),
+    documents: documents.map((d) => ({
+      id: d.id,
+      key: d.key,
+      label: d.label,
+      meta: d.meta,
+      createdAt: d.createdAt,
+      ...seal(d.sealed),
+    })),
+    settings: settings.map((setting) => ({
+      name: setting.name,
+      updatedAt: setting.updatedAt,
+      ...seal(setting.sealed),
     })),
   };
 
@@ -118,6 +150,45 @@ export function kdfFromBackup(kdf: BackupFile['kdf']): KdfParams | null {
   return null;
 }
 
+/**
+ * Is this entry shaped like a document?
+ *
+ * A backup is a file the user picked off a disk, so it is untrusted input in
+ * the same way an imported site profile is (`profile-transfer.ts`). `meta` is
+ * plaintext, and the panel plans a derivation from it without unlocking:
+ * width, height and a byte count that are not numbers would put the editor
+ * into arithmetic on `undefined`. An entry that is not shaped right is
+ * dropped, never repaired into something plausible.
+ */
+/** The same untrusted-input rule as a document: shaped like one, or dropped. */
+function looksLikeSetting(row: SerializedSetting): boolean {
+  return (
+    typeof row.name === 'string' &&
+    row.name !== '' &&
+    typeof row.updatedAt === 'string' &&
+    typeof row.iv === 'string' &&
+    typeof row.ct === 'string'
+  );
+}
+
+function looksLikeDocument(row: SerializedDocument): boolean {
+  const meta = row.meta as Partial<DocumentMeta> | undefined;
+  return (
+    typeof row.id === 'string' &&
+    row.id !== '' &&
+    typeof row.label === 'string' &&
+    typeof row.createdAt === 'string' &&
+    typeof row.iv === 'string' &&
+    typeof row.ct === 'string' &&
+    typeof meta === 'object' &&
+    meta !== null &&
+    typeof meta.mime === 'string' &&
+    typeof meta.bytes === 'number' &&
+    typeof meta.width === 'number' &&
+    typeof meta.height === 'number'
+  );
+}
+
 export function parseBackup(text: string): BackupFile {
   let parsed: unknown;
   try {
@@ -130,9 +201,12 @@ export function parseBackup(text: string): BackupFile {
   if (file.format !== BACKUP_FORMAT) {
     throw new BackupFormatError('That file is not an AutoFill Assistant backup.');
   }
-  if (file.version !== BACKUP_VERSION) {
+  if (typeof file.version !== 'number' || !READABLE_BACKUP_VERSIONS.includes(file.version)) {
+    // A file's job is to outlive the build that wrote it, in both directions:
+    // version 1 is read as a backup that simply had no documents in it.
     throw new BackupFormatError(
-      `This backup is version ${String(file.version)}; this build reads version ${BACKUP_VERSION}.`,
+      `This backup is version ${String(file.version)}; this build reads ` +
+        `${READABLE_BACKUP_VERSIONS.join(' and ')}.`,
     );
   }
   if (!file.kdf || !file.verifier || !Array.isArray(file.records)) {
@@ -166,6 +240,29 @@ export async function importVault(
   }
 
   const skippedKeys: string[] = [];
+  const documents: StoredDocument[] = [];
+  for (const row of file.documents ?? []) {
+    if (!isFieldKey(row.key) || !isDocumentKey(row.key)) {
+      skippedKeys.push(row.key);
+      continue;
+    }
+    if (!looksLikeDocument(row)) continue;
+    documents.push({
+      id: row.id,
+      key: row.key as FieldKey,
+      label: row.label,
+      meta: { ...row.meta, key: row.key as FieldKey },
+      sealed: unseal(row),
+      createdAt: row.createdAt,
+    });
+  }
+
+  const settings: StoredSetting[] = [];
+  for (const row of file.settings ?? []) {
+    if (!looksLikeSetting(row)) continue;
+    settings.push({ name: row.name, sealed: unseal(row), updatedAt: row.updatedAt });
+  }
+
   const records: StoredProfileRecord[] = [];
   for (const row of file.records) {
     if (!isFieldKey(row.key)) {
@@ -198,5 +295,22 @@ export async function importVault(
   const tx = db.transaction('profile', 'readwrite');
   await Promise.all([...records.map((r) => tx.store.put(r)), tx.done]);
 
-  return { imported: records.length, skippedKeys };
+  const docTx = db.transaction('documents', 'readwrite');
+  await Promise.all([...documents.map((d) => docTx.store.put(d)), docTx.done]);
+
+  /*
+   * Settings are replaced, not merged.
+   *
+   * `clearVault` leaves them alone — they outlive a vault being re-created on
+   * purpose — but a *restore* is the user saying "this file is my vault now",
+   * and a leftover API key or an old academic path from the vault being
+   * replaced would be the one thing in there they did not choose.
+   */
+  if (file.settings !== undefined) {
+    const settingsTx = db.transaction('settings', 'readwrite');
+    await settingsTx.store.clear();
+    await Promise.all([...settings.map((s) => settingsTx.store.put(s)), settingsTx.done]);
+  }
+
+  return { imported: records.length, documents: documents.length, skippedKeys };
 }

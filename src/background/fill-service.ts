@@ -10,26 +10,74 @@
  *    write list carries one value per matched field and nothing else.
  *  - **Nothing below the fill threshold is sent at all.** A low-confidence
  *    match is left blank for the user rather than written and hoped for.
+ *
+ * Documents ride the same run. Each upload box the form has — a file box, or a
+ * drag-and-drop area with none — is given the stored document it asks for,
+ * fitted to what the page says it accepts (`documents/field-constraint.ts`),
+ * after every text field, so a dependent dropdown's postback cannot wipe it.
+ * An upload window the user has to open themselves (Google Forms' "Add file")
+ * is not part of a fill; see `upload-window-service.ts`.
  */
 
 import type { Result } from '@/shared/messages';
 import { envelope } from '@/shared/messages';
-import type { FillPlan, MatchResult, PlannedField } from '@/shared/types';
+import type { DocConstraint, FillPlan, MatchResult, PlannedField } from '@/shared/types';
 import { CONFIDENCE } from '@/shared/types';
 import { bandOf } from '@/matching';
 import { isDocumentKey, isFieldKey, type FieldKey } from '@/matching/taxonomy';
+import { answerLevellessEducation } from '@/matching/qualifications';
+import { locateBySelector } from '@/matching/profile-cache';
 import { describeReauth, reauthCheck } from '@/runtime/reauth';
 import { appendAudit } from '@/runtime/audit';
-import { rememberRecords } from './review-service';
+import { rememberDocuments, rememberRecords } from './review-service';
 import { openVaultDb } from '@/vault/db';
 import { getAllFields } from '@/vault/profile-store';
 import { isUnlocked, lastAuthenticatedAt, VaultLockedError, withKey } from '@/vault/session';
 import { harvestTab, type TabHarvest } from './harvest-service';
+import { variantFor } from './document-service';
+import { __resetUploadsForTests, forgetUploads, uploadedKeys } from './upload-state';
+import { constraintForField, fileNameFor } from '@/documents/field-constraint';
+import { describeBytes, describeConstraint } from '@/documents/constraints';
+import { bytesToBase64 } from '@/shared/base64';
 
+/** A document on its way into the page. Base64: see `shared/base64.ts`. */
 export interface SerializedFileValue {
-  bytes: number[];
+  base64: string;
   mime: string;
   filename: string;
+}
+
+/**
+ * The most document bytes one fill carries into the page.
+ *
+ * Not a P1/P6 cap — those live in `limits.ts`. This one is transport: every
+ * document travels in the single `fill:apply` message, and Chrome refuses a
+ * message over 64 MiB. Base64 at this budget is ~43 MB, leaving room for the
+ * rest. A document past it is reported, never silently dropped.
+ */
+export const MAX_ATTACH_BYTES_PER_FILL = 32 * 1024 * 1024;
+
+export type DocumentRoute = 'file-box' | 'drop' | 'window';
+
+/** What happened to one document the form asked for. */
+export interface DocumentOutcome {
+  /** A field ref (`f3`) for a file box, a slot ref (`u1`) otherwise. */
+  ref: string;
+  key: FieldKey;
+  /** The portal's own words for it. */
+  portalLabel: string;
+  route: DocumentRoute;
+  attached: boolean;
+  /** What the document was fitted to, in words. */
+  requirement: string;
+  /** What was attached, or would have been. */
+  variant?: { mime: string; bytes: number; width: number; height: number; passedThrough: boolean };
+  /** Why it is not attached, when it is not — a sentence for the user. */
+  reason?: string;
+  /** Machine-readable reason, so the panel can offer the right remedy. */
+  code?: string;
+  /** The file box's own Upload button, which the review can press with approval. */
+  uploadButton?: string;
 }
 
 export interface WriteInstruction {
@@ -58,8 +106,17 @@ export interface FillReport {
   aborted: boolean;
   /** Fields matched but left blank because confidence was too low. */
   skippedLowConfidence: { key: string; confidence: number }[];
-  /** Document fields we had no master for. */
-  missingDocuments: string[];
+  /** Every document the form asked for, attached or not, and why. */
+  documents: DocumentOutcome[];
+  /**
+   * Upload questions on the form that the extension could not name.
+   *
+   * Listed rather than dropped: on a test portal with five required uploads
+   * the panel said "Attached 3 of 3 documents", which reads as done when two
+   * had never been tried. A question the matcher cannot place is one the user
+   * has to deal with, and the only way they know is if it is on the list.
+   */
+  unrecognisedUploads: { ref: string; label: string }[];
   /** Submissions the guard blocked during the run (P5 audit). */
   blocked: number;
 }
@@ -75,10 +132,15 @@ export function buildWrites(
   values: ReadonlyMap<string, string>,
   dependentSelects: ReadonlySet<string>,
   fieldSelectors: ReadonlyMap<string, string[]>,
-): { writes: WriteInstruction[]; skipped: { key: string; confidence: number }[]; missingDocs: string[] } {
+): {
+  writes: WriteInstruction[];
+  skipped: { key: string; confidence: number }[];
+  /** Document fields: no vault value, a file — see `prepareDocuments`. */
+  documents: { ref: string; key: FieldKey }[];
+} {
   const writes: WriteInstruction[] = [];
   const skipped: { key: string; confidence: number }[] = [];
-  const missingDocs: string[] = [];
+  const documents: { ref: string; key: FieldKey }[] = [];
 
   for (const match of matches) {
     if (match.key === 'unknown') continue;
@@ -89,9 +151,8 @@ export function buildWrites(
       continue;
     }
 
-    if (isDocumentKey(match.key as FieldKey)) {
-      // Document variants are attached separately — see attachDocuments.
-      missingDocs.push(match.key);
+    if (isFieldKey(match.key) && isDocumentKey(match.key)) {
+      documents.push({ ref: match.fieldRef, key: match.key });
       continue;
     }
 
@@ -112,8 +173,242 @@ export function buildWrites(
     });
   }
 
-  return { writes, skipped, missingDocs };
+  return { writes, skipped, documents };
 }
+
+// ---------------------------------------------------------------------------
+// Documents
+// ---------------------------------------------------------------------------
+
+/** One upload box on the form, and everything needed to fit a document to it. */
+interface DocumentSlot {
+  ref: string;
+  key: FieldKey;
+  route: 'file-box' | 'drop';
+  portalLabel: string;
+  labelText: string;
+  requirementText?: string;
+  accept?: string;
+  selectors: string[];
+}
+
+/**
+ * The upload boxes a fill can put a document into, in form order.
+ *
+ * File boxes come from the matcher like any field. Drop areas come from the
+ * harvest's upload slots — only the `drop` kind: a `window` slot needs the
+ * user to open the site's own upload window first.
+ */
+/**
+ * File boxes and drop areas the form has that no document was matched to.
+ *
+ * Top frame only, as `documentSlotsFor` is. A box with no words at all is
+ * still listed ("An upload box with no label"): it is a question the page
+ * asks, and saying nothing about it is how "3 of 3" happened.
+ */
+export function unrecognisedUploadsIn(
+  harvest: Pick<TabHarvest, 'fields' | 'uploadSlots'>,
+  fromMatches: readonly { ref: string }[],
+): { ref: string; label: string }[] {
+  const named = new Set(fromMatches.map((match) => match.ref));
+  const unnamed: { ref: string; label: string }[] = [];
+
+  for (const field of harvest.fields) {
+    if (field.frameId !== 0 || field.tag !== 'file' || named.has(field.ref)) continue;
+    unnamed.push({
+      ref: field.ref,
+      label: field.labelText.trim() || field.nearbyText.trim() || 'An upload box with no label',
+    });
+  }
+  for (const slot of harvest.uploadSlots) {
+    if (slot.kind === 'drop' && slot.key === null) unnamed.push({ ref: slot.ref, label: slot.label });
+  }
+  return unnamed;
+}
+
+export function documentSlotsFor(
+  harvest: Pick<TabHarvest, 'fields' | 'uploadSlots'>,
+  fromMatches: readonly { ref: string; key: FieldKey }[],
+): DocumentSlot[] {
+  const slots: DocumentSlot[] = [];
+  const topFields = harvest.fields.filter((field) => field.frameId === 0);
+
+  for (const { ref, key } of fromMatches) {
+    const field = topFields.find((f) => f.ref === ref);
+    // The traits veto keeps doc keys on file boxes; this is the belt to its braces.
+    if (!field || field.tag !== 'file') continue;
+    slots.push({
+      ref,
+      key,
+      route: 'file-box',
+      portalLabel: field.labelText.trim() || field.nearbyText.trim() || 'Document',
+      labelText: field.labelText,
+      ...(field.requirementText === undefined ? {} : { requirementText: field.requirementText }),
+      ...(field.accept === undefined ? {} : { accept: field.accept }),
+      selectors: field.selectors,
+    });
+  }
+
+  for (const slot of harvest.uploadSlots) {
+    if (slot.kind !== 'drop' || slot.key === null) continue;
+    slots.push({
+      ref: slot.ref,
+      key: slot.key,
+      route: 'drop',
+      portalLabel: slot.label,
+      labelText: slot.label,
+      requirementText: slot.requirementText,
+      selectors: slot.selectors,
+    });
+  }
+
+  return slots;
+}
+
+/** A constraint the user taught for exactly this box, if a profile carries one. */
+function taughtConstraint(
+  harvest: Pick<TabHarvest, 'fields' | 'documentRules'>,
+  slot: DocumentSlot,
+): DocConstraint | null {
+  const topFields = harvest.fields.filter((field) => field.frameId === 0);
+  for (const rule of harvest.documentRules) {
+    if (rule.key !== slot.key) continue;
+    if (locateBySelector(rule.selectors, topFields)?.ref === slot.ref) return rule.constraint;
+    // A drop area is not a field, so compare its own selectors directly.
+    if (slot.route === 'drop' && rule.selectors.some((s) => slot.selectors.includes(s))) {
+      return rule.constraint;
+    }
+  }
+  return null;
+}
+
+/** The requirement one slot's document must be fitted to. */
+export function constraintForSlot(
+  harvest: Pick<TabHarvest, 'fields' | 'documentRules'>,
+  slot: DocumentSlot,
+): DocConstraint {
+  return constraintForField({
+    labelText: slot.labelText,
+    ...(slot.requirementText === undefined ? {} : { requirementText: slot.requirementText }),
+    ...(slot.accept === undefined ? {} : { accept: slot.accept }),
+    taught: taughtConstraint(harvest, slot),
+  }).constraint;
+}
+
+/** A document fitted and ready, or the outcome that explains why not. */
+interface PreparedDocuments {
+  writes: WriteInstruction[];
+  /** Keyed by ref, in form order. `attached` is settled once the page answers. */
+  outcomes: Map<string, DocumentOutcome>;
+  constraints: Map<string, DocConstraint>;
+}
+
+/**
+ * Fit each slot's document to what the page asks for.
+ *
+ * Runs only after the re-auth gate has passed, because this is where document
+ * bytes are decrypted. A failure here is an outcome with the pipeline's own
+ * sentence — "No PAN card saved", "cannot be made smaller than 50 KB" — never
+ * an exception that takes the text fields down with it.
+ */
+async function prepareDocuments(
+  harvest: TabHarvest,
+  slots: readonly DocumentSlot[],
+  alreadyUploaded: ReadonlySet<FieldKey>,
+): Promise<PreparedDocuments> {
+  const writes: WriteInstruction[] = [];
+  const outcomes = new Map<string, DocumentOutcome>();
+  const constraints = new Map<string, DocConstraint>();
+  let budget = MAX_ATTACH_BYTES_PER_FILL;
+
+  for (const slot of slots) {
+    const constraint = constraintForSlot(harvest, slot);
+    constraints.set(slot.ref, constraint);
+    const button = slot.route === 'file-box' ? harvest.uploadButtons[slot.ref] : undefined;
+    const base = {
+      ref: slot.ref,
+      key: slot.key,
+      portalLabel: slot.portalLabel,
+      route: slot.route,
+      requirement: describeConstraint(constraint),
+      ...(button ? { uploadButton: button.label } : {}),
+    };
+
+    if (alreadyUploaded.has(slot.key)) {
+      outcomes.set(slot.ref, {
+        ...base,
+        attached: false,
+        code: 'already-uploaded',
+        reason: 'Already uploaded in this run, so it was not attached a second time.',
+      });
+      continue;
+    }
+
+    const variant = await variantFor(slot.key, constraint);
+    if (!variant.ok) {
+      outcomes.set(slot.ref, { ...base, attached: false, code: variant.code, reason: variant.reason });
+      continue;
+    }
+
+    if (variant.bytes.length > budget) {
+      outcomes.set(slot.ref, {
+        ...base,
+        attached: false,
+        code: 'over-budget',
+        reason:
+          `At ${describeBytes(variant.bytes.length)} this would take one fill past what it can ` +
+          'carry into the page. Upload the others first, then press Fill again.',
+      });
+      continue;
+    }
+    budget -= variant.bytes.length;
+
+    writes.push({
+      ref: slot.ref,
+      key: slot.key,
+      value: {
+        base64: bytesToBase64(variant.bytes),
+        mime: variant.mime,
+        filename: fileNameFor(slot.key, variant.mime),
+      },
+    });
+    outcomes.set(slot.ref, {
+      ...base,
+      // Settled from the page's own read-back once it answers.
+      attached: false,
+      variant: {
+        mime: variant.mime,
+        bytes: variant.bytes.length,
+        width: variant.width,
+        height: variant.height,
+        passedThrough: variant.passedThrough,
+      },
+    });
+  }
+
+  return { writes, outcomes, constraints };
+}
+
+/** Fold the page's per-write records into the document outcomes. */
+function settleDocuments(
+  outcomes: ReadonlyMap<string, DocumentOutcome>,
+  records: readonly FillOutcomeRecord[],
+): DocumentOutcome[] {
+  return [...outcomes.values()].map((outcome) => {
+    if (!outcome.variant || outcome.code !== undefined) return outcome;
+    const record = records.find((r) => r.ref === outcome.ref);
+    if (record?.ok) return { ...outcome, attached: true };
+    return {
+      ...outcome,
+      attached: false,
+      code: 'page-refused',
+      reason: record?.reason
+        ? `The page did not take it: ${record.reason}.`
+        : 'The fill stopped before this document was reached.',
+    };
+  });
+}
+
 
 // ---------------------------------------------------------------------------
 // Run authorisation (§ Phase 6)
@@ -156,8 +451,31 @@ export function authoriseRun(
   authorisedRuns.set(tabId, { tabId, refs, startedAt: now });
 }
 
+/**
+ * Told when a run ends, however it ends: approved and submitted, aborted,
+ * timed out, or its tab closed.
+ *
+ * The worker uses it to hand the page back — the guard disengaged, the
+ * per-origin document_start script unregistered. Without it that script
+ * outlived the fill for the rest of the browser session, and locked the submit
+ * buttons of every later page on the same host.
+ */
+type RunEndedHandler = (tabId: number) => void;
+let runEnded: RunEndedHandler = () => {};
+
+export function onRunEnded(handler: RunEndedHandler): void {
+  runEnded = handler;
+}
+
 export function endRun(tabId: number): void {
-  authorisedRuns.delete(tabId);
+  const had = authorisedRuns.delete(tabId);
+  forgetUploads(tabId);
+  if (had) runEnded(tabId);
+}
+
+/** The tabs with a fill live right now. */
+export function liveRunTabs(now: number = Date.now()): number[] {
+  return [...authorisedRuns.keys()].filter((tabId) => authorisedRun(tabId, now) !== null);
 }
 
 export function authorisedRun(
@@ -167,7 +485,9 @@ export function authorisedRun(
   const run = authorisedRuns.get(tabId);
   if (!run) return null;
   if (now - run.startedAt > RUN_AUTHORISATION_MS) {
+    // Expired: ended, and released like any other ending.
     authorisedRuns.delete(tabId);
+    runEnded(tabId);
     return null;
   }
   return run;
@@ -176,6 +496,7 @@ export function authorisedRun(
 /** Test seam. */
 export function __resetRunsForTests(): void {
   authorisedRuns.clear();
+  __resetUploadsForTests();
 }
 
 // ---------------------------------------------------------------------------
@@ -193,13 +514,23 @@ export function __resetRunsForTests(): void {
  * explicit approval action, and the guard is armed separately by an approval
  * token; putting a submit selector in the plan would be the first half of a
  * capability nothing here should have.
+ *
+ * Documents go in `documents`, never `fields`. Re-verification walks `fields`
+ * and refills what a postback emptied — and on a portal whose Upload button
+ * posts the form, an emptied file box usually means the upload *worked*.
+ * Putting it back would ask the user to upload the same document twice.
  */
-function planFrom(harvest: TabHarvest, writes: readonly WriteInstruction[]): FillPlan {
+function planFrom(
+  harvest: TabHarvest,
+  writes: readonly WriteInstruction[],
+  documents: ReadonlyMap<string, { key: FieldKey; constraint: DocConstraint }> = new Map(),
+): FillPlan {
   const selectors = new Map(harvest.fields.map((field) => [field.ref, field.selectors]));
   const matched = new Map(harvest.matches.map((match) => [match.fieldRef, match]));
 
   const fields: PlannedField[] = [];
   for (const write of writes) {
+    if (documents.has(write.ref)) continue;
     const match = matched.get(write.ref);
     if (!match || !isFieldKey(match.key)) continue;
     fields.push({
@@ -217,7 +548,7 @@ function planFrom(harvest: TabHarvest, writes: readonly WriteInstruction[]): Fil
     formFingerprint: harvest.fingerprint,
     tabId: harvest.tabId,
     fields,
-    documents: [],
+    documents: [...documents].map(([fieldRef, { key, constraint }]) => ({ fieldRef, key, constraint })),
     submit: null,
     createdAt: Date.now(),
   };
@@ -241,23 +572,33 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
 
   const values = await withKey(async (db, key) => {
     const entries = await getAllFields(db, key);
-    return new Map(entries.map((entry) => [entry.key as string, entry.value]));
+    // A question that names no qualification is answered from the most recent
+    // one the user holds, rather than from a second copy they had to type.
+    return answerLevellessEducation(new Map(entries.map((entry) => [entry.key as string, entry.value])));
   });
 
   const fieldSelectors = new Map(harvest.fields.map((field) => [field.ref, field.selectors]));
   const dependent = new Set(harvest.frames.flatMap((frame) => frame.dependentSelects));
 
-  const { writes, skipped, missingDocs } = buildWrites(
+  const { writes: textWrites, skipped, documents: documentMatches } = buildWrites(
     harvest.matches,
     values,
     dependent,
     fieldSelectors,
   );
 
+  const alreadyUploaded = uploadedKeys(tabId);
+  const slots = documentSlotsFor(harvest, documentMatches);
+
   // § Phase 6: the re-authentication gate. Checked here, before any value
   // leaves the worker — not in the panel, which is only the thing that asks.
+  // Documents count: a signature or an Aadhaar card is `high` sensitivity, and
+  // the gate runs before a single document is decrypted, not after.
   const gate = reauthCheck(
-    writes.map((write) => write.key).filter(isFieldKey),
+    [
+      ...textWrites.map((write) => write.key).filter(isFieldKey),
+      ...slots.filter((slot) => !alreadyUploaded.has(slot.key)).map((slot) => slot.key),
+    ],
     lastAuthenticatedAt(),
     Date.now(),
   );
@@ -265,7 +606,15 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
     return { ok: false, error: describeReauth(gate.keys), code: 'REAUTH_REQUIRED' };
   }
 
+  const prepared = await prepareDocuments(harvest, slots, alreadyUploaded);
+
+  // Text first, documents last: a dependent dropdown's postback empties every
+  // file box, and it should happen before anything is attached, not after.
+  const writes = [...textWrites, ...prepared.writes];
+
   if (writes.length === 0) {
+    const documents = settleDocuments(prepared.outcomes, []);
+    rememberDocuments(tabId, documents);
     return {
       ok: true,
       data: {
@@ -274,19 +623,28 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
         records: [],
         aborted: false,
         skippedLowConfidence: skipped,
-        missingDocuments: missingDocs,
+        documents,
+        unrecognisedUploads: unrecognisedUploadsIn(harvest, documentMatches),
         blocked: 0,
       },
     };
   }
 
   // The user asked for this fill, so the tab may refill itself after a
-  // postback until the run ends or expires.
-  authoriseRun(tabId, writes);
+  // postback until the run ends or expires. Text only — a refill never
+  // carries a document (see `planFrom`).
+  authoriseRun(tabId, textWrites);
+
+  const planned = new Map(
+    prepared.writes.map((write) => [
+      write.ref,
+      { key: write.key as FieldKey, constraint: prepared.constraints.get(write.ref) ?? { mime: [] } },
+    ]),
+  );
 
   const response = (await chrome.tabs.sendMessage(
     tabId,
-    envelope({ type: 'fill:apply', writes, plan: planFrom(harvest, writes) }),
+    envelope({ type: 'fill:apply', writes, plan: planFrom(harvest, writes, planned) }),
     { frameId: 0 },
   )) as Result<{ records: FillOutcomeRecord[]; aborted: boolean; blocked: number }> | undefined;
 
@@ -294,11 +652,14 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
     return { ok: false, error: response?.error ?? 'The page did not respond to the fill request.' };
   }
 
+  const documents = settleDocuments(prepared.outcomes, response.data.records);
+
   // § Phase 7: keep the per-field outcomes for the review screen. `truncated`
   // and `fuzzy` are facts about what the fill engine did, and the page has no
   // memory of them — a shortened value is indistinguishable from a short one
   // once it is sitting in an input.
   rememberRecords(tabId, response.data.records);
+  rememberDocuments(tabId, documents);
 
   await appendAudit({
     site: harvest.url,
@@ -309,6 +670,8 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
       filled: response.data.records.filter((record) => record.ok).length,
       attempted: writes.length,
     },
+    // Text only. A document is never a logged value — not its bytes, and not
+    // even the neutral filename; the key above says which one went in.
     values: Object.fromEntries(
       writes
         .filter((write) => typeof write.value === 'string')
@@ -326,7 +689,8 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
       records: response.data.records,
       aborted: response.data.aborted,
       skippedLowConfidence: skipped,
-      missingDocuments: missingDocs,
+      documents,
+      unrecognisedUploads: unrecognisedUploadsIn(harvest, documentMatches),
       blocked: response.data.blocked,
     },
   };
@@ -368,7 +732,9 @@ export async function refillTab(
 
   const values = await withKey(async (db, key) => {
     const entries = await getAllFields(db, key);
-    return new Map(entries.map((entry) => [entry.key as string, entry.value]));
+    // A question that names no qualification is answered from the most recent
+    // one the user holds, rather than from a second copy they had to type.
+    return answerLevellessEducation(new Map(entries.map((entry) => [entry.key as string, entry.value])));
   });
 
   const keys = wanted.map((ref) => run.refs.get(ref)!).filter(isFieldKey);
@@ -405,7 +771,8 @@ export async function refillTab(
       records: response.data.records,
       aborted: response.data.aborted,
       skippedLowConfidence: [],
-      missingDocuments: [],
+      documents: [],
+      unrecognisedUploads: [],
       blocked: response.data.blocked,
     },
   };
@@ -418,7 +785,8 @@ function emptyReport(): FillReport {
     records: [],
     aborted: false,
     skippedLowConfidence: [],
-    missingDocuments: [],
+    documents: [],
+    unrecognisedUploads: [],
     blocked: 0,
   };
 }

@@ -27,10 +27,17 @@ import { measureShape } from '@/documents/raster';
 import { shapeFromBox, type ShapeReading } from '@/documents/trim';
 import { ExtractedDetails } from './ExtractedDetails';
 import { errorMessage, isLockedError, send } from '@/ui/lib/client';
-import { DOCUMENT_KEYS, labelFor } from '@/ui/lib/field-groups';
+import { labelFor } from '@/ui/lib/field-groups';
+import { documentGroupsFor } from '@/ui/lib/vault-shape';
+import type { AcademicPath } from '@/matching/pathway';
 
 interface Props {
   onLocked: () => void;
+  /**
+   * The user's academic path, which decides which folders are offered. Null
+   * means the questions were skipped, and the whole catalogue is shown.
+   */
+  path: AcademicPath | null;
 }
 
 /** A constraint most Indian portals use, offered as a one-click preview. */
@@ -44,6 +51,8 @@ interface Preview {
   height: number;
   warnings: string[];
   fromCache: boolean;
+  /** The saved copy already met the requirement, so it would go in unchanged. */
+  passedThrough: boolean;
 }
 
 /**
@@ -63,7 +72,9 @@ interface Pending {
   shape: ShapeReading | null;
 }
 
-export function DocumentsPanel({ onLocked }: Props) {
+export function DocumentsPanel({ onLocked, path }: Props) {
+  /** Set by the control at the foot: the path offers, it never forbids. */
+  const [showAll, setShowAll] = useState(false);
   const [masters, setMasters] = useState<DocumentSummary[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<FieldKey | null>(null);
@@ -211,7 +222,9 @@ export function DocumentsPanel({ onLocked }: Props) {
         return;
       }
 
-      const blob = new Blob([Uint8Array.from(result.bytes)], { type: result.mime });
+      const blob = new Blob([Uint8Array.from(result.bytes)], {
+        type: result.mime,
+      });
       const url = URL.createObjectURL(blob);
       urls.current.push(url);
 
@@ -224,6 +237,7 @@ export function DocumentsPanel({ onLocked }: Props) {
           height: result.height,
           warnings: result.warnings,
           fromCache: result.fromCache,
+          passedThrough: result.passedThrough === true,
         }),
       );
     } catch (err) {
@@ -245,14 +259,17 @@ export function DocumentsPanel({ onLocked }: Props) {
   }
 
   const byKey = new Map(masters.map((m) => [m.key, m]));
+  // A slot holding a document is shown whatever the path says.
+  const groups = documentGroupsFor(showAll ? null : path, new Set(byKey.keys()));
   const { constraint } = parseConstraint(constraintText);
 
   return (
     <section className="border-t border-slate-200 p-4">
       <h2 className="text-sm font-semibold text-slate-900">Documents</h2>
       <p className="mt-1 text-xs text-slate-500">
-        Add one good-quality copy of each. Portal-sized versions are generated when needed —
-        nothing is uploaded anywhere.
+        Add one good-quality copy of each. When a form asks for one, “Fill this form” makes a copy
+        the size and format that form accepts, on this device, and puts it in the form’s upload box.
+        It reaches a site only when that form is sent.
       </p>
 
       <label className="mt-3 block">
@@ -293,206 +310,267 @@ export function DocumentsPanel({ onLocked }: Props) {
         </p>
       )}
 
-      <ul className="mt-3 space-y-3">
-        {DOCUMENT_KEYS.map((key) => {
-          const master = byKey.get(key);
-          const staged = pending.get(key);
-          const shown = previews.get(key);
-          const busy = busyKey === key;
+      {groups.map((group) => {
+        const added = group.keys.filter((key) => byKey.has(key)).length;
+        return (
           /*
-           * Assess the staged pick when there is one, and the stored document
-           * otherwise. Reading off metadata rather than remembering what the
-           * upload found means the same answer either way, and it also covers
-           * documents added before this check existed — which is most of them,
-           * for an existing user.
+           * One folder per section, and the optional ones start closed.
+           *
+           * Forty-odd slots in one list is a list nobody reads to the end of.
+           * `details` keeps every slot in the page — findable by the browser
+           * search and by a screen reader — while showing the handful a person
+           * is working through.
            */
-          const assessed = staged?.meta ?? master?.meta;
-          /*
-           * A staged file carries its fresh reading; a stored one carries the
-           * box measured at upload, which `shapeFromBox` turns back into the
-           * same answer. Documents stored before any of this have neither, and
-           * are judged by the canvas exactly as they always were.
-           */
-          const shape =
-            staged?.shape ??
-            (master?.meta.content
-              ? shapeFromBox(master.meta.content, {
-                  width: master.meta.width,
-                  height: master.meta.height,
-                })
-              : null);
-          const findings = assessed ? assessMaster(assessed, roleFor(key), shape) : [];
+          <details
+            key={group.id}
+            open={group.optional !== true}
+            className="mt-3 rounded border border-slate-200"
+          >
+            <summary className="cursor-pointer px-2 py-1.5 text-xs font-semibold text-slate-800">
+              {group.title}{' '}
+              <span className="font-normal text-slate-500">
+                — {added} of {group.keys.length} added
+              </span>
+            </summary>
+            {group.hint !== undefined && (
+              <p className="px-2 pb-1 text-[11px] text-slate-500">{group.hint}</p>
+            )}
+            <ul className="space-y-3 p-2">
+              {group.keys.map((key) => {
+                const master = byKey.get(key);
+                const staged = pending.get(key);
+                const shown = previews.get(key);
+                const busy = busyKey === key;
+                /*
+                 * Assess the staged pick when there is one, and the stored document
+                 * otherwise. Reading off metadata rather than remembering what the
+                 * upload found means the same answer either way, and it also covers
+                 * documents added before this check existed — which is most of them,
+                 * for an existing user.
+                 */
+                const assessed = staged?.meta ?? master?.meta;
+                /*
+                 * A staged file carries its fresh reading; a stored one carries the
+                 * box measured at upload, which `shapeFromBox` turns back into the
+                 * same answer. Documents stored before any of this have neither, and
+                 * are judged by the canvas exactly as they always were.
+                 */
+                const shape =
+                  staged?.shape ??
+                  (master?.meta.content
+                    ? shapeFromBox(master.meta.content, {
+                        width: master.meta.width,
+                        height: master.meta.height,
+                      })
+                    : null);
+                const findings = assessed ? assessMaster(assessed, roleFor(key), shape) : [];
 
-          return (
-            <li key={key} className="rounded border border-slate-200 p-2">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="text-xs font-medium text-slate-800">{labelFor(key)}</span>
-                {staged ? (
-                  <span className="text-[10px] font-medium text-amber-700">
-                    {staged.meta.width}×{staged.meta.height} ·{' '}
-                    {Math.round(staged.meta.bytes / 1024)} KB · not saved
-                  </span>
-                ) : master ? (
-                  <span className="text-[10px] text-slate-500">
-                    {master.meta.width}×{master.meta.height} ·{' '}
-                    {Math.round(master.meta.bytes / 1024)} KB
-                  </span>
-                ) : (
-                  <span className="text-[10px] text-slate-400">not added</span>
-                )}
-              </div>
+                return (
+                  <li key={key} className="rounded border border-slate-200 p-2">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-xs font-medium text-slate-800">{labelFor(key)}</span>
+                      {staged ? (
+                        <span className="text-[10px] font-medium text-amber-700">
+                          {staged.meta.width}×{staged.meta.height} ·{' '}
+                          {Math.round(staged.meta.bytes / 1024)} KB · not saved
+                        </span>
+                      ) : master ? (
+                        <span className="text-[10px] text-slate-500">
+                          {master.meta.width}×{master.meta.height} ·{' '}
+                          {Math.round(master.meta.bytes / 1024)} KB
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-slate-400">not added</span>
+                      )}
+                    </div>
 
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                <label className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50">
-                  {staged ? 'Choose another' : master ? 'Replace' : 'Add'}
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,application/pdf"
-                    className="hidden"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void stage(key, file);
-                      e.target.value = '';
-                    }}
-                  />
-                </label>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                      <label className="cursor-pointer rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50">
+                        {staged ? 'Choose another' : master ? 'Replace' : 'Add'}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,application/pdf"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) void stage(key, file);
+                            e.target.value = '';
+                          }}
+                        />
+                      </label>
 
-                {staged && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void save(key)}
-                      disabled={busy}
-                      // One panel, twelve documents, twelve buttons reading
-                      // "Save"; the document name is what tells them apart.
-                      aria-label={`Save ${labelFor(key)} to vault`}
-                      className="rounded border border-slate-800 bg-slate-800 px-2 py-1 text-[11px] text-white hover:bg-slate-700 disabled:opacity-50"
-                    >
-                      {busy ? 'Saving…' : 'Save to vault'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => discard(key)}
-                      disabled={busy}
-                      aria-label={`Discard the ${labelFor(key)} you chose`}
-                      className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50"
-                    >
-                      Discard
-                    </button>
-                  </>
-                )}
+                      {staged && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void save(key)}
+                            disabled={busy}
+                            // One panel, twelve documents, twelve buttons reading
+                            // "Save"; the document name is what tells them apart.
+                            aria-label={`Save ${labelFor(key)} to vault`}
+                            className="rounded border border-slate-800 bg-slate-800 px-2 py-1 text-[11px] text-white hover:bg-slate-700 disabled:opacity-50"
+                          >
+                            {busy ? 'Saving…' : 'Save to vault'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => discard(key)}
+                            disabled={busy}
+                            aria-label={`Discard the ${labelFor(key)} you chose`}
+                            className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            Discard
+                          </button>
+                        </>
+                      )}
 
-                {master && (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => void preview(key)}
-                      disabled={busy}
-                      className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                    >
-                      {busy ? 'Working…' : 'Preview for this portal'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setReading((was) =>
-                          was?.id === master.id ? null : { id: master.id, label: labelFor(key) },
-                        )
-                      }
-                      className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50"
-                    >
-                      Read details from this
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void remove(master.id)}
-                      className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
-                    >
-                      Remove
-                    </button>
-                  </>
-                )}
-              </div>
+                      {master && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => void preview(key)}
+                            disabled={busy}
+                            className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                          >
+                            {busy ? 'Working…' : 'Preview for this portal'}
+                          </button>
+                          {/*
+                           * Only for a document with printing on it. A face
+                           * photograph, a signature and a thumb impression carry
+                           * no details to read, and offering to read one is an
+                           * offer to spend five seconds recognising nothing.
+                           */}
+                          {roleFor(key) === 'document' && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setReading((was) =>
+                                  was?.id === master.id
+                                    ? null
+                                    : { id: master.id, label: labelFor(key) },
+                                )
+                              }
+                              className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50"
+                            >
+                              Read details from this
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => void remove(master.id)}
+                            className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-slate-50"
+                          >
+                            Remove
+                          </button>
+                        </>
+                      )}
+                    </div>
 
-              {staged && (
-                <p className="mt-1.5 text-[11px] text-slate-600">
-                  Ready to save: <span className="font-medium">{staged.file.name}</span>
-                  {master && <span className="text-slate-500"> — this will replace the stored copy.</span>}
-                </p>
-              )}
-
-              {reading?.id === master?.id && reading !== null && (
-                <ExtractedDetails
-                  documentId={reading.id}
-                  documentLabel={reading.label}
-                  onLocked={onLocked}
-                  onClose={() => setReading(null)}
-                  onSaved={(count) => {
-                    setReading(null);
-                    setSavedNotice(
-                      count === 0
-                        ? 'Nothing was saved.'
-                        : `Saved ${count} detail${count === 1 ? '' : 's'} to your vault.`,
-                    );
-                  }}
-                />
-              )}
-
-              {findings.length > 0 && (
-                <ul className="mt-1.5 space-y-1">
-                  {findings.map((finding) => (
-                    <li
-                      key={finding.message}
-                      role={finding.severity === 'blocker' ? 'alert' : 'status'}
-                      className={
-                        finding.severity === 'blocker'
-                          ? 'rounded border border-red-300 bg-red-50 p-1.5 text-[11px] text-red-800'
-                          : finding.severity === 'warning'
-                            ? 'rounded border border-amber-300 bg-amber-50 p-1.5 text-[11px] text-amber-900'
-                            : // A note is not a complaint. Styled to be read once and forgotten.
-                              'rounded border border-slate-200 bg-slate-50 p-1.5 text-[11px] text-slate-600'
-                      }
-                    >
-                      <span className="font-medium">{finding.message}</span>{' '}
-                      <span className="opacity-90">{finding.remedy}</span>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              {shown && 'failed' in shown && (
-                <p className="mt-1.5 rounded border border-red-300 bg-red-50 p-1.5 text-[11px] text-red-700">
-                  {shown.failed}
-                </p>
-              )}
-
-              {shown && !('failed' in shown) && (
-                <div className="mt-1.5 flex items-start gap-2">
-                  {shown.mime.startsWith('image/') && (
-                    <img
-                      src={shown.url}
-                      alt={`Derived ${labelFor(key)} preview`}
-                      className="h-16 w-auto rounded border border-slate-200"
-                    />
-                  )}
-                  <div className="text-[11px] text-slate-600">
-                    <p>
-                      {Math.round(shown.bytes / 1024)} KB · {shown.width}×{shown.height} px
-                      {shown.fromCache && <span className="text-slate-400"> · cached</span>}
-                    </p>
-                    <p className="text-slate-500">Required: {describeConstraint(constraint)}</p>
-                    {shown.warnings.map((w) => (
-                      <p key={w} className="mt-0.5 text-amber-700">
-                        {w}
+                    {staged && (
+                      <p className="mt-1.5 text-[11px] text-slate-600">
+                        Ready to save: <span className="font-medium">{staged.file.name}</span>
+                        {master && (
+                          <span className="text-slate-500">
+                            {' '}
+                            — this will replace the stored copy.
+                          </span>
+                        )}
                       </p>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                    )}
+
+                    {reading?.id === master?.id && reading !== null && (
+                      <ExtractedDetails
+                        documentId={reading.id}
+                        documentLabel={reading.label}
+                        onLocked={onLocked}
+                        onClose={() => setReading(null)}
+                        onSaved={(count) => {
+                          setReading(null);
+                          setSavedNotice(
+                            count === 0
+                              ? 'Nothing was saved.'
+                              : `Saved ${count} detail${count === 1 ? '' : 's'} to your vault.`,
+                          );
+                        }}
+                      />
+                    )}
+
+                    {findings.length > 0 && (
+                      <ul className="mt-1.5 space-y-1">
+                        {findings.map((finding) => (
+                          <li
+                            key={finding.message}
+                            role={finding.severity === 'blocker' ? 'alert' : 'status'}
+                            className={
+                              finding.severity === 'blocker'
+                                ? 'rounded border border-red-300 bg-red-50 p-1.5 text-[11px] text-red-800'
+                                : finding.severity === 'warning'
+                                  ? 'rounded border border-amber-300 bg-amber-50 p-1.5 text-[11px] text-amber-900'
+                                  : // A note is not a complaint. Styled to be read once and forgotten.
+                                    'rounded border border-slate-200 bg-slate-50 p-1.5 text-[11px] text-slate-600'
+                            }
+                          >
+                            <span className="font-medium">{finding.message}</span>{' '}
+                            <span className="opacity-90">{finding.remedy}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+
+                    {shown && 'failed' in shown && (
+                      <p className="mt-1.5 rounded border border-red-300 bg-red-50 p-1.5 text-[11px] text-red-700">
+                        {shown.failed}
+                      </p>
+                    )}
+
+                    {shown && !('failed' in shown) && (
+                      <div className="mt-1.5 flex items-start gap-2">
+                        {shown.mime.startsWith('image/') && (
+                          <img
+                            src={shown.url}
+                            alt={`Derived ${labelFor(key)} preview`}
+                            className="h-16 w-auto rounded border border-slate-200"
+                          />
+                        )}
+                        <div className="text-[11px] text-slate-600">
+                          <p>
+                            {Math.round(shown.bytes / 1024)} KB · {shown.width}×{shown.height} px
+                            {shown.fromCache && <span className="text-slate-400"> · cached</span>}
+                            {shown.passedThrough && (
+                              <span className="text-slate-400">
+                                {' '}
+                                · already fits, used unchanged
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-slate-500">
+                            Required: {describeConstraint(constraint)}
+                          </p>
+                          {shown.warnings.map((w) => (
+                            <p key={w} className="mt-0.5 text-amber-700">
+                              {w}
+                            </p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
+        );
+      })}
+
+      {path !== null && (
+        <button
+          type="button"
+          onClick={() => setShowAll((was) => !was)}
+          className="mt-3 text-xs text-slate-500 underline hover:text-slate-700"
+        >
+          {showAll ? 'Show only my documents' : 'Show every document slot'}
+        </button>
+      )}
     </section>
   );
 }

@@ -36,7 +36,8 @@
 
 import type { DocumentMeta } from '@/shared/types';
 import { detectScripts, readableScripts, type IndicScript } from './indic';
-import { extractFromText, type ExtractionResult } from './extract';
+import { extractFromText, type ExtractionHint, type ExtractionResult } from './extract';
+import type { PageBox } from './evidence-region';
 
 /** How the text was obtained. The user should be told which. */
 export type TextSource =
@@ -55,6 +56,27 @@ export interface DocumentText {
   engineConfidence?: number;
   /** Anything the user should know about how this was read. */
   notes: string[];
+  /**
+   * Where each line of `text` sat on the page, as shares of the page — line
+   * `i` of the text is entry `i` here. Present only for text recognised from
+   * pixels, and only when it is provably in step with the text: it is what
+   * lets the suggestion screen show the piece of the card a value came from,
+   * and the wrong piece would be worse than none.
+   */
+  lines?: TextLine[];
+  /**
+   * Quarter turns clockwise that stood the page upright before it was read.
+   * The boxes in `lines` are places on that upright page, so whoever cuts a
+   * piece out of the stored document needs this to find it. Travels with
+   * `lines` or not at all.
+   */
+  turns?: 1 | 2 | 3;
+}
+
+/** A line of recognised text and the box that held it, as shares of the page. */
+export interface TextLine {
+  text: string;
+  box: PageBox;
 }
 
 /**
@@ -71,7 +93,21 @@ export interface OcrEngine {
     bytes: Uint8Array,
     mime: string,
     scripts: IndicScript[],
-  ): Promise<{ text: string; confidence?: number }>;
+  ): Promise<{
+    text: string;
+    confidence?: number;
+    /**
+     * Anything the engine learned about the picture that the text cannot say —
+     * that the scan is too small to read reliably, for instance. Shown to the
+     * user beside the values, because "the photo is the limit" is more use than
+     * a list of values misread from it.
+     */
+    notes?: string[];
+    /** Where each line of `text` sat, when the engine knows. */
+    lines?: TextLine[];
+    /** Quarter turns clockwise the engine turned the page before reading it. */
+    turns?: 0 | 1 | 2 | 3;
+  }>;
 }
 
 /** Reads a PDF's embedded text layer. Supplied by the caller for testability. */
@@ -80,6 +116,12 @@ export type PdfTextReader = (bytes: Uint8Array) => Promise<string>;
 export interface ReadOptions {
   pdfText?: PdfTextReader;
   ocr?: OcrEngine;
+  /**
+   * What the vault knows about this document that its text cannot say — the
+   * slot it is filed under. A marks card does not reliably print whose marks
+   * card it is; the slot the user chose does.
+   */
+  hint?: ExtractionHint;
   /**
    * Scripts to try, when the caller knows better than we can guess — e.g. the
    * user picked their language. Otherwise decided from whatever text turns up.
@@ -154,16 +196,25 @@ export async function readDocumentText(
   const result = await options.ocr.recognise(bytes, meta.mime, wanted);
   const text = result.text.trim();
 
+  // Boxes are kept only if they are, line for line, the text being returned.
+  const inStep =
+    result.lines !== undefined && result.lines.map((line) => line.text).join('\n') === text;
+
   return {
     text,
     source: text === '' ? 'none' : 'ocr',
     scripts: detectScripts(text),
     ...(result.confidence === undefined ? {} : { engineConfidence: result.confidence }),
+    ...(inStep && text !== '' ? { lines: result.lines! } : {}),
+    ...(inStep && text !== '' && result.turns !== undefined && result.turns !== 0
+      ? { turns: result.turns }
+      : {}),
     notes: [
       ...notes,
       ...(text === ''
         ? ['Nothing could be read from this image. A sharper, straighter photo in better light usually fixes it.']
         : ['Recognised from the image, so please check each value against the card.']),
+      ...(result.notes ?? []),
     ],
   };
 }
@@ -182,7 +233,7 @@ export async function readAndExtract(
   options: ReadOptions = {},
 ): Promise<ExtractionResult & { read: DocumentText }> {
   const read = await readDocumentText(bytes, meta, options);
-  const extracted = extractFromText(read.text);
+  const extracted = extractFromText(read.text, options.hint ?? {});
 
   if (read.source !== 'ocr') return { ...extracted, read };
 

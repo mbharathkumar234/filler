@@ -193,3 +193,11 @@ describe('the table stays in step with the bus', () => {
     expect([...used].filter((type) => !known.has(type)).sort()).toEqual([]);
   });
 });
+
+describe('upload-all picks', () => {
+  it('takes a document pick and refuses anything else', () => {
+    expect(validateRequest({ type: 'approval:upload-all', tabId: 7, picks: { u0: 'doc.pan_card' } }).ok).toBe(true);
+    expect(validateRequest({ type: 'approval:upload-all', tabId: 7, picks: { u0: 'id.aadhaar' } }).ok).toBe(false);
+    expect(validateRequest({ type: 'approval:upload-all', tabId: 7, picks: ['doc.photo'] }).ok).toBe(false);
+  });
+});

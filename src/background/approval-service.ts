@@ -31,9 +31,13 @@ import type { Result } from '@/shared/messages';
 import { envelope } from '@/shared/messages';
 import { ApprovalRegistry, REFUSAL_TEXT } from '@/runtime/approval';
 import { appendAudit } from '@/runtime/audit';
+import { isDocumentKey, isFieldKey } from '@/matching/taxonomy';
 import { harvestTab } from './harvest-service';
 import { endRun } from './fill-service';
-import { forgetTabReview } from './review-service';
+import { collectValues, forgetTabReview } from './review-service';
+import { noteUploaded, uploadedKeys } from './upload-state';
+import { uploadAllToWindows, type BatchItem } from './upload-window-service';
+import type { FieldKey } from '@/matching/taxonomy';
 
 const registry = new ApprovalRegistry();
 
@@ -165,6 +169,171 @@ export async function submitWithApproval(tabId: number): Promise<Result<{ submit
       ? { submitted: true }
       : { submitted: false, why: 'The page did not accept the submission. Nothing was sent.' },
   };
+}
+
+/**
+ * One document's upload: approved by a hold, then its Upload button pressed.
+ *
+ * Many portals put an "Upload" beside each file box that posts the whole form.
+ * The guard blocks that like any submit — rightly, since the form carries what
+ * we filled — so the only way through is the one the final submit takes: an
+ * approval, spent before the click, naming exactly one element.
+ *
+ * ## What the panel can and cannot say
+ *
+ * It names the file box, nothing more. *Which* button that is comes from the
+ * worker's own fresh harvest, and the harvest never records the final submit
+ * as a document's Upload (`upload-slots.ts`), so no panel bug can aim an
+ * upload approval at "Submit Application".
+ *
+ * ## One step, not two
+ *
+ * The final submit's approval is two calls, grant then submit, so the user
+ * can watch a clock and change their mind before the application goes. Here
+ * the user asked for "approve, then it presses" — the 1.5-second hold is the
+ * deliberate gesture, and releasing early is the change of mind. Everything
+ * else is identical: the registry issues a single-use token bound to the page
+ * and the element, and it is burned before the click.
+ *
+ * The run is **not** ended, unlike after the final submit: the application is
+ * still being filled, and the next document may be next.
+ */
+export async function uploadWithApproval(
+  tabId: number,
+  ref: string,
+): Promise<Result<{ pressed: boolean; why?: string; reloading?: boolean }>> {
+  const harvested = await harvestTab(tabId);
+  if (!harvested.ok) return harvested;
+  const harvest = harvested.data;
+
+  const field = harvest.fields.find((f) => f.ref === ref && f.frameId === 0 && f.tag === 'file');
+  const match = harvest.matches.find((m) => m.fieldRef === ref);
+  const button = harvest.uploadButtons[ref];
+  if (!field || !button || !match || !isFieldKey(match.key) || !isDocumentKey(match.key)) {
+    return {
+      ok: true,
+      data: {
+        pressed: false,
+        why: 'That document’s Upload button is not on the page any more. Scan the page again.',
+      },
+    };
+  }
+  const key = match.key;
+
+  const refuse = async (why: string) => {
+    await appendAudit({
+      site: harvest.url,
+      formFingerprint: harvest.fingerprint,
+      event: { t: 'upload.refused', key, why },
+    }).catch(() => {});
+    return { ok: true as const, data: { pressed: false, why } };
+  };
+
+  if (uploadedKeys(tabId).has(key)) {
+    return refuse('It was already uploaded in this run.');
+  }
+
+  // A human-only step outstanding means P4 applies here as at the final submit.
+  const blocker = harvest.blockers.find((b) => b.type === 'captcha' || b.type === 'otp');
+  if (blocker) return refuse(`${blocker.reason} Complete it first, then approve.`);
+
+  // Read back, not remembered: the box must hold the document right now.
+  const held = await collectValues(tabId, [ref]);
+  if (held.get(ref) !== 'file') {
+    return refuse('There is no document in that box right now. Press “Fill this form” first.');
+  }
+
+  const grant = registry.issue({
+    tabId,
+    formFingerprint: harvest.fingerprint,
+    targetSelector: button.selector,
+  });
+  await appendAudit({
+    site: harvest.url,
+    formFingerprint: harvest.fingerprint,
+    event: { t: 'upload.approved', key, target: button.selector },
+  });
+
+  const check = registry.consume({
+    tabId,
+    token: grant.token,
+    formFingerprint: harvest.fingerprint,
+    targetSelector: button.selector,
+  });
+  if (!check.ok) return refuse(REFUSAL_TEXT[check.why]);
+
+  let pressed: boolean;
+  let reloading = false;
+  try {
+    const response = (await chrome.tabs.sendMessage(
+      tabId,
+      envelope({
+        type: 'fill:press-upload',
+        token: {
+          value: check.grant.token,
+          expiresAt: check.grant.expiresAt,
+          targetSelector: check.grant.targetSelector,
+        },
+        ref,
+      }),
+      { frameId: 0 },
+    )) as Result<{ pressed: boolean }> | undefined;
+    pressed = response?.ok === true && response.data.pressed;
+  } catch (error) {
+    /*
+     * Two silences, and they mean opposite things. "Receiving end does not
+     * exist": nothing heard the message, so nothing was pressed. "Message port
+     * closed": the page heard it and went away before answering — which is
+     * exactly what a submit-type Upload does when it posts the form back.
+     */
+    const detail = error instanceof Error ? error.message : String(error);
+    reloading = /message port closed/i.test(detail);
+    pressed = reloading;
+  }
+
+  if (!pressed) return refuse('The page did not take the press. Nothing was uploaded.');
+
+  noteUploaded(tabId, key);
+  await appendAudit({
+    site: harvest.url,
+    formFingerprint: harvest.fingerprint,
+    event: { t: 'upload.done', key },
+  }).catch(() => {});
+  return { ok: true, data: reloading ? { pressed: true, reloading: true } : { pressed: true } };
+}
+
+/**
+ * Every upload window on the form, after one hold (§ document attachment).
+ *
+ * A Google Form attaches a document only by uploading it, into Google's own
+ * window, to the form owner's Drive — there is no "filled but not sent" state
+ * as a file box has. So, as with a portal's Upload button, it takes the
+ * deliberate gesture: one hold approves this form's documents, and each
+ * document still gets its own single-use token, bound to its own "Add file"
+ * control and to this page, burned before its first press
+ * (`upload-window-service.ts` → `uploadAllToWindows`).
+ */
+export async function uploadAllWithApproval(
+  tabId: number,
+  picks: Readonly<Record<string, FieldKey>>,
+): Promise<Result<{ items: BatchItem[] }>> {
+  return uploadAllToWindows(tabId, picks, (slot, key, harvest) => {
+    const target = slot.selectors[0] ?? slot.ref;
+    const grant = registry.issue({ tabId, formFingerprint: harvest.fingerprint, targetSelector: target });
+    const check = registry.consume({
+      tabId,
+      token: grant.token,
+      formFingerprint: harvest.fingerprint,
+      targetSelector: target,
+    });
+    if (!check.ok) return null;
+    void appendAudit({
+      site: harvest.url,
+      formFingerprint: harvest.fingerprint,
+      event: { t: 'upload.approved', key, target },
+    }).catch(() => {});
+    return { value: check.grant.token, expiresAt: check.grant.expiresAt };
+  });
 }
 
 export function revokeApproval(tabId: number): void {

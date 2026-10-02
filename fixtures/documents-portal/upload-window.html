@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Insert file</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 1.5rem; color: #202124; }
+      .drop { border: 2px dashed #dadce0; padding: 2rem; text-align: center; }
+      #upload { margin-top: 1rem; background: #1a73e8; color: #fff; border: 0; padding: .5rem 1rem; border-radius: 4px; }
+    </style>
+  </head>
+  <body>
+    <!-- A stand-in for a site's own upload window, served as a same-origin frame. -->
+    <h1>Insert file</h1>
+    <div class="drop" id="drop">Drag a file here<br /><input type="file" id="browse" hidden /></div>
+    <ul id="received"></ul>
+    <!-- No type attribute: exactly the kind of button a guard in this frame would block. -->
+    <button id="upload">Upload</button>
+
+    <script>
+      (function () {
+        var received = [];
+        window.__received = received;
+        window.__uploadPresses = 0;
+        var list = document.getElementById('received');
+        function take(files, via) {
+          for (var i = 0; i < files.length; i += 1) {
+            received.push({ name: files[i].name, type: files[i].type, size: files[i].size, via: via });
+            var item = document.createElement('li');
+            item.textContent = files[i].name;
+            list.appendChild(item);
+          }
+          // As Google's does: the upload finishes, the window closes, and the
+          // form lists the file under its question.
+          if (files.length > 0 && parent.__fileArrived) {
+            var name = files[0].name;
+            setTimeout(function () { parent.__fileArrived(name); }, 1500);
+          }
+        }
+        document.getElementById('browse').addEventListener('change', function (event) {
+          take(event.target.files, 'box');
+          // Google's window takes the file and empties its box at once.
+          event.target.value = '';
+        });
+        var drop = document.getElementById('drop');
+        drop.addEventListener('dragover', function (event) { event.preventDefault(); });
+        drop.addEventListener('drop', function (event) {
+          event.preventDefault();
+          take(event.dataTransfer.files, 'drop');
+        });
+        document.getElementById('upload').addEventListener('click', function () {
+          window.__uploadPresses += 1;
+        });
+      })();
+    </script>
+  </body>
+</html>

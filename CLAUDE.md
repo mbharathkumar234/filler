@@ -60,5 +60,30 @@ If a requested feature conflicts with these, stop and flag it rather than implem
 - Run state machine: `src/runtime/machine.ts` (pure reducer) + `store.ts` + `persistence.ts`.
   The behaviour that uses them — pause, resume, drift recovery — is `content/run-controller.ts`,
   which takes ports rather than reaching for `chrome.*` so it can be driven against a fixture.
+- Documents into forms: `documents/field-constraint.ts` (which requirement a box means),
+  `background/fill-service.ts` (file boxes and drop areas, during Fill),
+  `content/upload-slots.ts` (upload controls that are not file boxes),
+  `background/upload-window-service.ts` + `content/upload-window.ts` (a site's own upload
+  window — self-contained injected functions, never click; `uploadAllToWindows` gates one hold,
+  `upload-batch.ts` sequences every window through ports so e2e drives the real thing, its
+  presses in `submit-guard.ts` behind per-document tokens), and
+  `approval-service.ts` → `uploadWithApproval` + `content/upload-press.ts` (a portal's own
+  Upload button, only with an approval token, through `submit-guard.ts`).
+- What the vault holds, and how it is laid out: `src/matching/taxonomy.ts` (the keys —
+  append-only), `src/ui/lib/field-groups.ts` (`DOCUMENT_GROUPS`, the folders the editor shows;
+  every `doc.*` key belongs to exactly one, asserted by `field-groups.test.ts`), and
+  `src/matching/frame.ts`, where a certificate issued once per qualification takes the level its
+  question names (`doc.study_certificate` + "SSLC" -> `doc.study_certificate_10`).
+  Nothing is entered twice: a question that names no qualification is answered from the most
+  recent one the user holds (`src/matching/qualifications.ts`).
+- Whose vault it is: `src/matching/pathway.ts` (the user's own board, route, stage, entrance
+  exams, category and claims — pure rules, no UI import) and `src/ui/lib/vault-shape.ts`, the
+  only place that decides which blocks and folders a panel renders. Two invariants hold it
+  together, both tested: a key that holds a value is never hidden, and no stored path means the
+  whole catalogue. The answers are sealed in the vault (`vault.path` in `settings-store.ts`,
+  reached by `path:get`/`path:set`) and travel in the backup.
+- Degree and branch names: `src/matching/courses.ts` — a catalogue of suggestions only. The
+  fields stay free text; the setup card writes the chosen pair into
+  `education.<level>.course`/`.branch`, and never over an answer the user typed.
 - Full phase plan and definition-of-done: `IMPLEMENTATION_PLAN.md`.
 - Portal in-bounds verdicts: `docs/portal-notes/`. Threat model: `docs/THREAT_MODEL.md`.

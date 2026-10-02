@@ -79,6 +79,10 @@ export const MESSAGES = {
 
   'step.vault.title': 'Create your vault',
   'step.vault.detail': 'One passphrase, encrypted on this device. Nobody can reset it for you.',
+  'step.path.title': 'Say what you have studied',
+  'step.path.detail':
+    'Your board, your stream and where you are now. The vault is built from this, so you ' +
+    'only see the blocks and documents you actually have.',
   'step.profile.title': 'Add your details',
   'step.profile.detail':
     'Name, date of birth, contact and address — the ones every portal asks for.',
@@ -182,6 +186,10 @@ const HI: Catalogue = {
   'step.vault.title': 'अपना वॉल्ट बनाएँ',
   'step.vault.detail':
     'एक पासफ़्रेज़, इसी डिवाइस पर एन्क्रिप्ट किया हुआ। इसे कोई भी रीसेट नहीं कर सकता।',
+  'step.path.title': 'आपने क्या पढ़ा है, यह बताएँ',
+  'step.path.detail':
+    'आपका बोर्ड, स्ट्रीम और अभी आप कहाँ हैं — वॉल्ट इसी से बनता है, ताकि आपको ' +
+    'वही दिखे जो वाकई आपके पास है।',
   'step.profile.title': 'अपना विवरण जोड़ें',
   'step.profile.detail': 'नाम, जन्मतिथि, संपर्क और पता — जो हर पोर्टल माँगता है।',
   'step.documents.title': 'अपनी फ़ोटो और हस्ताक्षर अपलोड करें',
@@ -257,6 +265,10 @@ const TA: Catalogue = {
   'step.vault.title': 'உங்கள் பெட்டகத்தை உருவாக்குங்கள்',
   'step.vault.detail':
     'ஒரு கடவுச்சொற்றொடர், இந்தச் சாதனத்திலேயே மறையாக்கப்படும். இதை யாராலும் மீட்டமைக்க முடியாது.',
+  'step.path.title': 'நீங்கள் என்ன படித்தீர்கள் என்பதைச் சொல்லுங்கள்',
+  'step.path.detail':
+    'உங்கள் வாரியம், பிரிவு, இப்போது நீங்கள் எங்கே இருக்கிறீர்கள் என்பது. இதிலிருந்தே ' +
+    'பெட்டகம் உருவாகிறது; உங்களிடம் உள்ளவை மட்டுமே காட்டப்படும்.',
   'step.profile.title': 'உங்கள் விவரங்களைச் சேர்க்கவும்',
   'step.profile.detail':
     'பெயர், பிறந்த தேதி, தொடர்பு மற்றும் முகவரி — ஒவ்வொரு போர்ட்டலும் கேட்பவை.',

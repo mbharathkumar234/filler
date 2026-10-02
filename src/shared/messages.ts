@@ -16,6 +16,7 @@
  * Phase 10 adds full schema validation on top of both.
  */
 
+import type { AcademicPath } from '@/matching/pathway';
 import type { FieldKey } from '@/matching/taxonomy';
 import type { FillPlan, RunState } from './types';
 import type { PersistedRun } from '@/runtime/persistence';
@@ -26,6 +27,7 @@ import type { ImportResult } from '@/vault/backup-format';
 import type { DocConstraint } from './types';
 import type { DocumentSummary } from '@/vault/document-store';
 import type { DerivedPayload, DocumentExtraction } from '@/background/document-service';
+import type { BatchItem, WindowPlacement } from '@/background/upload-window-service';
 import type { TabHarvest } from '@/background/harvest-service';
 import type { FillReport, WriteInstruction } from '@/background/fill-service';
 import type { ReviewPayload } from '@/background/review-service';
@@ -54,11 +56,58 @@ export type VaultRequest =
   | { type: 'vault:set'; key: FieldKey; value: string; fromDocument?: boolean }
   | { type: 'vault:delete'; key: FieldKey }
   | { type: 'vault:completeness' }
-  | { type: 'vault:export' }
-  | { type: 'vault:import'; text: string; passphrase: string }
+  /*
+   * Backup moves a piece at a time.
+   *
+   * The file is ordinary JSON; only its journey over the bus is split. A vault
+   * holding a photo, a signature and forty scans is tens of megabytes, and one
+   * message that size is refused — which is what a backup of a full vault now
+   * is, since it carries the documents too.
+   */
+  | { type: 'vault:export-begin' }
+  | { type: 'vault:export-chunk'; index: number }
+  | { type: 'vault:import-chunk'; index: number; text: string }
+  | { type: 'vault:import-commit'; passphrase: string }
   | { type: 'vault:touch' }
+  /**
+   * The academic path the vault is laid out from (§ vault structure).
+   *
+   * `vault:set-path` with null forgets it, which the panels read as "show
+   * everything" — the state somebody who skips the questions is in.
+   *
+   * Named with the `vault:` prefix because that is how the worker routes: a
+   * vault message called anything else reaches no handler at all, and the
+   * panel is told "Unhandled request" by a router that never saw it.
+   */
+  | { type: 'vault:path' }
+  | { type: 'vault:set-path'; path: AcademicPath | null }
   /** § Phase 6 re-auth gate: prove it is still the same person at the desk. */
   | { type: 'vault:reauth'; passphrase: string };
+
+/**
+ * Reading a document's pixels (§ reading a document).
+ *
+ * Worker to offscreen document, and nowhere else. PaddleOCR's models run on
+ * ONNX Runtime, whose WebAssembly a service worker can load but should not hold
+ * for a whole read, so the recognition runs in an offscreen page — still the
+ * extension's own background, never a tab, never a site. The image travels as
+ * base64 because the bus is JSON; it is one page of a document the user asked
+ * to have read, and it goes no further.
+ */
+export type OcrRequest = {
+  type: 'ocr:recognise';
+  /** One page: the stored image as it was, or a PDF page rasterised by the worker. */
+  image: string;
+  mime: string;
+};
+
+/** One piece of text on the page, and where it sits (page pixels). */
+export interface OcrItem {
+  text: string;
+  /** The recogniser's mean character probability, 0–1. */
+  score: number;
+  box: { x0: number; y0: number; x1: number; y1: number };
+}
 
 /** Document operations. Privileged, like the vault requests above. */
 export type DocumentRequest =
@@ -78,12 +127,41 @@ export type DocumentRequest =
   | { type: 'doc:preflight'; key: FieldKey; constraint: DocConstraint }
   | { type: 'doc:extract'; id: string };
 
+/**
+ * Put one upload question's document into the site's own upload window, which
+ * the user has just opened (Google Forms' "Add file"). The panel names the
+ * question; the worker decides the document, fits it, and finds the window. It
+ * never presses anything in it — the user presses Upload. Privileged.
+ *
+ * Its own union rather than a `DocumentRequest`: those are the vault's document
+ * store, and this one reaches into a tab.
+ */
+export type UploadRequest = {
+  type: 'doc:to-window';
+  tabId: number;
+  slotRef: string;
+  /** The second try, when the window ignored the first: drop instead of setting its file box. */
+  mode?: 'drop';
+  /**
+   * The document the user picked, for a question the matcher could not place.
+   * Only honoured for such a question, and only as a `doc.*` key.
+   */
+  key?: FieldKey;
+};
+
 export type RuntimeRequest =
   | { type: 'ping' }
   | { type: 'harvest:request' }
   | { type: 'harvest:ready' }
   /** Content script asking the worker which tab it is in (§ Phase 6 run keys). */
   | { type: 'run:hello' }
+  /**
+   * The document_start guard asking whether a fill is live in its own tab.
+   * Answered from the worker's run table; a no hands the page back.
+   */
+  | { type: 'run:active' }
+  /** Worker to page: the run is over, and the page is the user's again. */
+  | { type: 'run:release' }
   | { type: 'run:state'; state: RunState }
   /** The user pressed "I have completed this" — in the panel or the overlay. */
   | { type: 'run:continue' }
@@ -133,7 +211,13 @@ export type FillRequest =
   | { type: 'fill:apply'; writes: WriteInstruction[]; plan?: FillPlan }
   | { type: 'fill:undo' }
   | { type: 'fill:refill'; refs: string[] }
-  | { type: 'fill:submit'; token: ApprovalToken };
+  | { type: 'fill:submit'; token: ApprovalToken }
+  /**
+   * One document's approved upload: the guard presses that file box's own
+   * Upload button, once. `ref` is the file box, so the page side knows which
+   * document the approval covers.
+   */
+  | { type: 'fill:press-upload'; token: ApprovalToken; ref: string };
 
 /**
  * Review and approval (§ Phase 7).
@@ -165,7 +249,18 @@ export type ApprovalRequest =
   | { type: 'approval:grant'; tabId: number }
   | { type: 'approval:submit'; tabId: number }
   | { type: 'approval:revoke'; tabId: number }
-  | { type: 'approval:status'; tabId: number };
+  | { type: 'approval:status'; tabId: number }
+  /**
+   * The user held to approve one document's upload; press its Upload button.
+   * Names the file box only — which button that is, the worker reads from its
+   * own harvest, never from the panel.
+   */
+  | { type: 'approval:upload'; tabId: number; ref: string }
+  /**
+   * One hold, every upload window on the form (Google Forms). `picks` names a
+   * document only for a question the matcher could not place.
+   */
+  | { type: 'approval:upload-all'; tabId: number; picks?: Record<string, FieldKey> };
 
 /**
  * The model settings (§ Phase 8). All privileged.
@@ -240,6 +335,7 @@ export type AuditRequest =
 export type ExtensionRequest =
   | VaultRequest
   | DocumentRequest
+  | UploadRequest
   | HarvestRequest
   | FillRequest
   | ReviewRequest
@@ -248,6 +344,7 @@ export type ExtensionRequest =
   | LlmRequest
   | TeachRequest
   | GuardRequest
+  | OcrRequest
   | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
 
@@ -261,16 +358,23 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'vault:set',
   'vault:delete',
   'vault:completeness',
-  'vault:export',
-  'vault:import',
+  'vault:export-begin',
+  'vault:export-chunk',
+  'vault:import-chunk',
+  'vault:import-commit',
   'vault:touch',
   'vault:reauth',
+  'vault:path',
+  'vault:set-path',
   'doc:list',
   'doc:put',
   'doc:delete',
   'doc:derive',
   'doc:preflight',
   'doc:extract',
+  // Carries a rendered page of somebody's document: extension contexts only.
+  'ocr:recognise',
+  'doc:to-window',
   'harvest:tab',
   'fill:tab',
   'fill:undo:tab',
@@ -281,6 +385,8 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'approval:submit',
   'approval:revoke',
   'approval:status',
+  'approval:upload',
+  'approval:upload-all',
   'audit:read',
   'audit:configure',
   'audit:settings',
@@ -323,10 +429,17 @@ export interface ResponseMap {
   'vault:set': null;
   'vault:delete': null;
   'vault:completeness': Completeness;
-  'vault:export': string;
+  /** How many pieces the finished file is in, and how big it is. */
+  'vault:export-begin': { chunks: number; bytes: number; documents: number };
+  'vault:export-chunk': string;
+  /** How many pieces the worker is holding so far. */
+  'vault:import-chunk': { received: number };
   /** null means a wrong passphrase for the backup file. */
-  'vault:import': ImportResult | null;
+  'vault:import-commit': ImportResult | null;
   'vault:touch': null;
+  /** null when the questions have not been answered on this vault. */
+  'vault:path': AcademicPath | null;
+  'vault:set-path': null;
   /** false means a wrong passphrase — the gate stays shut. */
   'vault:reauth': boolean;
   'doc:list': DocumentSummary[];
@@ -336,6 +449,13 @@ export interface ResponseMap {
   'doc:derive': DerivedPayload | { failed: true; reason: string; code: string };
   'doc:preflight': { ok: boolean; warnings: string[]; reason?: string };
   'doc:extract': DocumentExtraction;
+  /**
+   * Every piece of text the page recognised, where it sits, and the page's
+   * size — of the page stood upright, with the quarter turns clockwise that
+   * stood it there.
+   */
+  'ocr:recognise': { items: OcrItem[]; width: number; height: number; turns?: 0 | 1 | 2 | 3 };
+  'doc:to-window': WindowPlacement;
   'harvest:tab': TabHarvest;
   'fill:tab': FillReport;
   'fill:undo:tab': { restored: number };
@@ -343,6 +463,7 @@ export interface ResponseMap {
   'fill:undo': { restored: number };
   'fill:refill': FillReport;
   'fill:submit': { submitted: boolean };
+  'fill:press-upload': { pressed: boolean };
   'review:build': ReviewPayload;
   'review:collect': Record<string, string>;
   'field:focus': null;
@@ -354,6 +475,12 @@ export interface ResponseMap {
   'approval:submit': { submitted: boolean; why?: string };
   'approval:revoke': null;
   'approval:status': { active: boolean; remainingMs: number };
+  /**
+   * `why` is a sentence for the user when nothing was pressed. `reloading`
+   * means the page posted back as it was pressed — scan again to continue.
+   */
+  'approval:upload': { pressed: boolean; why?: string; reloading?: boolean };
+  'approval:upload-all': { items: BatchItem[] };
   'audit:read': AuditEntry[];
   'audit:configure': null;
   'audit:settings': AuditSettings;
@@ -387,6 +514,8 @@ export interface ResponseMap {
   'harvest:request': null;
   'harvest:ready': null;
   'run:hello': { tabId: number };
+  'run:active': boolean;
+  'run:release': null;
   'run:state': null;
   'run:save': null;
   'run:load': PersistedRun | null;

@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { extractFromText, isValidAadhaar, isWellFormedPan, type Candidate } from './extract';
+import { isFieldKey } from '@/matching/taxonomy';
+import { extractFromText, isValidAadhaar, isWellFormedPan, type Candidate, zeroesForOs } from './extract';
 
 /**
  * Reading an ID card (§ document extraction).
@@ -330,9 +331,15 @@ describe('what it refuses to look for at all', () => {
   });
 
   it('never returns a candidate for a key outside the taxonomy', () => {
+    /*
+     * `isFieldKey`, not a shape. The shape said "lower case letters and dots",
+     * which `education.class_10.roll_number` fails for having a digit in it —
+     * and which a key that merely *looks* right would pass. The taxonomy is
+     * the contract: a candidate for a key it does not have cannot be saved.
+     */
     const result = extractFromText(`Ravi Kumar\n${VALID_AADHAAR[0]}\nABCPE1234F`);
     for (const candidate of result.candidates) {
-      expect(candidate.key).toMatch(/^[a-z]+\.[a-z_.]+$/);
+      expect(isFieldKey(candidate.key), candidate.key).toBe(true);
     }
   });
 });
@@ -386,5 +393,18 @@ describe('the ASCII word-boundary trap', () => {
       .map((line) => line.trim());
 
     expect(offenders).toEqual([]);
+  });
+});
+
+describe('a zero the engine read as a letter O', () => {
+  it('reads it as the zero it is, where digits make that certain', () => {
+    expect(zeroesForOs('is 3000o ( Rs.')).toBe('is 30000 ( Rs.');
+    expect(zeroesForOs('Year 2O22')).toBe('Year 2022');
+  });
+
+  it('never touches an O in a word', () => {
+    for (const text of ['Roll No. 18315726', 'SCHOOL', 'O+ blood group', 'Form 16 Office', '10 o’clock']) {
+      expect(zeroesForOs(text), text).toBe(text);
+    }
   });
 });

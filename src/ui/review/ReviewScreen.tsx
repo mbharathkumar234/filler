@@ -27,6 +27,7 @@ import { needsAttention } from '@/runtime/review';
 import type { FieldKey } from '@/matching/taxonomy';
 import { isFieldKey } from '@/matching/taxonomy';
 import { errorMessage, send } from '@/ui/lib/client';
+import { DocumentReview } from './DocumentReview';
 import { HoldToConfirm } from './HoldToConfirm';
 import { ReviewRow } from './ReviewRow';
 
@@ -315,22 +316,8 @@ export function ReviewScreen({ tabId, onDone }: { tabId: number; onDone?: () => 
         })}
       </div>
 
-      {payload && payload.documents.length > 0 && (
-        <div className="mt-3">
-          <h3 className="text-xs font-semibold text-slate-900">Documents this form wants</h3>
-          <ul className="mt-1 space-y-1">
-            {payload.documents.map((doc) => (
-              <li key={doc.ref} className="rounded border border-slate-200 p-2 text-xs">
-                <p className="font-medium text-slate-800">{doc.portalLabel}</p>
-                <p className="mt-0.5 text-[11px] text-slate-500">
-                  {doc.variant
-                    ? `${doc.variant.mime} · ${Math.round(doc.variant.bytes / 1024)} KB · ${doc.variant.width}×${doc.variant.height}`
-                    : (doc.problem ?? 'Nothing attached yet.')}
-                </p>
-              </li>
-            ))}
-          </ul>
-        </div>
+      {payload && (
+        <DocumentReview tabId={tabId} documents={payload.documents} onChanged={() => void load()} />
       )}
 
       <div className="mt-4 rounded border border-slate-300 bg-slate-50 p-3">

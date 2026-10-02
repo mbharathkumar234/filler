@@ -99,6 +99,30 @@ export const TRAITS: Partial<Record<FieldKey, FieldTraits>> = {
   'bank.bank_name': { shape: 'text', minLength: 2, maxLength: 80 },
   'bank.branch': { shape: 'text', minLength: 2, maxLength: 80 },
   'bank.account_type': { shape: 'choice' },
+
+  /*
+   * A semester and a year of study have no entry on purpose.
+   *
+   * They are one or two characters — "7", "IV", "4th" — and the general rule
+   * below vetoes any key for a field capped under three, on the reasoning that
+   * no value is meaningful in two characters. These two are, so the rule that
+   * would rule them out is the rule they must not be subject to: absence of an
+   * entry is not a veto (see the note above this table).
+   */
+
+  // The entrance exam, as numbers. A score may be a percentile with a decimal
+  // point, so it is left unconstrained rather than forced to be whole.
+  'entrance.exam_name': { shape: 'text', maxLength: 60 },
+  'entrance.registration_number': { shape: 'alphanumeric', minLength: 4, maxLength: 30 },
+  'entrance.roll_number': { shape: 'alphanumeric', minLength: 4, maxLength: 30 },
+  'entrance.rank': { shape: 'numeric', maxLength: 8 },
+  'entrance.year': { shape: 'numeric', exactLength: 4 },
+
+  // Karnataka's RD numbers: the acknowledgement printed on a Nadakacheri
+  // certificate, letters and digits together (e.g. "RD0123456789012").
+  'eligibility.caste_certificate_number': { shape: 'alphanumeric', minLength: 6, maxLength: 30 },
+  'eligibility.income_certificate_number': { shape: 'alphanumeric', minLength: 6, maxLength: 30 },
+  'eligibility.article_371j_number': { shape: 'alphanumeric', minLength: 6, maxLength: 30 },
 };
 
 for (const key of FIELD_KEYS) {
@@ -210,10 +234,28 @@ const SATISFIES: Readonly<Record<string, readonly ValueShape[]>> = {
 };
 
 export function veto(field: FieldDescriptor, key: FieldKey): VetoResult {
+  const capability = capabilityOf(field);
+
+  /*
+   * A file input holds a document and nothing else, in either direction.
+   *
+   * Decided by the key's family, before looking its traits up. It used to sit
+   * below the lookup, and a key with no traits entry skipped every check —
+   * which is what composed keys are: "Upload your 10th marks card" composed
+   * `education.class_10.marks_obtained`, and a file box was mapped to a marks
+   * box. The rule never depended on a key's traits, so it no longer waits for
+   * them.
+   */
+  const documentKey = key.startsWith('doc.');
+  if (capability.shape === 'file' && !documentKey) {
+    return { vetoed: true, reason: 'this is a file upload, not a text field' };
+  }
+  if (documentKey && capability.shape !== 'file') {
+    return { vetoed: true, reason: 'this key is a document, and the field is not a file input' };
+  }
+
   const traits = TRAITS[key];
   if (!traits) return { vetoed: false };
-
-  const capability = capabilityOf(field);
 
   /*
    * A label that names its own value shape rules out every key of another.
@@ -237,14 +279,6 @@ export function veto(field: FieldDescriptor, key: FieldKey): VetoResult {
       vetoed: true,
       reason: `the label says this box holds ${declared === 'email' ? 'an email address' : 'a phone number'}, and this key does not`,
     };
-  }
-
-  // A file input holds a document and nothing else, in either direction.
-  if (capability.shape === 'file' && traits.shape !== 'file') {
-    return { vetoed: true, reason: 'this is a file upload, not a text field' };
-  }
-  if (traits.shape === 'file' && capability.shape !== 'file') {
-    return { vetoed: true, reason: 'this key is a document, and the field is not a file input' };
   }
 
   // A select/radio holds one of a fixed set. A free-text key such as a name or

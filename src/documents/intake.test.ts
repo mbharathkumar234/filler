@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest';
 
-import { assessMaster, blockersIn, isUsable, roleFor, ROLE_TARGETS, type IntakeRole } from './intake';
+import {
+  assessMaster,
+  blockersIn,
+  isUsable,
+  roleFor,
+  ROLE_TARGETS,
+  trimsToInk,
+  type IntakeRole,
+} from './intake';
 import type { DocumentMeta } from '@/shared/types';
 
 function meta(overrides: Partial<DocumentMeta> = {}): DocumentMeta {
@@ -94,7 +102,7 @@ describe('documents that are not photos', () => {
 });
 
 describe('the advice itself', () => {
-  const roles: IntakeRole[] = ['photo', 'signature', 'document'];
+  const roles: IntakeRole[] = ['photo', 'signature', 'thumb', 'document'];
 
   it('always says what to do, not just what is wrong', () => {
     for (const role of roles) {
@@ -135,6 +143,16 @@ describe('choosing the rules for a key (§ mutation-testing gap)', () => {
 
   it('holds a signature to the signature rules', () => {
     expect(roleFor('doc.signature')).toBe('signature');
+  });
+
+  it('holds a thumb impression to its own rules, not the signature ones', () => {
+    // A thumbprint is roughly square. Judged as a signature it fails the
+    // landscape window every time, and the user is told to re-do a scan that
+    // was correct.
+    expect(roleFor('doc.thumb_impression')).toBe('thumb');
+    expect(assessMaster(meta({ key: 'doc.thumb_impression', width: 300, height: 300 }), 'thumb')).toEqual([]);
+    expect(blockersIn(assessMaster(meta({ key: 'doc.thumb_impression', width: 300, height: 300 }), 'signature')).length)
+      .toBeGreaterThan(0);
   });
 
   it('treats every other document as a document', () => {
@@ -371,5 +389,26 @@ describe('files that could not be read at all', () => {
     );
     expect(found[0]!.message).toMatch(/could not be opened/i);
     expect(found[0]!.remedy).toMatch(/incomplete or renamed/i);
+  });
+});
+
+describe('what a derivation may trim (§ test portal)', () => {
+  /*
+   * Found on a test portal that asked for a JPEG between 20 and 200 KB and
+   * nothing about shape. The photo already fitted, and needed at most a
+   * re-encode — but it came out with the top of the head cut off. The
+   * derivation had trimmed it "to its ink", the way a scanned certificate is
+   * trimmed of blank paper. A photograph has no blank paper: the background
+   * above the head is part of what the portal asked for, and on a light wall
+   * the top of somebody's hair reads as margin.
+   */
+  it('never trims a photograph', () => {
+    expect(trimsToInk('photo')).toBe(false);
+  });
+
+  it('still trims the paper around a signature, a thumbprint and a scanned certificate', () => {
+    expect(trimsToInk('signature')).toBe(true);
+    expect(trimsToInk('thumb')).toBe(true);
+    expect(trimsToInk('document')).toBe(true);
   });
 });

@@ -10,14 +10,25 @@
 
 import {
   assertSenderMayRequest,
+  envelope,
   isEnvelope,
   type ExtensionRequest,
   type Result,
 } from '@/shared/messages';
 import { handleVaultRequest, isVaultRequest } from './vault-service';
-import { handleDocumentRequest } from './document-service';
-import { harvestTab } from './harvest-service';
-import { endRun, fillTab, refillTab, undoFillOnTab } from './fill-service';
+import { handleDocumentRequest, setOcrEngine } from './document-service';
+import { createOcrHost } from './ocr-host';
+import { forgetHarvest, harvestTab } from './harvest-service';
+import { putInUploadWindow } from './upload-window-service';
+import {
+  authorisedRun,
+  endRun,
+  fillTab,
+  liveRunTabs,
+  onRunEnded,
+  refillTab,
+  undoFillOnTab,
+} from './fill-service';
 import {
   buildReviewForTab,
   editFieldOnTab,
@@ -29,6 +40,8 @@ import {
   grantApproval,
   revokeApproval,
   submitWithApproval,
+  uploadAllWithApproval,
+  uploadWithApproval,
 } from './approval-service';
 import {
   appendAudit,
@@ -63,6 +76,7 @@ import {
   revokePermission,
   statusFor,
   syncFor,
+  unregister,
   unregisterAll,
 } from './early-guard';
 import { clearRun, clearTab, loadRun, pruneRuns, saveRun } from '@/runtime/persistence';
@@ -81,6 +95,15 @@ function setPanelBehaviour(): Promise<void> {
 }
 
 void setPanelBehaviour();
+
+/*
+ * The document reader, installed once.
+ *
+ * Until now `setOcrEngine` had no caller and every photograph came back with
+ * "reading text from photographs is not available in this build". The engine
+ * runs in an offscreen document and loads only files from this package.
+ */
+setOcrEngine(createOcrHost());
 
 chrome.runtime.onInstalled.addListener(() => {
   /*
@@ -149,6 +172,39 @@ chrome.runtime.onSuspend?.addListener(() => {
  * the manifest to buy a signal `tabs.onRemoved` and the content script's own
  * `pagehide` already give us.
  */
+/*
+ * When a run ends, give the page back.
+ *
+ * The guard on the page disengages, and the per-origin document_start script
+ * is unregistered — unless another tab is mid-run on the same site. Before
+ * this the script stayed registered for the rest of the browser session, and
+ * because an origin pattern covers every port of a host, one fill on a local
+ * test portal locked the login of a different local project, on a page the
+ * extension had never been opened on.
+ */
+onRunEnded((tabId) => {
+  void releaseRun(tabId).catch(() => {});
+});
+
+async function releaseRun(tabId: number): Promise<void> {
+  await chrome.tabs
+    .sendMessage(tabId, envelope({ type: 'run:release' }), { frameId: 0 })
+    .catch(() => {
+      // The tab is gone or never had our script. Nothing to hand back.
+    });
+
+  const tab = await chrome.tabs.get(tabId).catch(() => null);
+  const pattern = originPattern(tab?.url ?? '');
+  if (!pattern) return;
+
+  for (const other of liveRunTabs()) {
+    if (other === tabId) continue;
+    const otherTab = await chrome.tabs.get(other).catch(() => null);
+    if (originPattern(otherTab?.url ?? '') === pattern) return;
+  }
+  await unregister(pattern);
+}
+
 chrome.tabs?.onRemoved.addListener((tabId) => {
   endRun(tabId);
   endRunLimit(tabId);
@@ -156,6 +212,7 @@ chrome.tabs?.onRemoved.addListener((tabId) => {
   // An approval is for one form in one tab. The tab is gone, so is the form.
   revokeApproval(tabId);
   forgetTabReview(tabId);
+  forgetHarvest(tabId);
   void clearTab(tabId).catch(() => {
     // The tab is gone; a failed cleanup is not worth surfacing.
   });
@@ -168,6 +225,11 @@ chrome.runtime.onStartup?.addListener(() => {
 async function route(request: ExtensionRequest, tabId: number | null): Promise<Result<unknown>> {
   if (isVaultRequest(request.type)) {
     return handleVaultRequest(request as Parameters<typeof handleVaultRequest>[0]);
+  }
+
+  // Reaches into a tab, so it is not the document store's to handle.
+  if (request.type === 'doc:to-window') {
+    return putInUploadWindow(request.tabId, request.slotRef, request.mode ?? 'box', request.key);
   }
 
   if (request.type.startsWith('doc:')) {
@@ -282,6 +344,10 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
       return { ok: true, data: null };
     case 'approval:status':
       return { ok: true, data: approvalStatus(request.tabId) };
+    case 'approval:upload':
+      return uploadWithApproval(request.tabId, request.ref);
+    case 'approval:upload-all':
+      return uploadAllWithApproval(request.tabId, request.picks ?? {});
 
     case 'audit:read':
       return { ok: true, data: await readAudit(request.limit) };
@@ -390,6 +456,9 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
       return { ok: true, data: null };
     case 'harvest:ready':
       return { ok: true, data: null };
+    // The document_start guard asking about its own tab, and only its own.
+    case 'run:active':
+      return { ok: true, data: tabId !== null && authorisedRun(tabId) !== null };
     case 'ping':
       return { ok: true, data: 'pong' };
     default:
@@ -399,6 +468,18 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isEnvelope(message)) return false;
+
+  /*
+   * Not every extension message is for the worker.
+   *
+   * `ocr:recognise` is addressed to the offscreen reader, and every extension
+   * context hears every `runtime.sendMessage`. Answering it here would be
+   * answering on the reader's behalf — and because the worker replies in
+   * microseconds while reading a page takes seconds, the worker's answer is
+   * the one the sender gets. That is what it did: "Rejected.", every time,
+   * while the reader was still working and about to succeed.
+   */
+  if (message.payload.type === 'ocr:recognise') return false;
 
   try {
     assertSenderMayRequest(message.payload.type, sender);

@@ -226,7 +226,7 @@ happy-path only · 🔴 not implemented, or failing, or amber on a safety/privac
 | 7-7 | Append-only audit log | 🟢 | `audit.test.ts` → "exposes no way to change or remove one entry" |
 | 7-8 | Click a row → scroll to and highlight the field | 🟢 | `review-bridge.test.ts` → "marks it with our own element, never by restyling the page's" |
 | 7-9 | Inline edit writes back + optional save to vault | 🟡 | `review-bridge.test.ts` covers the page write; the *save-to-vault* branch has no test |
-| 7-10 | Document section with thumbnails vs. requirement | 🔴 | `ReviewDocument` is a stub — `problem: 'Attach from the Documents panel'`. No thumbnails, no size-vs-requirement comparison. |
+| 7-10 | Document section with thumbnails vs. requirement | 🟡 | **Requirement vs. attached now shown** — `review-documents.test.ts` (7 tests) → "shows what went in beside what was asked". Still no thumbnails. See *Documents were never attached* below. |
 | 7-11 | **User test: 3 people, 1 planted wrong value** | 🔴 | not done — human activity |
 
 ### Phase 8 — LLM fallback
@@ -260,9 +260,9 @@ happy-path only · 🔴 not implemented, or failing, or amber on a safety/privac
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 10-1 | Strict CSP, no eval, no remote code | 🟢 | built `manifest.json` inspected; no `.wasm` file in `dist/` |
+| 10-1 | Strict CSP, no eval, no remote code | 🟢 | built `manifest.json` inspected; two `.wasm` files in `dist/` — Argon2id and ONNX Runtime (the document reader) — both bundled, neither fetched: `release-gates.test.ts` → "points the document reader at this package, never at a CDN"; `e2e/ocr.spec.ts` → "reads the words off a rendered page, under the extension’s CSP, with nothing fetched" |
 | 10-2 | `npm audit` + licence check | 🟢 | 0 vulnerabilities; ISC/MIT/Apache-2.0 only |
-| 10-3 | Isolation review | 🟡 | `docs/ISOLATION_REVIEW.md` — 8 claims each citing a test. It is a document, not a test. |
+| 10-3 | Isolation review | 🟡 | `docs/ISOLATION_REVIEW.md` — 9 claims each citing a test. It is a document, not a test. |
 | 10-4 | Message-bus schema validation | 🟢 | `validate.test.ts` (35 tests) → "refuses a type nobody declared"; "knows every privileged type" |
 | 10-5 | Argon2id + PBKDF2 migration | 🟢 | `kdf-migration.test.ts` (19 tests) → "still opens"; "is LEFT ALONE when the vault holds data" |
 | 10-6 | P1/P6 rate & scope limits | 🟢 | `limits.test.ts` (15 tests) → "admits exactly the cap, then stops" |
@@ -650,3 +650,740 @@ demonstrates the submit succeeding *first*, then blocks it.
 injection *call* on a user-granted page remains untested; what is tested is that
 the file it injects parses, runs, and wires itself. Closing the last step would
 need a driver that can operate browser chrome.
+
+---
+
+# Documents were never attached
+
+Found by using the extension on a Google Form: pressing **Fill this form**
+uploaded nothing, on any site. Five causes, found in the order they were hit.
+
+| # | Cause | Where |
+|---|-------|-------|
+| 1 | The fill skipped every `doc.*` match, pointing at an `attachDocuments` that did not exist. `planFrom` hard-coded `documents: []`, the review showed a stub, and the panel never mentioned the skip. | `fill-service.ts` |
+| 2 | A Google Form has no file box. "Add file" opens the site's own upload window, a same-origin frame; the harvester only reads `input, select, textarea`. | `harvester.ts` |
+| 3 | The submit guard blocked a portal's own submit-type Upload button — even the user's own press. | `submit-guard.ts` |
+| 4 | The guard was injected into every frame, so inside a site's upload window it could block the user's press on Upload. Nothing is ever written to a sub-frame. | `content/index.ts` |
+| 5 | The traits veto returned early for any key without a traits entry — every composed key — so a *file* box labelled "Upload your 10th marks card" was mapped to `education.class_10.marks_obtained`. | `traits.ts` |
+
+## What now happens
+
+- **File boxes, during Fill.** The requirement is read off the page — label,
+  the hint beside the box, its `accept` list; a taught constraint wins
+  (`documents/field-constraint.ts`, test-first, 23 tests). The stored master is
+  fitted by the existing pipeline, or attached untouched when it already fits.
+  Documents go after every text field, over the bus as base64, inside a
+  per-fill budget. The re-auth gate covers documents, before decryption.
+- **Drag-and-drop areas** get a synthetic drop, and the widget's own answer
+  (a cancelled `drop`) decides success.
+- **Upload windows** (Google Forms): the user opens it; "Put … in the upload
+  window" runs two self-contained functions in that frame; the user presses
+  Upload (`upload-window-service.ts`, `content/upload-window.ts`).
+- **A portal's Upload button**: hold-to-approve one document; a token naming
+  that button, burned before the press; the form's other file boxes emptied
+  first (`uploadWithApproval`, `content/upload-press.ts`).
+- **The guard is top-frame only**, matching the `document_start` guard.
+- **A re-auth prompt** now exists. The worker had refused high-sensitivity
+  fills after three minutes since Phase 6, and no screen could answer it.
+
+## Evidence
+
+| Claim | Test |
+|-------|------|
+| A document lands in a real file box and the page hears it | `documents.spec.ts` → "a document lands in the box" |
+| The real photo is fitted to the box's own words | `documents.spec.ts` → "the real pipeline fits the real photo" (3.6 MB → 20–50 KB) |
+| Undo restores the user's own pick | `documents.spec.ts` → "Undo gives back a file the user had chosen" |
+| Unapproved Upload is blocked; approved posts once, one document | `documents.spec.ts` → "is blocked unapproved … approved" |
+| The window functions work from their own source and press nothing | `documents.spec.ts` → "the file goes into the window … nothing is pressed" |
+| The guard stays out of sub-frames | `extension.spec.ts` → "the guard stays out of sub-frames" — proved to fail with the old behaviour |
+| Gate before decryption; refills never carry a document | `fill-service.test.ts` → "asks for the passphrase before decrypting…", "never lets a refill…" |
+| Document wordings, from a fixture (rule 5) | `matching/documents.test.ts` over `fixtures/documents-portal/` |
+
+`fixtures/documents-portal/page-1.html` joins the measured corpus: 6/6
+mappable correct, **0 high-confidence mismatches**; every other fixture's
+numbers are unchanged.
+
+# The vault, laid out as a student's folders
+
+The vault held twelve document slots, named for what a national form tends to
+ask for. A Karnataka student applying through KEA keeps about forty: a study
+certificate and a transfer certificate for *each* of Class 10 and PUC, the
+371(J) Annexure-A, and eleven KCET papers from the application form to the
+admission order.
+
+| Change | Where |
+|--------|-------|
+| 32 document slots appended, 12 kept as they were (keys are append-only) | `taxonomy.ts` |
+| A certificate that exists per qualification is retargeted by the level its question names, the way `education[]` fields already were | `frame.ts` |
+| The slots are grouped into the folders they are kept in; optional folders start collapsed | `ui/lib/field-groups.ts` |
+| An RD number is a text field, not a document: it is printed on a certificate but a portal asks for it in a text box | `taxonomy.ts`, `traits.ts` |
+| A thumb impression is judged by its own rules — a thumbprint is square, and the signature window rejected every correct one | `documents/intake.ts` |
+
+| Claim | Test |
+|-------|------|
+| Every document a student keeps is matched from a fixture, in the words portals use (rule 5) | `matching/documents.test.ts` over `fixtures/documents-portal/student-documents.html` (35 questions) |
+| Every slot has exactly one folder, and two of a kind are never labelled alike | `ui/lib/field-groups.test.ts` |
+| A closed folder still holds its slots in the page | `DocumentsPanel.test.tsx` |
+| A thumb impression is not held to the signature rules | `intake.test.ts` |
+
+**Not slots, on purpose:** printed passport photographs (the digital original
+is the slot), and bank account details, which are the existing `bank.*` text
+fields.
+
+# Restoring a vault had never once worked
+
+Reported in use: importing a real backup — 9.6 MB, 110 fields, nine documents,
+one setting — failed with **"Maximum call stack size exceeded"** after the last
+piece was read, and nothing was restored.
+
+**Cause.** `fromBase64` checked that a string was base64 with
+`/^(?:[A-Za-z0-9+\/]{4})*…$/`. V8 recurses on a quantified group like that:
+past a few megabytes it throws rather than answering. Every value in a backup
+is such a string, and the file's largest was 5.7 MB, so the import died on the
+first document it reached — every time, for any vault holding a document of
+real size.
+
+**Fix.** The check is a character scan: the alphabet, a length that is a
+multiple of four, padding only at the end. O(n), no stack.
+
+**Why no test caught it.** The six-megabyte case existed, and only *exported*.
+`backup-transfer.test.ts` now restores one too, and fails with the old regex in
+place.
+
+| Claim | Test |
+|-------|------|
+| A four-megabyte string decodes | `crypto.test.ts` → "reads a document-sized string" |
+| Padding is still rejected where it does not belong | `crypto.test.ts` → "rejects padding that is not at the end" |
+| A vault whose documents are megabytes restores, fields and documents both | `backup-transfer.test.ts` → "restores a vault whose documents are megabytes" |
+| The reported file itself parses and unseals, all 120 sealed values | checked directly against `autofill-2026-09-21.afvault` |
+
+# The guard blocked sites it had never filled
+
+Reported in use: the login of an unrelated local project (DBARS) and a
+government hostel portal refused the user's own **Sign In** with "Submission
+blocked", on pages the extension had not been opened on.
+
+| Cause | Fix |
+|-------|-----|
+| The guard switched on the moment the content script loaded, and refused every submit until an approval — so a scan, or any load of the script, locked the page. | Dormant by default. It **engages** at the first write of a fill, on a review edit, or on adopting a live run, and disengages when the run ends. |
+| The per-origin `document_start` script, registered when a fill started, was never removed: it loaded on every page of that host for the rest of the session. An origin pattern covers every port, so a fill on `localhost:5173` guarded every localhost app. | Unregistered when the run ends — approved, aborted, expired or its tab closed (`onRunEnded`) — unless another tab is mid-run on the same site. Loaded before the page, it starts engaged and asks the worker (`run:active`); with no live run for its tab it stands down. |
+
+| Claim | Test |
+|-------|------|
+| A page the extension has not filled submits normally, with the shipped bundle loaded | `extension.spec.ts` → "leaves the user's own submit alone" |
+| A document_start copy with no live run hands the page back — **fails with the stand-down removed**, reproducing the report | `extension.spec.ts` → "hands the page back" |
+| Engaged, the guard still blocks: every adversarial guard spec passes | `guard-adversarial.spec.ts`, `fill.spec.ts`, `submit-guard.test.ts` |
+| Every way a run ends releases it, including expiry | `fill-service.test.ts` → "a run ending hands the page back" |
+
+# What a test portal found
+
+A separate test portal's `/documents` page reported five extension faults.
+It was captured as it renders (`scripts/capture-page.mjs` →
+`fixtures/test-portal/documents.html`) and every fault was reproduced there
+before it was fixed.
+
+| Reported | Cause | Fix |
+|----------|-------|-----|
+| An income certificate in the photo box | A header link, "Upload Documents", was read as an upload control; its "question" was **Home**. A document assigned to that slot went to "the window" — and `placeFileInWindow`, run in the page itself, took the **first file box on the page** that accepted a JPEG: the photo's. | Navigation links are never upload controls (`navigates`, `PAGE_CHROME`); in the page itself, "the window" is the open dialog and only that. |
+| The photo cropped, top of the head gone | Every derivation trimmed to the ink box measured at upload. A photograph has no blank paper: the background above the head is part of it. | `trimsToInk(role)` — false for a photo. |
+| "Class X Academic Record" not filled | Roman X was not Class 10, and the matcher never read the page's own "Also known as: 10th Marks Card / SSLC Marks Card" line. | `class\s*x` is Class 10; `aliasesOf` scores an alias list just below the label. |
+| "ST Category Certificate" not filled | A certificate named by the category it proves had no phrasing; the alias "Caste certificate" was not read. | Category-certificate phrasings, and the alias list. |
+| A JPG for a PDF-only box, skipped silently | Never matched (above), so never attempted and never reported. Once matched, the JPEG is wrapped in a one-page PDF inside the 50 KB – 2 MB window. | Proved in a real browser against the portal's own rule text. |
+| "3 of 3 filled" on a page with five uploads | Upload boxes the matcher could not name were dropped from the report. | `unrecognisedUploads` in the fill report; the panel counts and names them. |
+
+| Claim | Test |
+|-------|------|
+| Every requirement on the captured page reaches its key, with no confident mistake | `matching/test-portal.test.ts` |
+| No navigation link becomes an upload slot | `test-portal.test.ts` → "takes no navigation link" |
+| Filled the way Fill fills, each box holds its own document, and nothing is named "income" | `documents.spec.ts` → "puts each document in its own box" |
+| A window placement cannot reach the page's own boxes — proved to fail with the old whole-page search, reproducing the report | `documents.spec.ts` → "never reaches the page's own file boxes" |
+| The photo keeps its shape under "20 KB – 200 KB"; a JPEG becomes a PDF under "PDF, 50 KB – 2 MB" | `derivation.spec.ts` |
+| A photo is never trimmed; paper documents still are | `intake.test.ts` |
+
+**One thing not proved:** the user's own run cannot be replayed, so it is not
+certain the income certificate took the route above rather than, say, a vault
+Photo slot holding the wrong file. The route above produces that exact refusal,
+and it is closed. The portal now shows the size and pixels of a refused file,
+which settles it if it recurs.
+
+# One vault per person, not one vault for everybody
+
+Every user got the same vault: seven qualification blocks of fifteen identical
+fields, and every document folder the taxonomy has. A Karnataka student who
+went CBSE Class 10 → PUC → B.Tech through KCET scrolled past Diploma,
+Postgraduate, Professional degree and Doctorate to reach their bank details.
+The "+ Add a qualification" control that preceded this kept its answer in React
+state, so a block added by accident could not be removed and one added on
+purpose vanished on reload.
+
+| Change | Where |
+|--------|-------|
+| The user answers, once, what they studied — board, state, route after Class 10, stream, where they are now, entrance exams, category, claims | `ui/onboarding/PathSetup.tsx`, a card at the top of the panel |
+| Those answers decide which blocks and folders exist | `matching/pathway.ts` (rules) + `ui/lib/vault-shape.ts` (groups) |
+| The answers are sealed in the vault, not in `chrome.storage.local`: they name a reservation category | `vault.path` via `path:get` / `path:set` |
+| A backup carries the settings, so a restored vault is laid out as it was left | `vault/backup.ts` |
+| Folder and block titles follow the person's own board: "Class 10 (CBSE)", "PUC (Class 12)" | `vault-shape.ts` |
+| The session-only "claimed" set is gone | `VaultEditor.tsx` |
+
+For the path this was designed against — CBSE Class 10 in Karnataka, PUC
+Science PCMB, B.Tech through KCET, fourth year, ST, 371(J) — the editor shows
+Class 10, PUC, Undergraduate, the KCET folder, and three reservation questions
+in place of twenty-one. Diploma, ITI, Postgraduate, Professional degree and
+Doctorate are not there.
+
+**Two rules make a wrong answer cheap.** A key that already holds a value is
+always shown, whatever the path says; and each panel has a control that shows
+the whole catalogue. The path decides what is *offered*, never what is
+possible — the matcher still knows every key, and a form asking for a document
+the path did not offer still names it and still reports "no master saved".
+
+| Claim | Test |
+|-------|------|
+| The example student gets school, PUC and the degree, and not the four they never took | `matching/pathway.test.ts`, `ui/lib/vault-shape.test.ts` |
+| Reservation narrows to the claims actually made | `pathway.test.ts` → "narrows reservation to the claims actually made" |
+| Nothing invented: every key offered is in the taxonomy | `pathway.test.ts` → "invents no key" |
+| A filled block is never hidden | `vault-shape.test.ts`, `VaultEditor.test.tsx` |
+| A path that is not one reads as no path, rather than shaping the editor | `pathway.test.ts`, `background/path-service.test.ts` |
+| Stored sealed: the category is not readable from the record | `path-service.test.ts` → "is stored sealed" |
+| A restored vault keeps its layout | `vault.test.ts` → "carries the settings" |
+
+## Which degree, in the words the university prints
+
+`education.*.course` and `.branch` were free text with no vocabulary, so the
+same degree became "btech", "B-Tech", "B.E CSE" and "comp sci" across four
+applications — and the setup card could say somebody was reading Engineering
+without recording *what*.
+
+`matching/courses.ts` is a catalogue of about fifty degrees with their
+branches, drawn from the user's own tree: B.E. / B.Tech with 36 branches, the
+medical and AYUSH degrees, B.Sc with its sciences, B.Com / BBA / BMS, BA and
+its humanities, the five-year law degrees, B.Des / B.Arch / B.Plan, and a short
+postgraduate set.
+
+| Change | Where |
+|--------|-------|
+| The setup card asks which degree and which branch, as dropdowns rather than forty buttons | `PathSetup.tsx` |
+| The chosen pair is written into `education.<level>.course` / `.branch` — a value a form fills from | `VaultEditor.writeDegree` |
+| Every course and branch box in the editor offers the same names through a `datalist` | `FieldRow.tsx`, `suggestionsFor` |
+| The path carries `course` / `branch`; a path stored before this reads back with both null | `pathway.ts` |
+
+**It suggests; it never restricts.** The boxes stay free text, because no list
+of Indian degree titles is complete — "Not listed — I will type it" is the
+first option in both dropdowns. A value the user typed themselves is never
+written over: `writeDegree` skips a box that already holds something.
+
+**Never on a masked field.** `FieldRow` drops suggestions for a high-sensitivity
+key: a dropdown of values beside a password-type box is a way to read one
+without revealing it.
+
+| Claim | Test |
+|-------|------|
+| An engineering student is offered B.E. / B.Tech and its branches, not MBBS | `courses.test.ts` |
+| A postgraduate is offered M.Tech, not B.Tech | `courses.test.ts` |
+| The chosen degree reaches the block a form fills from | `VaultEditor.test.tsx` |
+| A typed answer is never overwritten | `VaultEditor.test.tsx` |
+| A course the catalogue lacks answers with no branches rather than a guess | `courses.test.ts` |
+
+## The slots a student mid-degree actually holds
+
+The taxonomy had no key for anything issued *during* a course, so a fourth-year
+student had nowhere to put the papers a scholarship or an internship asks for.
+Thirty-one document keys and fifteen field keys were appended:
+
+| Folder | Slots |
+|--------|-------|
+| College (the course you are on) | semester marks card, consolidated marks card, bonafide certificate, college ID card, admission letter |
+| Caste and reservation | Form-D caste certificate, OBC certificate, EWS certificate |
+| Work and internships | resume, internship offer letter, internship certificate, experience certificate, letter of recommendation |
+| Courses and training | course, training, workshop, professional certification |
+| Achievements and projects | hackathon, competition, merit, project report, project certificate, published paper, patent |
+| Sports and service | sports, NCC, NSS, volunteering |
+| ITI | ITI marks card, national trade certificate |
+
+Text fields: `entrance.*` (which exam, registration number, roll number, rank,
+score, year), `semester` and `year_of_study` on the generic block and on
+diploma / undergraduate / postgraduate, and `eligibility.article_371j` — the
+claim itself, which previously existed only as the RD number on its
+certificate.
+
+Each one carries a label, exactly one folder, its portal phrasings, and a
+question in `fixtures/documents-portal/student-documents.html` matched by
+`matching/documents.test.ts` (rule 5) — 92 questions there now.
+
+Two judgements worth recording:
+
+- **"Bonafide certificate" moved.** It was a phrasing of `doc.study_certificate`;
+  it is now its own slot, because a bonafide is issued by the institution a
+  student is *at* and a study certificate proves where they studied before.
+- **A semester and a year of study have no traits entry on purpose.** The
+  general rule vetoes any key for a field capped under three characters, on the
+  reasoning that nothing meaningful fits in two — and "7" does.
+
+**Folded rather than shown:** the four portfolio folders (work, courses,
+achievements, sports) are offered to every student past school, since nobody is
+asked whether they have been to a hackathon. They render one line each until
+opened. Folders the path kept because of an *answer* — the KCET papers, the
+caste certificates, the college's own documents — are open.
+
+# A backup of the easy half
+
+Export wrote the text fields and nothing else. The photo, the signature and
+forty scans — the part that takes an afternoon and a scanner to replace — were
+not in the file, and a restore on a new machine left every document slot empty.
+
+| Change | Where |
+|--------|-------|
+| The backup carries the documents, sealed exactly as the vault holds them; export still decrypts nothing | `vault/backup.ts`, format version 2 |
+| A version 1 file still restores, as a backup that had no documents in it | `parseBackup` |
+| The file moves over the bus a piece at a time: a vault of scans is far past one message | `vault:export-begin/-chunk`, `vault:import-chunk/-commit` |
+| An imported document entry is untrusted input and is dropped unless it is shaped like one | `looksLikeDocument` |
+| Variants (portal-sized copies) stay out: a cache that rebuilds | `exportVault` |
+
+| Claim | Test |
+|-------|------|
+| A document round-trips byte for byte, and its bytes appear in the file only as ciphertext | `vault.test.ts` → "carries the file, still sealed", "round-trips the file itself" |
+| A six-megabyte vault splits and joins back to the same file | `backup-transfer.test.ts` → "splits a vault too big for one message" |
+| A wrong passphrase keeps the pieces, so nothing is uploaded twice | `backup-transfer.test.ts` |
+| Out-of-order pieces are refused rather than stitched | `backup-transfer.test.ts` |
+| A cut never lands inside a character | `vault.test.ts` → "never cuts a character in half" |
+
+## The same field, seven times
+
+The editor showed all seven qualification blocks at once — fifteen identical
+fields each — plus a generic "any qualification" block of sixteen. 121
+education boxes, of which a school leaver fills about thirty, and the same
+marks were typed twice: once under Class 12 and once under the generic block.
+
+| Change | Where |
+|--------|-------|
+| Class 10 and Class 12 are shown; the other five are offered by name and appear when claimed, or when they already hold a value | `VaultEditor.tsx`, `conditional` groups in `field-groups.ts` |
+| A question that names no qualification is answered from the most recent one held — whole record from one block, never a mixture | `matching/qualifications.ts` (test-first, 9 tests) |
+| The generic block left the meter's denominator, since nobody fills it now | `vault/profile-store.ts` |
+| The document folder "Identity" became "Identity documents"; the profile block above it is also called Identity | `field-groups.ts` |
+
+| Claim | Test |
+|-------|------|
+| School shows, the rest are offered, a claimed block appears, a filled one is never hidden | `VaultEditor.test.tsx` |
+| One qualification answers a level-less question, and a hand-typed value still wins | `matching/qualifications.test.ts` |
+| An older vault's generic values still show, and still count | `VaultEditor.test.tsx`, `vault.test.ts` |
+
+## Still open
+
+- **Google's real upload window is unverified.** Whether it accepts a file
+  placed this way can only be checked on a live form. The panel's fallbacks,
+  in order: drop instead, then a copy to choose by hand.
+- **PDF → JPEG in the worker** still runs pdf.js where STATUS already calls it
+  untested; pass-through avoids it whenever the form accepts PDF.
+- **A typeless `<button>Browse</button>`** inside a form is still blocked by the
+  top-frame guard when the user presses it — the guard's existing rule, and it
+  protects SPA submit buttons of the same shape.
+- **File boxes inside a form's own iframes** are still not filled; nothing is.
+
+# A reader that could not read
+
+"Read details from this" answered **"Nothing could be read from this document.
+Reading text from photographs is not available in this build."** — for every
+photograph, and for every PDF that was a scan rather than a document with a text
+layer. Which is nearly every document a student holds: a marks card is a
+photograph of a marks card. The seam had been there since Phase 4 and had never
+been filled in: `readDocumentText` took an optional `OcrEngine`,
+`document-service.ts` held a `setOcrEngine` nothing called, and `extract.ts`'s
+own header referred to an `ocr.ts` that did not exist.
+
+## The engine, and where it is allowed to run
+
+| Change | Where |
+|--------|-------|
+| Text recognition, bundled: `tesseract.js` with the SIMD-LSTM core and the English `best_int` pack. Every path it is given is a `chrome-extension://` one; `workerBlobURL` off, cache off | `src/offscreen/ocr.ts`, `vite.config.ts` → `ocrAssets()` |
+| It runs in an **offscreen document** — recognition needs a Web Worker and a service worker cannot start one — opened on demand and closed when the reading is done | `src/background/ocr-host.ts`, `src/offscreen/ocr.html` |
+| Before recognition: a scanned PDF is rasterised, an image decoded, and either upscaled to 2000 px wide and re-encoded, because a phone photo at 700 px reads as noise | `ocr-host.ts` → `renderForReading` |
+| `offscreen` added to the manifest's permissions, with the reason written down in three places a reviewer reads | `manifest.config.ts`, `STORE_LISTING.md`, `PRIVACY.md` |
+| A build that lost its model fails the build rather than shipping a reader that cannot read | `scripts/verify-dist.mjs` (4 entries, two with a 1 MB floor) |
+| Which languages exist is a table, so a second one is a data change | `src/documents/ocr.ts` → `BUNDLED_MODELS`, `modelsFor` |
+
+About **9.2 MB** of wasm and models in `dist/ocr/`, copied from `node_modules` at
+build time. That is the honest cost of reading a document without sending it
+anywhere.
+
+## Knowing what it is reading
+
+Text alone is not an answer: "1234567" beside "REGISTER NUMBER" means one thing
+on a Class 10 card and another on a degree transcript. The vault has always known
+which slot the user filed a document under — it was simply never passed to
+the reader.
+
+| Change | Where |
+|--------|-------|
+| The slot travels with the read, as a hint. The bus is unchanged: `doc:extract` still carries only an id | `extract.ts` → `ExtractionHint`, `document-service.ts` |
+| Marks cards: board, school, register **or** roll number, year, subjects, marks, max, percentage, result — filed under the qualification the slot names (`doc.marksheet_10` → `education.class_10.*`). Transfer, study and migration certificates land in the same block when the slot names a level, and in none when it does not | `documents/extract-education.ts` (test-first, 23 tests) |
+| Certificates: the **RD number** into the box for *that kind* of certificate, plus community, category, income, domicile state, and the 371(J) claim itself | `documents/extract-claims.ts` (test-first, 11 tests) |
+| An address, from the one document that carries the holder's own | `documents/extract-address.ts` (test-first, 5 tests) |
+| Entrance papers: the exam's own name beside its CET/application number, hall-ticket number, rank, score and year | `documents/extract-entrance.ts` (test-first, 10 tests) |
+| A passbook's words, which a scholarship form asks for: bank, branch, the name the account is held in, the kind of account. Plus a labelled driving-licence number | `documents/extract-bank.ts` (test-first, 10 tests) |
+| A third channel beside candidates and warnings: **notes** — what was read and deliberately not offered | `extract.ts` → `ctx.note` |
+| A dozen rows at once are grouped under the vault editor's own headings, in its order, each group with a tick-all | `ui/vault-editor/ExtractedDetails.tsx`, `groupFor`/`groupOrder` in `field-groups.ts` |
+| No offer to read a face photograph, a signature or a thumb impression: nothing is printed on one | `DocumentsPanel.tsx`, gated on `roleFor` |
+
+| Claim | Test |
+|-------|------|
+| The bundled wasm and model actually recognise text, in a real browser | `e2e/ocr.spec.ts` → "reads the words off a rendered page, with nothing fetched" |
+| Nothing is fetched while reading: no request leaves the extension's own origin | same test, asserting on every request the page made |
+| The reader's page is opened on demand and closed again | `e2e/ocr.spec.ts` → "the worker can open the reader’s page, and closes it again" |
+| The engine never reaches a page | `no-ocr-in-content.test.ts`, unchanged and still passing |
+| A caste certificate's number never lands in the income certificate's box | `extract-claims.test.ts` |
+| A school's address never becomes the applicant's | `extract-education.test.ts`, `extract-address.test.ts` |
+| A marks card pre-ticks nothing: it carries no checksum | `extract-education.test.ts`, `ExtractedDetails.test.tsx` |
+| Ticking a group writes nothing until Save, and then only that group | `ExtractedDetails.test.tsx` → "saves only the group the user ticked" |
+| A level is never guessed for a certificate whose slot names none | `extract-education.test.ts` → "guesses no level for a certificate whose slot names none" |
+| A photograph is offered no reading, and a marks card is | `DocumentsPanel.test.tsx` |
+
+## What it will not do, said on the screen rather than left silent
+
+A user holding the card can see what is missing, and silence reads as a misread.
+So the reader says it: **the individual subject marks have no box** (the subject
+names are one list; the total and the percentage are saved), and **the school's
+address is not saved as your address** (only an Aadhaar card carries the holder's
+own). Both appear only when the card actually had them.
+
+## Still open
+
+- **Three alphabets: English, Kannada, Devanagari.** The other eight Tesseract
+  models remain one table entry and one file away. A Tamil or Bengali document
+  still gets the honest message it got before.
+- **Handwriting is not read.** Tesseract is a print engine. A handwritten
+  register number will come back wrong or not at all, which is why nothing from a
+  card is ever pre-ticked.
+- **The rules are proved against realistic OCR text, not against scans.** Every
+  parser test is a fixture of what recognition gives back for a card of that
+  shape. The one thing no test can stand in for is the user's own marks card,
+  read by hand against the card itself.
+- **PUC and degree cards beyond the shapes tested.** Each new card shape is a
+  fixture and, at most, a label; the machinery does not change.
+
+# What the reader actually returned, on real documents
+
+The reader shipped and was then pointed at the user's own vault. Five documents,
+four bad outcomes, and none of them the kind of failure a fixture test can have:
+
+| What they saw | What it was |
+|---------------|-------------|
+| PAN card: **"A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received"** | The sizing step only ever scaled pictures *up*. A 2944 × 4224 photo — 12.4 megapixels — went to the engine untouched, recognising it outlived the thirty seconds MV3 gives an idle service worker, and the worker was collected with the panel still waiting. |
+| 2nd PUC card: board read as **"a. E Shb zn DEPARTMENT OF PRE-UNIVERSITY EDUCATION fe” |"**, subjects as "Bl oor wx ori) Sr, lin" | Only English was bundled. Every Karnataka document prints each heading in Kannada *and* English on one line; read with English alone the Kannada half does not disappear, it comes back as broken Latin spliced into the English — and then lands in the vault. |
+| Aadhaar: "a number … fails its check digit" | A photograph lit from one side, thresholded as one page. The Verhoeff check did its job — it refused a misread rather than storing it — but the misread was avoidable. |
+| Cancelled cheque: nothing at all | Every rule was label-anchored, and a cheque labels nothing. The image was also 780 × 716, which is below what any engine can read. |
+
+## The picture, before the engine sees it
+
+| Change | Where |
+|--------|-------|
+| A page is scaled **both ways** now, to a 2400-pixel long edge and at most 6 megapixels | `documents/preprocess.ts` → `readingScale` |
+| The lighting is taken out of the picture: the paper is modelled from the brightest pixel in each of 16 × 16 blocks, the page is divided by that model, and one Otsu threshold then fits the whole page | `preprocess.ts` → `prepareForReading` |
+| A guard against making things worse: a result that is nearly all ink, or nearly none, is thrown away and the plain greyscale used instead — speckle reads as words that were never there | same, `MIN_INK`/`MAX_INK` |
+| The engine is handed a **PNG**, not a JPEG: JPEG's artefacts sit exactly where text does | `ocr-host.ts` → `renderForReading` |
+| A scan too small to read says so, instead of offering values read off it | `tooSmallToRead` — the user's cheque and certificates are all under it |
+| The worker is kept alive for the length of a reading, and a reading that runs past 150 seconds is called off in our own words | `ocr-host.ts` → `keepAlive`, `READ_TIMEOUT_MS` |
+
+Sauvola's local threshold was tried first and dropped: it keeps thin strokes
+beautifully and hollows out anything thicker than its window, which on a marks
+card means the headings.
+
+## Two alphabets, because the documents have two
+
+| Change | Where |
+|--------|-------|
+| Kannada and Devanagari packs ship beside English (+3.3 MB) | `vite.config.ts` → `ocrAssets()`, `verify-dist.mjs` |
+| Which alphabets to expect comes from **the user's own path** — the state they set up with — so nobody is asked a question about scripts | `documents/ocr.ts` → `scriptsForState`, read in `document-service.ts` |
+| English is read first; the local script is a second reading, paid for only by the documents that need it | `ocr-host.ts`, `readWrongAlphabet` |
+| The two readings are **merged, not chosen**: a second alphabet costs a little English accuracy (measured: `PRIYA S` → `PRIYA 5`), and English is what every rule reads, so the bilingual page is kept with each line's English taken from the English-only pass | `ocr.ts` → `mergeReadings` |
+| Rules read one alphabet still: a line is reduced to what it says in English, with a Kannada-only label translated and a value printed in one script left alone | `documents/bilingual.ts` → `latinise` |
+| The fragments a misread leaves at the ends of a line are stripped — never the value side of a label | `bilingual.ts` → `trimNoise` |
+| A cheque's unlabelled account number is offered, at a confidence that says nothing on the page confirmed it | `extract-bank.ts` |
+| The text the engine produced is shown on request, with an honest word about how sure it was | `ExtractedDetails.tsx` |
+
+| Claim | Test |
+|-------|------|
+| A huge photograph is shrunk, a small one enlarged, and neither exceeds what the engine can read in a sitting | `preprocess.test.ts` → "shrinks a 12-megapixel photograph…" |
+| Ink survives in the bright half *and* in the shadow, which one threshold cannot manage | `preprocess.test.ts` → "keeps the ink in the bright half and in the shadow" |
+| A picture with no text in it is not thresholded into speckle | `preprocess.test.ts` → "when thresholding would make things worse" |
+| The worker is kept alive, the wait is bounded, and the page goes over losslessly | `ocr-host.test.ts` → "a reading that takes a long time" |
+| The Kannada pack in this package really reads Kannada, in a real browser, fetching nothing | `e2e/ocr.spec.ts` → "reads a bilingual card in both alphabets" |
+| A bilingual PUC card yields its register number, parents, college, totals and six subjects | `extract-education.test.ts` → "a card printed in Kannada and English" |
+| A value printed in one script only is never deleted — an Aadhaar name in Devanagari still reads | `bilingual.test.ts`, `extract.test.ts` |
+| "Father's Name" is a label, not a misread | `bilingual.test.ts` → "never eats a value" |
+
+## Still open, honestly
+
+- **A second alphabet costs some English accuracy.** The merge above recovers
+  most of it, and it cannot recover a line the English pass never read.
+- **Handwriting is not read.** Tesseract is a print engine.
+- **The user's own certificates are 904 × 1280 and the cheque 780 × 716.**
+  Enlarging does not put back detail the camera never captured; the reader now
+  says so rather than offering values it misread. Re-photographing those at about
+  2000 pixels is the single biggest thing left, and it is not code.
+- **Nothing here is proved against the user's actual scans** — only against
+  fixtures of what recognition returns for cards of that shape, and against a
+  real browser reading a rendered bilingual line.
+
+# One suggestion from the richest document in the vault
+
+Pressed on an e-Aadhaar letter, the reader returned a page of recognised text,
+**one** saveable detail, and a warning that the photograph was bad. The letter
+carries an addressed block of labelled lines — S/O, VTC, PO, Sub District,
+District, State, PIN Code, Mobile — and none of it was read.
+
+| Change | Where |
+|--------|-------|
+| The e-Aadhaar block is read: village (VTC), taluk (Sub District), district, state, PIN, post office, mobile, and S/O as the father's name | `documents/extract-aadhaar.ts` |
+| **A VID is no longer read as an Aadhaar number.** Sixteen digits in four groups: the first twelve are a 4-4-4 run followed by a *space*, so the "not part of a longer run" guard never fired, the checksum failed on a number read perfectly, and the user was told to retake the photo | `extract.ts` → `extractAadhaar` |
+| The masked number says it is masked — every downloaded e-Aadhaar prints `XXXX XXXX 5521`, so there is nothing to read and nothing to blame | `extract-aadhaar.ts` |
+| The enrolment number and the VID are reported as read and not saved, rather than filed somewhere they do not belong | same, as notes |
+| `address.permanent.taluk` / `address.correspondence.taluk` appended to the taxonomy, with synonyms | `matching/taxonomy.ts`, `synonyms.json` |
+| Labels are matched as the engine *actually returned them*: "S/O:" as `5/ಲಿ:`, "District," as "Destict," — the guard is the value (a place name, six digits, a person's name), not the spelling of the label | `extract-aadhaar.ts` |
+| The suggestion screen is a table: detail, value read, and the tick at the end of the pair | `ui/vault-editor/ExtractedDetails.tsx` |
+
+| Claim | Test |
+|-------|------|
+| The addressed block yields nine or more details, each a key the taxonomy has | `extract-aadhaar.test.ts` |
+| The taluk is not filed under city or district | `extract-aadhaar.test.ts`, `deterministic.test.ts` |
+| A VID never becomes an Aadhaar number, and raises no warning | `extract-aadhaar.test.ts` |
+| The same letter read as recognition actually returned it still yields seven or more | `extract-aadhaar.test.ts` → "the same letter, as recognition actually returned it" |
+| These labels read no address off a marks card that names a district | `extract-aadhaar.test.ts` |
+| A form's "Taluk" fills from the new key, above the auto-fill band | `deterministic.test.ts` |
+| The label comes first, the value next, the tick last | `ExtractedDetails.test.tsx` |
+
+**Still not saved, and said so on the screen:** the enrolment number (no box in
+the taxonomy) and the VID (temporary by design). The Aadhaar number itself
+cannot be read from any downloaded letter — it is masked on the document.
+
+# The channel closed again, on a small picture
+
+After the Aadhaar work the same error came back — "A listener indicated an
+asynchronous response by returning true, but the message channel closed before
+a response was received" — on a 1080 × 1615 letter, so size was not the
+cause this time. Two reads were running at once, and each killed the other.
+
+**Why two.** The side panel mounts under React's StrictMode, which runs an
+effect twice in development, so one press of "Read details from this" sent
+`doc:extract` twice. Harmless while a read took a few seconds; the two-pass
+bilingual read made the overlap certain.
+
+**Two ways they killed each other**, both fixed, both proved to fail first:
+
+| Mechanism | Fix | Proof it bit |
+|-----------|-----|--------------|
+| Every read closed the one offscreen reader on its way out, so the first to finish shut it under the second | Reads are queued; the page is closed only by the last read out | `ocr-reads.test.ts` — with the old per-read close restored, three of its tests fail on `CLOSED-MID-READ` |
+| The reader page kept one engine and **terminated** it whenever a reading wanted other alphabets — the second pass (`eng+kan`) killed the engine the first (`eng`) was still using | One engine per alphabet set, never replaced while in use; readings run one at a time | `e2e/ocr.spec.ts` → "answers two overlapping readings that want different alphabets" failed in a real browser with the user's exact message, and passes now |
+
+And the cheapest fix of the three: a second request for a document already being
+read shares the first one's answer (`document-service.ts` → `readsUnderWay`), so
+one press is one read.
+
+# Phase 1: PaddleOCR reads the documents
+
+Tesseract is gone. The reader is PaddleOCR — its PP-OCRv5 text detector and its
+English recogniser — running on ONNX Runtime in a dedicated Web Worker, started
+by the offscreen page. It was chosen by measurement (Phase 0, on the user's own
+five documents): Tesseract read 91 of 120 printed phrases, PaddleOCR 114.
+
+## Why a port, not PaddleOCR's SDK
+
+PaddleOCR ships a browser SDK (`@paddleocr/paddleocr-js`). It cannot run in an
+extension page: its OpenCV.js builds functions with `new Function`, which the
+extension's CSP (no `unsafe-eval`, by MV3 rule and by choice) refuses. ONNX
+Runtime itself needs only `wasm-unsafe-eval`, which was already granted for
+Argon2id. So PaddleOCR's models run on ONNX Runtime directly, and the steps
+around them are ported from PaddleOCR's own code as pure functions:
+
+| Step | Where |
+|------|-------|
+| Scale for detection — at the page's own resolution, as PaddleOCR's **pipeline** does (the detector's own file says "long side 960", and following it lost small print) | `documents/paddle.ts` → `detectionSize`, `PIPELINE_DETECTION` |
+| Find the text boxes — threshold, a **rotated** rectangle per region (convex hull, rotating calipers: OpenCV's `minAreaRect`), score inside the rectangle, unclip | `paddle.ts` → `findTextBoxes` |
+| Warp each box upright, 48 pixels tall, padded to 320 | `paddle.ts` → `cropForRecognition` |
+| CTC decoding against the model's own character list | `paddle.ts` → `decodeCtc` |
+| The reading loop, batched by width | `documents/paddle-reader.ts` → `readPage` |
+| Boxes back into lines, each value paired with the label beside it; the English model's guesses at Kannada dropped by score | `documents/layout.ts` |
+
+Two measured corrections shaped the port. An upright box around a slanted line
+is mostly background: its score fell below 0.6 and every long line of the
+Form-D paragraph vanished, until the rectangle was allowed to rotate. And
+detecting at 960 pixels instead of the page's own size cost small print and
+merged words into long lines.
+
+The models are fetched **at build time** from PaddleOCR's model host and pinned
+by SHA-256 (`scripts/fetch-ocr-models.mjs`); a changed archive fails the build.
+Their YAML settings are converted to JSON at build time by a real parser, so the
+extension ships no YAML parser; the recogniser's 436 characters were checked
+identical, in order, to PaddleOCR's own dictionary file.
+
+## On the user's five documents
+
+The extension's own pipeline code (same modules, same models, same runtime), in a
+real Chromium, against the answer key from Phase 0:
+
+| | Phase 0 Tesseract | Phase 1 |
+|---|---|---|
+| Printed phrases read | 91 / 120 | **114 / 120** — the same as PaddleOCR's own SDK |
+| Fields the vault gets | 5 / 34 | **33 / 34**, none wrong |
+| Time per document (one CPU thread) | 1–10 s | 4–12 s — the same as the SDK, measured side by side |
+| Requests off the machine | none | none |
+
+Field rules closed on the way, each test-first against the reader's real output
+shapes (values changed): a name certified in a sentence ("This is to certify
+that …", with the parents on the certificates); CBSE's seven-column rows behind
+a subject code; the PUC's rows with the register number and exam month
+repeated; a totals line's maximum; "Month/Year"; "College" but never "College
+Code No."; the Aadhaar name under "To"; a certificate number printed twice; the
+income certificate's own sentence; a zero read as the letter O. And a
+better-evidenced reading of a field now replaces a weaker one, whichever rule
+spoke first.
+
+## What went, and why
+
+Tesseract and its three language packs; the two-pass English-then-Kannada
+reading and its merge; the lighting-flattening pass (it suited Tesseract, which
+thresholds a page whole; PaddleOCR's models were trained on photographs and
+read them better untouched); choosing alphabets from the user's state. A
+Devanagari recogniser of the same generation exists; adding it is one pinned
+archive and a per-box choice between recognisers.
+
+## Still open
+
+- ~~**The income figure on the user's own certificate.**~~ Closed in Phase 2,
+  from the words the certificate spells the amount in. (The English recogniser
+  still drops the bold figure; PaddleOCR's own two-step crop was tried and read
+  slightly worse overall — 112 phrases, 32 fields — so it was not adopted.)
+- **Kannada text is not read**, deliberately: no vault field on these
+  documents needs it, and PaddleOCR's only Kannada model read worse than none.
+- ~~**One CPU thread.**~~ Closed in Phase 2: the extension's pages are
+  cross-origin isolated and the reader uses up to four.
+- **Handwriting** is still not read.
+
+# Phase 2: what the reader learned next
+
+Five things, each measured on the user's own five documents with the
+extension's own modules in a real Chromium. The sixth — documents not yet
+measured — waits on pictures.
+
+| | Phase 1 | Phase 2 |
+|---|---|---|
+| Fields the vault gets | 33 / 34 | **34 / 34**, none wrong |
+| Printed phrases read | 114 / 120 | 114 / 120 |
+| The same, with every document handed over sideways or upside down | nothing read | **34 / 34 and 114 / 120**, each of the three ways |
+| Per-subject marks (CBSE Class 10, 2nd PUC) | not saved | all five, and all six; each card's subjects sum to its printed total |
+| Five documents, read one after another | 70 s and 77 s on one thread | **33 s and 32 s** on four, same text, same fields |
+| Requests off the machine | none | none |
+
+## The piece of the card beside each value
+
+The suggestion screen has always quoted the line a value came from. But the
+value and the quoted line come from the same reading: a "3" misread as an "8" is
+an "8" in both, and they agree perfectly. So each value is now shown beside the
+piece of the document it was read from — the one thing on that screen the reader
+did not produce.
+
+Boxes travel as shares of the page (`documents/evidence-region.ts`), since a
+photograph may be shrunk before it is read; the piece is cut from the document
+**as stored**, in the service worker (`document-service.ts` → `evidenceCrops`),
+and reaches the panel as a data URI. Boxes are passed on only when they are,
+line for line, the text being returned (`read-document.ts`) — the wrong piece
+would be worse than none. Looked at, not just asserted: the name and totals
+crops off the real PUC card are the right pieces.
+
+## The income figure, from the words
+
+The one field Phase 1 missed. The recogniser drops the bold figure on that
+line and reads the words after it, so the amount is taken from the
+words when the figure is absent (`documents/number-words.ts`, Indian
+counting, tolerant of a clipped word, and silent when two readings tie). It is
+offered at lower confidence than a figure, and a figure and words that disagree
+raise a warning rather than a value.
+
+## Each subject's own marks
+
+An entrance form asks for Physics, Chemistry and Mathematics by name. The vault
+now has a box for each: 21 keys appended to the taxonomy (`marks_physics` …
+`marks_social_science`, generic and at Class 10 and 12), with the user's stream
+deciding which Class 12 boxes are shown (`matching/pathway.ts` →
+`SUBJECTS_FOR_STREAM`; no stream, or "other", shows all of them, and the total
+is never hidden — `markSubjectOf` tells a subject from `marks_obtained` by name).
+
+| What | Where |
+|------|-------|
+| Each row's marks into its subject's box, never pre-ticked; subjects with no box are named on the screen as read and kept only in the list | `extract-education.ts` |
+| A name the reader damaged is mended: **MAT JEMATICS** and **MAT!JEMATICS**, both read off the user's card, where the H is broken in print. One wrong letter, in a name of seven letters or more, compared as a whole word — Physical Education is not Physics, Geology is not Biology | `extract-education.ts` → `mended`, `undamaged` |
+| A long word with a stray mark inside it is a damaged word, not noise to strip from the line | `bilingual.ts` → `DAMAGED_WORD_LETTERS` |
+| A form's "Physics Marks" / "Marks obtained in Chemistry" finds the box, and takes the level the form names | `synonyms.json`, `deterministic.test.ts` → "each subject’s own marks" |
+| One language box, and it is the **first** language: "Second Language", "Third Language", plain "Language" and a named language are left for the user | same |
+| A box labelled only "Physics" is not filled | same |
+
+**A matcher rule changed with it**, and is recorded here because it touches
+every form, not just marks. Several phrases of one key partly matching a label
+through the *same word* used to count as corroboration, which lifted a key past
+the single-weak-signal cap on nothing but how many ways the dictionary says it —
+and would have filled "Physics" with the Physics marks the day that key had five
+phrases. A key with nothing but partial matches now keeps one per distinct set
+of shared words (`deterministic.ts` → `distinct`); a key the label names
+outright is scored exactly as before. Measured on all 349 fixture fields before
+and after: three flagged fills that were wrong are gone ("Licence Serial
+(allotted by this office)" as a driving licence, "Ward Inspector's Remarks" as a
+defence ward, a "same as permanent" tick box as a taluk); one flagged fill that
+was right is lost (a column the jsdom harvest labels just "Marks"); nothing
+auto-filled changed, and the A.2.1 record is byte-identical.
+
+## Sideways photographs
+
+The recogniser reads upright text and nothing else, so a page photographed
+sideways read as nothing. PaddleOCR's page-orientation classifier
+(`PP-LCNet_x1_0_doc_ori`, 6.8 MB, fetched at build time and pinned by SHA-256
+like the other two) now runs first, in about 15 ms.
+
+- Twenty of twenty right on the five documents turned all four ways, never less
+  sure than 0.86. A page is turned only above 0.7 (`paddle-reader.ts` →
+  `ORIENTATION_MIN_CONFIDENCE`): a sideways page left sideways reads as badly as
+  it did before, and an upright page turned on a guess loses a good reading.
+- Turned by moving whole pixels (`paddle.ts` → `rotateQuarter`), so nothing is
+  resampled.
+- The user is told ("This picture was sideways, so it was turned upright before
+  it was read"), and the pieces shown beside each value are cut from the stored
+  picture and turned upright (`evidence-region.ts` → `unturnBox`, `raster.ts` →
+  `turn`). Looked at for all three turnings.
+- In the built extension, under its CSP: `e2e/ocr.spec.ts` → "stands a page
+  photographed … upright, and reads it", three ways.
+
+## More than one thread
+
+Reading is now on up to four CPU threads: half the machine's cores, so the
+browser the user is sitting at stays usable (`preprocess.ts` → `readerThreads`).
+
+Threads share memory, and Chrome allows that only on a cross-origin isolated
+page, so the manifest now carries `cross_origin_embedder_policy: require-corp`
+and `cross_origin_opener_policy: same-origin`. **That isolates every page of the
+extension**, not only the reader's. It grants nothing and reaches no site; it
+narrows what these pages may embed, and none of them embeds anything from
+another origin. The full browser suite — 119 tests across every page — passes
+with it on.
+
+Two things that fail silently are pinned. ONNX Runtime starts each thread by
+loading the file it lives in, so it is loaded as a file of its own; bundled into
+the reader, every thread would have started a second reader (the bench did
+exactly that, and hung). And the thread count is taken from
+`crossOriginIsolated` rather than assumed, so a page that is not isolated reads
+on one thread, as before.
+
+| Claim | Evidence |
+|-------|----------|
+| The built manifest isolates the pages; the runtime is one file of its own and is not inside the reader | `scripts/verify-dist.mjs` |
+| The same, in the source, and the worker is listening before it loads anything | `release-gates.test.ts` → "the reader’s threads" |
+| In the built extension the reader's page is isolated, and the runtime's file is loaded once per thread — from the package, with no CSP violation and nothing fetched | `e2e/ocr.spec.ts` → "reads on more than one CPU thread, because its page is isolated" |
+
+## Still open
+
+- **PAN, passbook and cheque, and the KCET papers are not measured.** The
+  rules for them are tested against fixtures of what a reading looks like, not
+  against the user's own documents. It needs pictures.
+- **Not yet pressed in the installed extension.** Every number above is from
+  the extension's own modules and its built package driven by tests; nobody has
+  yet reloaded it and pressed "Read details from this" on a saved document.
+- **One language box.** An SSLC card has three languages; the second and third
+  are read and kept in the subject list only.
+- **Kannada text is not read**, and **handwriting** is not read.

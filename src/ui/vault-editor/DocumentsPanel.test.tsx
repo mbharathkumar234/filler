@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { DocumentsPanel } from './DocumentsPanel';
-import { DOCUMENT_KEYS, labelFor } from '@/ui/lib/field-groups';
+import { DOCUMENT_GROUPS, DOCUMENT_KEYS, labelFor } from '@/ui/lib/field-groups';
 import type * as Client from '@/ui/lib/client';
 
 /** Derive the row's wording rather than restating it — one source of truth. */
@@ -24,13 +24,16 @@ const DISCARD_PHOTO = `Discard the ${PHOTO_LABEL} you chose`;
 
 const sent: { type: string; key?: string }[] = [];
 
+/** What `doc:list` answers with. Empty unless a test saves something first. */
+let listing: unknown[] = [];
+
 vi.mock('@/ui/lib/client', async () => {
   const actual = await vi.importActual<typeof Client>('@/ui/lib/client');
   return {
     ...actual,
     send: (request: { type: string; key?: string }) => {
       sent.push(request);
-      if (request.type === 'doc:list') return Promise.resolve([]);
+      if (request.type === 'doc:list') return Promise.resolve(listing);
       if (request.type === 'doc:preflight') return Promise.resolve({ warnings: [] });
       return Promise.resolve(null);
     },
@@ -44,6 +47,7 @@ function photo(name = 'passport.jpg') {
 
 beforeEach(() => {
   sent.length = 0;
+  listing = [];
   // jsdom decodes no images; the panel only wants the dimensions.
   vi.stubGlobal('createImageBitmap', () =>
     Promise.resolve({ width: 900, height: 1200, close() {} }),
@@ -57,7 +61,7 @@ afterEach(() => {
 
 async function pickPhoto(file = photo()) {
   const user = userEvent.setup();
-  render(<DocumentsPanel onLocked={() => {}} />);
+  render(<DocumentsPanel onLocked={() => {}} path={null} />);
   await waitFor(() => expect(sent.some((m) => m.type === 'doc:list')).toBe(true));
 
   const inputs = document.querySelectorAll<HTMLInputElement>('input[type="file"]');
@@ -114,5 +118,64 @@ describe('staged document upload', () => {
 
     expect(await screen.findByText(/too small/i)).toBeTruthy();
     expect(sent.filter((m) => m.type === 'doc:put')).toHaveLength(0);
+  });
+});
+
+/**
+ * Forty-odd slots, in folders.
+ *
+ * A collapsed folder must still hold its slots in the page: a `details` that
+ * rendered nothing until it was opened would hide a document from the
+ * browser's own search, and from anyone reading the panel with a screen
+ * reader — which is how a slot stops being found at all.
+ */
+describe('the document folders', () => {
+  it('shows every folder, and keeps a closed one’s slots in the page', async () => {
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await waitFor(() => expect(screen.getByText(PHOTO_LABEL)).toBeTruthy());
+
+    for (const group of DOCUMENT_GROUPS) {
+      expect(screen.getByText(group.title), group.title).toBeTruthy();
+    }
+
+    const optional = DOCUMENT_GROUPS.find((group) => group.optional === true)!;
+    const hidden = optional.keys[0]!;
+    expect(screen.getByText(labelFor(hidden))).toBeTruthy();
+  });
+
+  it('counts what is added in each folder, so a gap is visible without opening it', async () => {
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    const photos = DOCUMENT_GROUPS[0]!;
+    await waitFor(() =>
+      expect(screen.getByText(`— 0 of ${photos.keys.length} added`)).toBeTruthy(),
+    );
+  });
+});
+
+describe('reading a document', () => {
+  /*
+   * A face photograph has nothing printed on it. Offering to read one is an
+   * offer to spend five seconds recognising nothing and then say so.
+   */
+  it('offers no reading of a photograph, and offers it for a marks card', async () => {
+    const saved = [
+      { id: 'a', key: 'doc.photo', meta: { key: 'doc.photo', mime: 'image/jpeg', bytes: 120_000 } },
+      {
+        id: 'b',
+        key: 'doc.marksheet_10',
+        meta: { key: 'doc.marksheet_10', mime: 'image/jpeg', bytes: 400_000 },
+      },
+    ];
+    listing = saved;
+
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await waitFor(() => expect(sent.some((m) => m.type === 'doc:list')).toBe(true));
+
+    // Both documents are in the panel — so the single Read button below is
+    // the marks card's, not an artefact of one row failing to render.
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'Preview for this portal' })).toHaveLength(2),
+    );
+    expect(screen.getAllByRole('button', { name: 'Read details from this' })).toHaveLength(1);
   });
 });

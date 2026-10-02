@@ -140,6 +140,16 @@ export function ReviewRow({
             </button>
           </div>
         </div>
+      ) : row.tag === 'file' ? (
+        // A file box's contents cannot be typed or revealed; the document
+        // section below says what is in it and against which requirement.
+        <p className="mt-1 text-sm text-slate-900">
+          {row.value === 'file' ? (
+            'A document is attached — see “Documents this form wants” below.'
+          ) : (
+            <span className="italic text-slate-400">No document attached</span>
+          )}
+        </p>
       ) : (
         <div className="mt-1 flex items-baseline gap-2">
           <span

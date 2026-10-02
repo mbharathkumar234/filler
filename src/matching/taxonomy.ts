@@ -264,9 +264,193 @@ export const FIELD_KEYS = [
   'family.guardian_email',
   'contact.alt_email',
   'contact.official_email',
+  // documents — a student's own folders (§ vault structure).
+  //
+  // Certificates that exist once per qualification carry a level suffix, the
+  // way `doc.marksheet_10` always has. The bare key is the slot for a portal
+  // that names no level; `compose` moves a match onto the level when the
+  // question names one ("SSLC study certificate").
+  'doc.voter_id',
+  'doc.birth_certificate',
+  'doc.passport',
+  'doc.driving_licence',
+  'doc.passing_certificate',
+  'doc.passing_certificate_10',
+  'doc.passing_certificate_12',
+  'doc.study_certificate',
+  'doc.study_certificate_10',
+  'doc.study_certificate_12',
+  'doc.transfer_certificate',
+  'doc.transfer_certificate_10',
+  'doc.transfer_certificate_12',
+  'doc.migration_certificate',
+  'doc.migration_certificate_10',
+  'doc.migration_certificate_12',
+  'doc.conduct_certificate',
+  'doc.marksheet_11',
+  'doc.article_371j_certificate',
+
+  // documents — entrance exam and admission (KCET/KEA, and the same shapes
+  // COMEDK, JEE and NEET use)
+  'doc.entrance_application_form',
+  'doc.entrance_fee_receipt',
+  'doc.entrance_admission_ticket',
+  'doc.entrance_result',
+  'doc.entrance_rank_card',
+  'doc.entrance_verification_slip',
+  'doc.entrance_claim_verification',
+  'doc.entrance_option_entry',
+  'doc.seat_allotment_letter',
+  'doc.admission_fee_receipt',
+  'doc.admission_order',
+
+  // documents — biometric and scholarship
+  'doc.thumb_impression',
+  'doc.scholarship_application',
+
+  // the numbers printed on a certificate, which a portal asks for as text
+  // rather than as a file (Karnataka's RD numbers)
+  'eligibility.caste_certificate_number',
+  'eligibility.income_certificate_number',
+  'eligibility.article_371j_number',
+  // documents — the course being read for now, and the papers it issues
+  'doc.semester_marksheet',
+  'doc.consolidated_marksheet',
+  'doc.bonafide_certificate',
+  'doc.college_id_card',
+  'doc.admission_letter',
+
+  // documents — reservation, per category (the generic caste certificate above
+  // is what a portal asks for when it does not name the form)
+  'doc.caste_certificate_form_d',
+  'doc.ews_certificate',
+  'doc.obc_certificate',
+
+  // documents — work, skills and what a student has done besides study
+  'doc.resume',
+  'doc.internship_offer_letter',
+  'doc.internship_certificate',
+  'doc.experience_certificate',
+  'doc.recommendation_letter',
+  'doc.course_certificate',
+  'doc.training_certificate',
+  'doc.workshop_certificate',
+  'doc.professional_certification',
+  'doc.hackathon_certificate',
+  'doc.competition_certificate',
+  'doc.achievement_certificate',
+  'doc.project_report',
+  'doc.project_certificate',
+  'doc.publication',
+  'doc.patent_document',
+  'doc.sports_certificate',
+  'doc.ncc_certificate',
+  'doc.nss_certificate',
+  'doc.volunteering_certificate',
+
+  // documents — the trade route out of Class 10
+  'doc.iti_marksheet',
+  'doc.iti_certificate',
+
+  // a course still being read for: which semester, and which year of it
+  'education[].semester',
+  'education[].year_of_study',
+  'education.diploma.semester',
+  'education.diploma.year_of_study',
+  'education.undergraduate.semester',
+  'education.undergraduate.year_of_study',
+  'education.postgraduate.semester',
+  'education.postgraduate.year_of_study',
+
+  // the entrance exam, as the numbers a portal asks for rather than the papers
+  'entrance.exam_name',
+  'entrance.registration_number',
+  'entrance.roll_number',
+  'entrance.rank',
+  'entrance.score',
+  'entrance.year',
+
+  // the claim itself, beside the RD number printed on its certificate
+  'eligibility.article_371j',
+
+  /*
+   * The taluk, which every Karnataka portal asks for and no key held.
+   *
+   * An Aadhaar letter prints it as "Sub District", a caste certificate as
+   * "Taluk", a scholarship form as "Taluka" or "Tehsil". It sits between the
+   * village and the district and is not either of them, so filing it under
+   * `city` or `district` puts a wrong answer in a box that is checked against
+   * the certificate.
+   */
+  'address.permanent.taluk',
+  'address.correspondence.taluk',
+
+  /*
+   * Each subject's own marks.
+   *
+   * A marks card has a row per subject, and an entrance application asks for
+   * Physics, Chemistry and Mathematics by name. There was one `subjects` key,
+   * holding the names, and nowhere for the marks beside them.
+   *
+   * School levels only: a degree has forty subjects and a transcript, not a
+   * box each. `language` is whichever language the student sat — Kannada,
+   * Hindi, Sanskrit — because a form asks for "Language", not for one by name.
+   * The level-less `education[]` keys are what a form's wording matches;
+   * `compose` moves them onto the level the form names.
+   */
+  'education[].marks_physics',
+  'education[].marks_chemistry',
+  'education[].marks_mathematics',
+  'education[].marks_biology',
+  'education[].marks_computer_science',
+  'education[].marks_english',
+  'education[].marks_language',
+  'education[].marks_science',
+  'education[].marks_social_science',
+  'education.class_10.marks_mathematics',
+  'education.class_10.marks_science',
+  'education.class_10.marks_social_science',
+  'education.class_10.marks_english',
+  'education.class_10.marks_language',
+  'education.class_12.marks_physics',
+  'education.class_12.marks_chemistry',
+  'education.class_12.marks_mathematics',
+  'education.class_12.marks_biology',
+  'education.class_12.marks_computer_science',
+  'education.class_12.marks_english',
+  'education.class_12.marks_language',
 ] as const;
 
 export type FieldKey = (typeof FIELD_KEYS)[number];
+
+/** The subjects the vault has a marks box for. */
+export const MARK_SUBJECTS = [
+  'physics',
+  'chemistry',
+  'mathematics',
+  'biology',
+  'computer_science',
+  'english',
+  'language',
+  'science',
+  'social_science',
+] as const;
+
+export type MarkSubject = (typeof MARK_SUBJECTS)[number];
+
+/**
+ * The subject a key holds the marks of, or null for any other key.
+ *
+ * By name, never by the `marks_` prefix alone: `marks_obtained` — the total —
+ * begins the same way, and a rule that mistook it for a subject would hide the
+ * total from anyone who did not sit a subject called "obtained".
+ */
+export function markSubjectOf(key: string): MarkSubject | null {
+  const segment = key.slice(key.lastIndexOf('.') + 1);
+  if (!segment.startsWith('marks_')) return null;
+  const subject = segment.slice('marks_'.length);
+  return (MARK_SUBJECTS as readonly string[]).includes(subject) ? (subject as MarkSubject) : null;
+}
 
 /** The only value the matcher may return that is not a `FieldKey`. */
 export const UNKNOWN_KEY = 'unknown' as const;
@@ -532,6 +716,131 @@ export const SENSITIVITY: Readonly<Record<FieldKey, Sensitivity>> = {
   'family.guardian_email': 'medium',
   'contact.alt_email': 'medium',
   'contact.official_email': 'medium',
+  // documents — a student's own folders
+  'doc.voter_id': 'high',
+  'doc.birth_certificate': 'high',
+  'doc.passport': 'high',
+  'doc.driving_licence': 'high',
+  'doc.passing_certificate': 'medium',
+  'doc.passing_certificate_10': 'medium',
+  'doc.passing_certificate_12': 'medium',
+  'doc.study_certificate': 'medium',
+  'doc.study_certificate_10': 'medium',
+  'doc.study_certificate_12': 'medium',
+  'doc.transfer_certificate': 'medium',
+  'doc.transfer_certificate_10': 'medium',
+  'doc.transfer_certificate_12': 'medium',
+  'doc.migration_certificate': 'medium',
+  'doc.migration_certificate_10': 'medium',
+  'doc.migration_certificate_12': 'medium',
+  'doc.conduct_certificate': 'medium',
+  'doc.marksheet_11': 'medium',
+  // Names a caste and a region, like the caste certificate it rests on.
+  'doc.article_371j_certificate': 'high',
+
+  // documents — entrance exam and admission
+  'doc.entrance_application_form': 'medium',
+  'doc.entrance_fee_receipt': 'medium',
+  'doc.entrance_admission_ticket': 'medium',
+  'doc.entrance_result': 'medium',
+  'doc.entrance_rank_card': 'medium',
+  'doc.entrance_verification_slip': 'medium',
+  'doc.entrance_claim_verification': 'medium',
+  'doc.entrance_option_entry': 'medium',
+  'doc.seat_allotment_letter': 'medium',
+  'doc.admission_fee_receipt': 'medium',
+  'doc.admission_order': 'medium',
+
+  // A thumb impression is biometric: it is treated as strictly as a signature.
+  'doc.thumb_impression': 'high',
+  'doc.scholarship_application': 'medium',
+
+  'eligibility.caste_certificate_number': 'medium',
+  'eligibility.income_certificate_number': 'medium',
+  'eligibility.article_371j_number': 'medium',
+  // documents — the current course
+  'doc.semester_marksheet': 'medium',
+  'doc.consolidated_marksheet': 'medium',
+  'doc.bonafide_certificate': 'medium',
+  'doc.college_id_card': 'medium',
+  'doc.admission_letter': 'medium',
+
+  // documents — reservation, per category: as sensitive as the caste they name
+  'doc.caste_certificate_form_d': 'high',
+  'doc.ews_certificate': 'high',
+  'doc.obc_certificate': 'high',
+
+  // documents — work and skills. A resume carries an address and a phone
+  // number; a workshop certificate carries a name and a date.
+  'doc.resume': 'medium',
+  'doc.internship_offer_letter': 'medium',
+  'doc.internship_certificate': 'medium',
+  'doc.experience_certificate': 'medium',
+  'doc.recommendation_letter': 'medium',
+  'doc.course_certificate': 'low',
+  'doc.training_certificate': 'low',
+  'doc.workshop_certificate': 'low',
+  'doc.professional_certification': 'low',
+  'doc.hackathon_certificate': 'low',
+  'doc.competition_certificate': 'low',
+  'doc.achievement_certificate': 'low',
+  'doc.project_report': 'low',
+  'doc.project_certificate': 'low',
+  'doc.publication': 'low',
+  'doc.patent_document': 'low',
+  'doc.sports_certificate': 'low',
+  'doc.ncc_certificate': 'low',
+  'doc.nss_certificate': 'low',
+  'doc.volunteering_certificate': 'low',
+
+  'doc.iti_marksheet': 'medium',
+  'doc.iti_certificate': 'medium',
+
+  'education[].semester': 'low',
+  'education[].year_of_study': 'low',
+  'education.diploma.semester': 'low',
+  'education.diploma.year_of_study': 'low',
+  'education.undergraduate.semester': 'low',
+  'education.undergraduate.year_of_study': 'low',
+  'education.postgraduate.semester': 'low',
+  'education.postgraduate.year_of_study': 'low',
+
+  'entrance.exam_name': 'low',
+  'entrance.registration_number': 'medium',
+  'entrance.roll_number': 'medium',
+  'entrance.rank': 'low',
+  'entrance.score': 'low',
+  'entrance.year': 'low',
+
+  'eligibility.article_371j': 'medium',
+
+  // As sensitive as the district it sits beside: part of an address, not an
+  // identifier.
+  'address.permanent.taluk': 'medium',
+  'address.correspondence.taluk': 'medium',
+
+  // Marks are what a marks card prints; nothing here identifies anybody.
+  'education[].marks_physics': 'low',
+  'education[].marks_chemistry': 'low',
+  'education[].marks_mathematics': 'low',
+  'education[].marks_biology': 'low',
+  'education[].marks_computer_science': 'low',
+  'education[].marks_english': 'low',
+  'education[].marks_language': 'low',
+  'education[].marks_science': 'low',
+  'education[].marks_social_science': 'low',
+  'education.class_10.marks_mathematics': 'low',
+  'education.class_10.marks_science': 'low',
+  'education.class_10.marks_social_science': 'low',
+  'education.class_10.marks_english': 'low',
+  'education.class_10.marks_language': 'low',
+  'education.class_12.marks_physics': 'low',
+  'education.class_12.marks_chemistry': 'low',
+  'education.class_12.marks_mathematics': 'low',
+  'education.class_12.marks_biology': 'low',
+  'education.class_12.marks_computer_science': 'low',
+  'education.class_12.marks_english': 'low',
+  'education.class_12.marks_language': 'low',
 };
 
 /**

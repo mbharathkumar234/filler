@@ -4,6 +4,8 @@ import {
   __resetGuardForTests,
   arm,
   disarm,
+  disengage,
+  engage,
   guardState,
   installSubmitGuard,
   isSubmitish,
@@ -87,6 +89,7 @@ describe('blocking while unarmed', () => {
   beforeEach(() => {
     mount(FORM);
     installSubmitGuard(document);
+    engage();
   });
 
   it('blocks a click on the submit button', () => {
@@ -158,6 +161,7 @@ describe('the adversarial case: form.submit() from page script', () => {
   beforeEach(() => {
     mount(FORM);
     installSubmitGuard(document);
+    engage();
   });
 
   it('blocks a scripted form.submit() while unarmed', () => {
@@ -174,7 +178,9 @@ describe('the adversarial case: form.submit() from page script', () => {
 
   it('is idempotent — installing twice does not double-patch', () => {
     installSubmitGuard(document);
+    engage();
     installSubmitGuard(document);
+    engage();
     document.querySelector<HTMLFormElement>('#frm')!.submit();
     expect(guardState().blocked).toBe(1);
   });
@@ -184,6 +190,7 @@ describe('arming', () => {
   beforeEach(() => {
     mount(FORM);
     installSubmitGuard(document);
+    engage();
   });
 
   it('permits exactly the element the token names', () => {
@@ -227,6 +234,7 @@ describe('arming', () => {
     `);
     __resetGuardForTests();
     installSubmitGuard(document);
+    engage();
 
     arm(token());
     document.querySelector<HTMLElement>('#btnWithdraw')!.click();
@@ -258,6 +266,7 @@ describe('submitWithApproval', () => {
   beforeEach(() => {
     mount(FORM);
     installSubmitGuard(document);
+    engage();
   });
 
   it('clicks exactly the recorded element', () => {
@@ -346,5 +355,61 @@ describe('submitWithApproval', () => {
     const approval = token({ targetSelector: '#no-such-button' });
     arm(approval);
     expect(submitWithApproval(approval, document)).toBe(false);
+  });
+});
+
+/*
+ * A page with nothing of ours on it (§ the guard must not break the web).
+ *
+ * The bug this exists for: the login of an unrelated local project, and a
+ * government hostel portal, refused the user's own "Sign In" — on pages the
+ * extension had never filled — because the guard switched on the moment the
+ * content script arrived. P2 is about the extension's fill; a page it has not
+ * written to is not its business.
+ */
+describe('a page the extension has not filled', () => {
+  beforeEach(() => {
+    mount(FORM);
+    installSubmitGuard(document);
+  });
+
+  it('lets the user press their own submit button', () => {
+    const submitted = vi.fn((event: Event) => event.preventDefault());
+    const toast = vi.fn();
+    setToastHandler(toast);
+    document.querySelector('#frm')!.addEventListener('submit', submitted);
+
+    (document.querySelector('#btnFinalSubmit') as HTMLButtonElement).click();
+
+    expect(submitted).toHaveBeenCalledTimes(1);
+    expect(toast).not.toHaveBeenCalled();
+    expect(guardState().blocked).toBe(0);
+  });
+
+  it('lets Enter inside a form submit it', () => {
+    const blocked = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    document.querySelector('#area')!.closest('form')!.querySelector('input')?.dispatchEvent(blocked);
+    expect(blocked.defaultPrevented).toBe(false);
+  });
+
+  it('starts blocking the moment a fill engages it, and stops when the run ends', () => {
+    const submitted = vi.fn((event: Event) => event.preventDefault());
+    document.querySelector('#frm')!.addEventListener('submit', submitted);
+    const press = () => (document.querySelector('#btnFinalSubmit') as HTMLButtonElement).click();
+
+    engage();
+    press();
+    expect(submitted).not.toHaveBeenCalled();
+
+    disengage();
+    press();
+    expect(submitted).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops an approval when the run ends, so it cannot be spent afterwards', () => {
+    engage();
+    arm({ value: 'token', expiresAt: Date.now() + 60_000, targetSelector: '#btnFinalSubmit' });
+    disengage();
+    expect(guardState().armed).toBeNull();
   });
 });

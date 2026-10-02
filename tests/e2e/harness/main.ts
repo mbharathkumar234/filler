@@ -9,7 +9,16 @@
 
 import { derive, type DerivationResult } from '@/documents/derive';
 import { harvest } from '@/content/harvester';
-import { installSubmitGuard, guardState, setToastHandler, arm, __resetGuardForTests } from '@/content/submit-guard';
+import {
+  engage,
+  installSubmitGuard,
+  guardState,
+  setToastHandler,
+  arm,
+  __resetGuardForTests,
+  openUploadWindowWithApproval,
+  pressUploadInWindowWithApproval,
+} from '@/content/submit-guard';
 import { runFill, type PlannedWrite } from '@/content/fill-run';
 import { parseConstraint } from '@/documents/constraints';
 import { createRasterBackend } from '@/documents/raster';
@@ -23,6 +32,17 @@ import { applyEdit, collectValues, focusField } from '@/content/review-bridge';
 import { setRunStorage, type RunStorage } from '@/runtime/persistence';
 import type { FillPlan, PlannedField, SiteProfile } from '@/shared/types';
 import type { FieldKey } from '@/matching/taxonomy';
+import { isVisible } from '@/content/harvester';
+import { undoFill } from '@/content/fill-run';
+import type { FieldSnapshot } from '@/content/filler';
+import { findUploadButton, findUploadSlots } from '@/content/upload-slots';
+import { placeFileInWindow, probeUploadWindow, questionShowsFile } from '@/content/upload-window';
+import { pressUpload } from '@/content/upload-press';
+import { constraintForField, fileNameFor } from '@/documents/field-constraint';
+import { bandOf, matchForm } from '@/matching/deterministic';
+import { isDocumentKey, isFieldKey } from '@/matching/taxonomy';
+import { base64ToBytes, bytesToBase64 } from '@/shared/base64';
+import { runUploadBatch, type BatchPorts, type BatchSlot } from '@/background/upload-batch';
 
 import type { HarnessResult } from './harness.d';
 
@@ -90,11 +110,21 @@ function runHarvest() {
  */
 const toasts: string[] = [];
 
+/**
+ * The guard as it stands on a page carrying a fill.
+ *
+ * Engaged, because that is the page every adversarial guard spec is about: a
+ * portal holding the extension's values and trying to send them unapproved.
+ * The real content script engages at its first write; a page it has not
+ * written to leaves the guard dormant, and that half is proved against the
+ * shipped bundle in `extension.spec.ts`.
+ */
 function installGuard() {
   __resetGuardForTests();
   toasts.length = 0;
   setToastHandler((message) => toasts.push(message));
   installSubmitGuard(document);
+  engage();
   return { installed: true };
 }
 
@@ -522,6 +552,242 @@ async function fillFromProfile(values: Record<string, string>): Promise<number> 
 
   return run.records.filter((record) => record.ok).length;
 }
+
+// ---------------------------------------------------------------------------
+// § document attachment
+// ---------------------------------------------------------------------------
+
+/**
+ * Documents into a real page, through the same code the content script runs.
+ *
+ * jsdom has no `DataTransfer` and no `DragEvent`, so whether a file actually
+ * lands in a file box — and whether the page sees it land — can only be
+ * answered here. What stands in for the worker is only where the bytes come
+ * from.
+ */
+let documentSnapshots: FieldSnapshot[] = [];
+
+function byRef(ref: string): Element | null {
+  return document.getElementById(ref) ?? document.querySelector(`[name="${CSS.escape(ref)}"]`);
+}
+
+async function attachDocument(ref: string, base64: string, mime: string, filename: string) {
+  const run = await runFill(
+    [{ ref, key: 'doc', value: { bytes: base64ToBytes(base64), mime, filename } }],
+    { resolve: byRef, delay: () => Promise.resolve() },
+  );
+  documentSnapshots.push(...run.snapshots);
+  return run.records.map((r) => ({
+    ref: r.ref,
+    ok: r.ok,
+    strategy: r.strategy ?? '',
+    reason: r.reason ?? '',
+  }));
+}
+
+/**
+ * Fill's own document decisions, on whatever page this is (§ test portal).
+ *
+ * Harvest, match, the same band threshold `buildWrites` applies, the same
+ * neutral file name `prepareDocuments` gives — then the content script's real
+ * filler. Only the bytes are stand-ins. What comes back is which file each box
+ * on the page ended up holding, which is the question a portal that refused
+ * "an income certificate" in its photo box was really asking.
+ */
+async function fillLikeFill() {
+  const result = harvest(document);
+  const matches = matchForm(result.fields);
+
+  const writes: PlannedWrite[] = [];
+  for (const match of matches) {
+    if (match.key === 'unknown' || bandOf(match) === 'unmapped') continue;
+    if (!isFieldKey(match.key) || !isDocumentKey(match.key)) continue;
+    const mime = match.key === 'doc.photo' || match.key === 'doc.signature' ? 'image/jpeg' : 'application/pdf';
+    writes.push({
+      ref: match.fieldRef,
+      key: match.key,
+      value: {
+        bytes: new TextEncoder().encode(`stand-in for ${match.key}`),
+        mime,
+        filename: fileNameFor(match.key, mime),
+      },
+    });
+  }
+
+  await runFill(writes, {
+    resolve: (ref) => result.elements.get(ref) ?? null,
+    delay: () => Promise.resolve(),
+  });
+
+  return result.fields
+    .filter((field) => field.tag === 'file')
+    .map((field) => {
+      const box = result.elements.get(field.ref) as HTMLInputElement | undefined;
+      return { label: field.labelText, filename: box?.files?.[0]?.name ?? null };
+    });
+}
+
+/** The whole path: read the box's requirement, derive the real photo to it, attach. */
+async function deriveAndAttach(ref: string, url: string, sourceMime: string) {
+  const el = byRef(ref);
+  const result = harvest(document);
+  const field = result.fields.find((f) => result.elements.get(f.ref) === el);
+  const { constraint } = constraintForField({
+    labelText: field?.labelText ?? '',
+    ...(field?.requirementText === undefined ? {} : { requirementText: field.requirementText }),
+    ...(field?.accept === undefined ? {} : { accept: field.accept }),
+  });
+  const bytes = new Uint8Array(await (await fetch(url)).arrayBuffer());
+  const derived = await derive(createRasterBackend(), bytes, sourceMime, constraint);
+  if (!derived.ok) return { ok: false, reason: derived.reason, minBytes: 0, maxBytes: 0 };
+  const [record] = await attachDocument(ref, bytesToBase64(derived.bytes), derived.mime, 'photo.jpg');
+  return {
+    ok: record?.ok ?? false,
+    reason: record?.reason ?? '',
+    minBytes: constraint.minBytes ?? 0,
+    maxBytes: constraint.maxBytes ?? 0,
+  };
+}
+
+/**
+ * `chrome.scripting.executeScript`, as far as a page can play it.
+ *
+ * Each function runs from its own source text, evaluated inside the frame it
+ * targets — so it sees that frame's `document`, and a function reaching for
+ * anything outside itself breaks here as it would in the extension. Frames are
+ * numbered in the order they are first seen, as Chrome numbers them, and a
+ * frame that is hidden and shown again keeps its number.
+ *
+ * And it answers as Chrome answers: `null` — never `undefined` — for a frame
+ * that could not run the function (another origin's, or one where it threw),
+ * and `null` for a function that returned nothing. A real form always has such
+ * frames; a harness that skipped them hid the crash that stopped every hold
+ * after its first document.
+ */
+const frameNumbers = new WeakMap<Window, number>();
+let nextFrameNumber = 1;
+
+function allFrames(win: Window, out: { id: number; win: Window; reachable: boolean }[] = []) {
+  for (const el of Array.from(win.document.querySelectorAll('iframe'))) {
+    const child = el.contentWindow;
+    if (!child) continue;
+    if (!frameNumbers.has(child)) frameNumbers.set(child, nextFrameNumber++);
+    let reachable = true;
+    try {
+      void child.document.body;
+    } catch {
+      reachable = false;
+    }
+    out.push({ id: frameNumbers.get(child)!, win: child, reachable });
+    if (reachable) allFrames(child, out);
+  }
+  return out;
+}
+
+const pageInjector: BatchPorts['inject'] = async (target, func, args) => {
+  const all = [{ id: 0, win: window as Window, reachable: true }, ...allFrames(window)];
+  const chosen = target === 'all' ? all : all.filter((frame) => frame.id === target);
+  return chosen.map(({ id, win, reachable }) => {
+    if (!reachable) return { frameId: id, result: null };
+    try {
+      const run = (win as unknown as { eval(code: string): (...a: unknown[]) => unknown }).eval(
+        `(${func.toString()})`,
+      );
+      return { frameId: id, result: (run(...args) ?? null) as ReturnType<typeof func> | null };
+    } catch {
+      return { frameId: id, result: null };
+    }
+  });
+};
+
+/**
+ * The real batch — `upload-batch.ts`, the code the extension runs — against
+ * this page. Only the document bytes and the token are stood in for.
+ *
+ * Recorded selectors are stripped of ids on purpose: Google's buttons have no
+ * stable id, so the extension only ever has a positional path for them.
+ */
+let scannedSlots: ReturnType<typeof findUploadSlots>['slots'] | null = null;
+
+async function uploadAll(keysByLabel: Record<string, string>) {
+  const pdf = new Set(['doc.aadhaar_card', 'doc.pan_card', 'doc.marksheet_10']);
+  // Scanned once, like the panel: a later hold works from the same scan.
+  scannedSlots ??= findUploadSlots(document, isVisible).slots;
+  const slots: BatchSlot[] = scannedSlots
+    .filter((slot) => slot.kind === 'window')
+    .map((slot) => ({
+      ref: slot.ref,
+      label: slot.label,
+      selectors: slot.selectors.filter((selector) => !selector.startsWith('#')),
+      key: (keysByLabel[slot.label] ?? null) as FieldKey | null,
+      constraint: { mime: [] },
+    }));
+  return runUploadBatch(slots, {
+    inject: pageInjector,
+    variant: async (key) => ({
+      ok: true,
+      bytes: new TextEncoder().encode(`stand-in for ${key}`),
+      mime: pdf.has(key) ? 'application/pdf' : 'image/jpeg',
+      width: 0,
+      height: 0,
+      passedThrough: true,
+    }),
+    token: () => ({ value: 'e2e-approved', expiresAt: Date.now() + 90_000 }),
+  });
+}
+
+window.__documents = {
+  uploadAll,
+  fillLikeFill,
+  attach: attachDocument,
+  deriveAndAttach,
+  undo: () => {
+    const restored = undoFill(documentSnapshots, byRef);
+    documentSnapshots = [];
+    return restored;
+  },
+  file: (ref) => {
+    const box = byRef(ref) as HTMLInputElement | null;
+    const file = box?.files?.[0];
+    return file ? { name: file.name, type: file.type, size: file.size } : null;
+  },
+  harvest: () => {
+    const result = harvest(document);
+    return result.fields
+      .filter((f) => f.tag === 'file')
+      .map((f) => ({
+        id: result.elements.get(f.ref)?.id ?? '',
+        name: result.elements.get(f.ref)?.getAttribute('name') ?? '',
+        labelText: f.labelText,
+        accept: f.accept ?? '',
+        requirementText: f.requirementText ?? '',
+      }));
+  },
+  slots: () =>
+    findUploadSlots(document, isVisible).slots.map((slot) => ({
+      ref: slot.ref,
+      kind: slot.kind,
+      label: slot.label,
+      requirementText: slot.requirementText,
+    })),
+  uploadButton: (ref) => {
+    const box = byRef(ref);
+    return box ? (findUploadButton(box, document.getElementById('btnFinal'))?.button ?? null) : null;
+  },
+  pressUpload: (targetSelector, approvedRef) =>
+    pressUpload(
+      { value: 'e2e-approved', expiresAt: Date.now() + 90_000, targetSelector },
+      byRef(approvedRef),
+      document,
+    ),
+  windowFunctions: () => ({
+    probe: probeUploadWindow.toString(),
+    place: placeFileInWindow.toString(),
+    open: openUploadWindowWithApproval.toString(),
+    press: pressUploadInWindowWithApproval.toString(),
+    shows: questionShowsFile.toString(),
+  }),
+};
 
 window.__teach = {
   recordIdOnlyProfile,

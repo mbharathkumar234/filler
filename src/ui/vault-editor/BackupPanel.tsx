@@ -11,6 +11,7 @@ import {
   BACKUP_EXTENSION,
   EXPORT_WARNING,
   IMPORT_WARNING,
+  chunkBackup,
   type ImportResult,
 } from '@/vault/backup-format';
 import { errorMessage, send } from '@/ui/lib/client';
@@ -32,15 +33,32 @@ export function BackupPanel({ onImported }: Props) {
     setBusy(true);
     setError(null);
     try {
-      const text = await send({ type: 'vault:export' });
-      const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+      /*
+       * Collected piece by piece.
+       *
+       * The file holds the documents as well as the fields now, so it is far
+       * past what one message carries. The pieces are kept as separate strings
+       * and handed to `Blob` as they are: joining them into a single string
+       * first would need as much memory again, for nothing.
+       */
+      const { chunks, documents } = await send({ type: 'vault:export-begin' });
+      const parts: string[] = [];
+      for (let index = 0; index < chunks; index += 1) {
+        setStatus(`Writing the backup\u2026 ${index + 1} of ${chunks}`);
+        parts.push(await send({ type: 'vault:export-chunk', index }));
+      }
+
+      const url = URL.createObjectURL(new Blob(parts, { type: 'application/json' }));
       const stamp = new Date().toISOString().slice(0, 10);
       const anchor = document.createElement('a');
       anchor.href = url;
       anchor.download = `autofill-${stamp}${BACKUP_EXTENSION}`;
       anchor.click();
       URL.revokeObjectURL(url);
-      setStatus('Backup saved. Store it offline.');
+      setStatus(
+        `Backup saved, with ${documents} document${documents === 1 ? '' : 's'} inside it. ` +
+          'Store it offline.',
+      );
       setMode('idle');
     } catch (err) {
       setError(errorMessage(err));
@@ -54,20 +72,30 @@ export function BackupPanel({ onImported }: Props) {
     setBusy(true);
     setError(null);
     try {
+      // Sent in pieces, for the same reason the export arrives in them.
+      const parts = chunkBackup(pendingFile);
+      for (let index = 0; index < parts.length; index += 1) {
+        setStatus(`Reading the backup\u2026 ${index + 1} of ${parts.length}`);
+        await send({ type: 'vault:import-chunk', index, text: parts[index]! });
+      }
+
       const result = (await send({
-        type: 'vault:import',
-        text: pendingFile,
+        type: 'vault:import-commit',
         passphrase,
       })) as ImportResult | null;
 
       if (result === null) {
+        // The worker keeps the pieces, so another passphrase can be tried
+        // without reading the file again.
+        setStatus(null);
         setError('That passphrase did not open the backup file.');
         return;
       }
 
       const skipped = result.skippedKeys.length;
       setStatus(
-        `Restored ${result.imported} field${result.imported === 1 ? '' : 's'}` +
+        `Restored ${result.imported} field${result.imported === 1 ? '' : 's'} and ` +
+          `${result.documents} document${result.documents === 1 ? '' : 's'}` +
           (skipped > 0 ? `; skipped ${skipped} unknown key${skipped === 1 ? '' : 's'}.` : '.') +
           ' Unlock again with the backup’s passphrase.',
       );

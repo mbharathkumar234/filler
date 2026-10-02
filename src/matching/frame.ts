@@ -44,7 +44,7 @@
  * Pure: a `FieldDescriptor` in, a frame out. No DOM, no portal, no profile.
  */
 
-import type { FieldDescriptor } from '@/shared/types';
+import { NEARBY_SEPARATOR, type FieldDescriptor } from '@/shared/types';
 import { isFieldKey, type FieldKey } from './taxonomy';
 import { GENERIC_TOKENS } from './normalise';
 
@@ -56,6 +56,7 @@ export type AddressSection = 'permanent' | 'correspondence';
 export type Subject = 'self' | 'father' | 'mother' | 'guardian' | 'parent' | 'emergency';
 export type Variant = 'confirm' | 'alternate' | 'official' | 'personal';
 export type Domain = 'bank' | 'education';
+export type FamilyMember = 'father' | 'mother' | 'guardian';
 
 export interface LabelFrame {
   /** Whose value the box holds. `self` unless the label names someone else. */
@@ -68,6 +69,12 @@ export interface LabelFrame {
   level: string | undefined;
   /** For a word that is two fields ("Branch"): which subject area the form is in. */
   domain: Domain | undefined;
+  /**
+   * Every family member the box's own words name. Usually one; "Father or
+   * Guardian Name" names two, and a key for either is then the label's own
+   * reading rather than a stand-in to be re-homed.
+   */
+  members?: ReadonlySet<FamilyMember>;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +93,7 @@ const PERMANENT_HINT = /permanent|native|स्थायी/i;
  * every postgraduate field on the form.
  */
 const EDUCATION_LEVELS: ReadonlyArray<{ level: string; pattern: RegExp }> = [
-  { level: 'class_10', pattern: /\b(10th|x\s*th|class\s*10|std\s*10|sslc|matric(ulation)?|secondary(?!\s*higher))\b/i },
+  { level: 'class_10', pattern: /\b(10th|x\s*th|class\s*10|class\s*x(?![iv])|std\s*10|sslc|matric(ulation)?|secondary(?!\s*higher))\b/i },
   { level: 'class_12', pattern: /\b(12th|xii|x\s*ii|class\s*12|std\s*12|hsc|puc|pre.?university|intermediate|(higher|senior)\s*secondary)\b/i },
   { level: 'phd', pattern: /\b(ph\.?\s?d|doctoral|doctorate)\b/i },
   { level: 'professional_degree', pattern: /\bprofessional\s*(degree|qualification|course)\b/i },
@@ -246,6 +253,57 @@ function ownLevel(field: FieldDescriptor): string | undefined {
   return firstMatch(EDUCATION_LEVELS, context)?.level;
 }
 
+/**
+ * Words that make a heading a *section* heading.
+ *
+ * The distinction is the whole safety of carrying a subject down. "Father's
+ * Details" governs the boxes beneath it. "Father's Name", set as a heading by a
+ * form builder that gives every question one, is the question above — and a
+ * subject borrowed from it would re-home the applicant's own mobile number onto
+ * their father.
+ */
+const SECTION_WORDS =
+  /\b(details?|particulars|information|info|section|part|record|profile|data|background|contact)\b|विवरण/i;
+
+/** A heading that names an attribute is a question, whatever else it says. */
+const ATTRIBUTE_WORDS =
+  /\b(name|number|no|mobile|phone|e-?mail|date|dob|birth|occupation|income|address|age|aadhaar|pan|signature|photo)\b/i;
+
+/** Subject words and the punctuation between them: "Father / Guardian", "1. Mother's". */
+const SUBJECT_ONLY = /\b(father|mother|guardian|parent)(['’]?s)?\b|पिता|माता|अभिभावक|[\s\d.:()/|&,\-–—]+/gi;
+
+/** A heading about the applicant — or the applicant *and* someone else — carries nothing. */
+const APPLICANT_WORDS = /\b(applicant|candidate|student|personal|self)\b/i;
+
+/**
+ * The subject a section heading carries down to the boxes beneath it.
+ *
+ * `nearbyText` lists the governing headings nearest first, one per
+ * `NEARBY_SEPARATOR` (`resolveNearbyText`). Only the nearest decides: a nearer
+ * heading that names nobody ("Contact Details") ends the reach of an older one
+ * ("Father's Details") instead of letting it leak through — which is how a
+ * person reads the page.
+ */
+export function headingSubject(nearbyText: string): Exclude<Subject, 'self'> | undefined {
+  const nearest = nearbyText.split(NEARBY_SEPARATOR)[0]?.trim() ?? '';
+  if (nearest === '' || APPLICANT_WORDS.test(nearest) || ATTRIBUTE_WORDS.test(nearest)) {
+    return undefined;
+  }
+
+  const named = firstMatch(SUBJECTS, nearest)?.subject;
+  if (named === undefined) return undefined;
+
+  // "Father's Details" — or a heading that is nothing but the subject: "Mother".
+  const bare = nearest.replace(SUBJECT_ONLY, '') === '';
+  return bare || SECTION_WORDS.test(nearest) ? named : undefined;
+}
+
+const FAMILY_MEMBERS: ReadonlySet<Subject> = new Set<Subject>(['father', 'mother', 'guardian']);
+
+function isFamilyMember(subject: Subject): subject is FamilyMember {
+  return FAMILY_MEMBERS.has(subject);
+}
+
 export function readFrame(field: FieldDescriptor): LabelFrame {
   const identifiers = identifierWords(field);
   const own = `${field.labelText} ${field.placeholder ?? ''} ${identifiers}`;
@@ -257,17 +315,35 @@ export function readFrame(field: FieldDescriptor): LabelFrame {
   const education = EDUCATION_CONTEXT.test(context) || level !== undefined;
 
   return {
-    subject: firstMatch(SUBJECTS, own)?.subject ?? 'self',
+    // The box's own words first; a section heading speaks only for a box that
+    // names nobody. "Mother's Name" under "Father's Details" is the mother's.
+    subject: firstMatch(SUBJECTS, own)?.subject ?? headingSubject(field.nearbyText) ?? 'self',
     variant: firstMatch(VARIANTS, own)?.variant ?? null,
     section: ownSection(field),
     level,
     domain: bank && !education ? 'bank' : education && !bank ? 'education' : undefined,
+    members: new Set(
+      SUBJECTS.filter((entry) => entry.pattern.test(own))
+        .map((entry) => entry.subject)
+        .filter(isFamilyMember),
+    ),
   };
 }
 
 // ---------------------------------------------------------------------------
 // Composing
 // ---------------------------------------------------------------------------
+
+/**
+ * Levels that have a document of their own, and the suffix that names it.
+ *
+ * Only the school levels: a degree's certificates are one per course, not one
+ * per level, and they keep their own keys.
+ */
+const DOCUMENT_LEVEL_SUFFIX: Readonly<Record<string, string | undefined>> = {
+  class_10: '_10',
+  class_12: '_12',
+};
 
 /**
  * The canonical key this frame gives an attribute — or null when it has none.
@@ -301,7 +377,44 @@ export function compose(key: FieldKey, frame: LabelFrame, carried?: AddressSecti
     if (isFieldKey(retargeted)) k = retargeted;
   }
 
+  /*
+   * The same certificate, issued once per qualification.
+   *
+   * A student holds a study certificate and a transfer certificate for Class
+   * 10 and another pair for PUC, and only the question says which is wanted.
+   * The bare key is the slot for a portal that names no level; naming one
+   * moves the match onto that level's document, exactly as the education
+   * block above does with its fields. The suffix is the one the document keys
+   * have always used (`doc.marksheet_10`).
+   */
+  if (k.startsWith('doc.') && frame.level !== undefined) {
+    const suffix = DOCUMENT_LEVEL_SUFFIX[frame.level];
+    const retargeted = suffix === undefined ? k : `${k}${suffix}`;
+    if (isFieldKey(retargeted)) k = retargeted;
+  }
+
   const subject = frame.subject;
+
+  /*
+   * A key that already names a family member, meeting a box about a different
+   * one. "Mother's Occupation" finds `family.father_occupation`, because the
+   * dictionary's occupation phrases are the father's. Re-home it to the member
+   * the box is about when that key exists; otherwise there is nowhere to keep
+   * it, and the father's value must not stand in for the mother's.
+   */
+  const member = /^family\.(father|mother|guardian)_(.+)$/.exec(k);
+  if (
+    member &&
+    isFamilyMember(subject) &&
+    member[1] !== subject &&
+    // A label naming both people ("Father or Guardian Name") means the
+    // guardian reading is its own, not a stand-in for the father's.
+    !frame.members?.has(member[1] as FamilyMember)
+  ) {
+    const rehomed = `family.${subject}_${member[2]}`;
+    return isFieldKey(rehomed) ? rehomed : null;
+  }
+
   if (subject !== 'self' && APPLICANT_ATTRIBUTES.has(k)) {
     return SUBJECT_HOMES[subject][k] ?? null;
   }
@@ -330,9 +443,12 @@ const SUBJECT_WORDS: Readonly<Record<Exclude<Subject, 'self'>, string>> = {
  * doing its job — and tells the user the box is theirs to fill.
  */
 export function unhousedReason(key: FieldKey, frame: LabelFrame): string {
-  const attribute = (key.split('.').pop() ?? key).replace(/_/g, ' ').replace(/^dob$/, 'date of birth');
+  const attribute = (key.split('.').pop() ?? key)
+    .replace(/^(father|mother|guardian)_/, '')
+    .replace(/_/g, ' ')
+    .replace(/^dob$/, 'date of birth');
   if (frame.subject !== 'self') {
-    return `this box is about ${SUBJECT_WORDS[frame.subject]}, not you, and there is no saved ${attribute} for them — left for you to fill`;
+    return `this box is about ${SUBJECT_WORDS[frame.subject]}, and there is no saved ${attribute} for them — left for you to fill`;
   }
   return `this box asks for ${frame.variant ?? 'another'} ${attribute}, which is not saved separately — left for you to fill`;
 }

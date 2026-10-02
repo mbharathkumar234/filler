@@ -25,7 +25,8 @@ export type FillStrategy =
   | 'option-fuzzy'
   | 'radio-label'
   | 'checkbox'
-  | 'file';
+  | 'file'
+  | 'drop';
 
 export interface FillOutcome {
   ok: boolean;
@@ -298,10 +299,7 @@ export function fillFile(
   }
 
   try {
-    const file = new win.File([bytes as BlobPart], filename, { type: mime });
-    const transfer = new win.DataTransfer();
-    transfer.items.add(file);
-    el.files = transfer.files;
+    el.files = transferOf(win, bytes, mime, filename).files;
     dispatchEdit(el);
 
     const attached = el.files?.length === 1 && el.files[0]?.name === filename;
@@ -315,6 +313,62 @@ export function fillFile(
     return {
       ok: false,
       reason: `could not attach the file: ${error instanceof Error ? error.message : 'unknown error'}`,
+    };
+  }
+}
+
+function transferOf(
+  win: Window & typeof globalThis,
+  bytes: Uint8Array,
+  mime: string,
+  filename: string,
+): DataTransfer {
+  const transfer = new win.DataTransfer();
+  transfer.items.add(new win.File([bytes as BlobPart], filename, { type: mime }));
+  return transfer;
+}
+
+/**
+ * Drop a document onto a drag-and-drop area that has no file box of its own.
+ *
+ * The same `DataTransfer` a real drag carries, delivered as the three events a
+ * drop widget listens for. Success is read from the widget's own answer: a
+ * handler that took the file cancels the `drop`, because otherwise the browser
+ * would navigate away to display it. A drop nobody cancelled went nowhere.
+ *
+ * There is no read-back — the widget keeps the file in its own state — and no
+ * undo. Some widgets start uploading the moment a file lands; that is the
+ * site's code, just as some sites check a value the moment it is typed.
+ */
+export function fillDrop(
+  el: Element,
+  bytes: Uint8Array,
+  mime: string,
+  filename: string,
+): FillOutcome {
+  const win = el.ownerDocument.defaultView;
+  if (!win || typeof win.DataTransfer === 'undefined' || typeof win.DragEvent === 'undefined') {
+    return { ok: false, reason: 'this browser will not allow dropping a file programmatically' };
+  }
+
+  try {
+    const transfer = transferOf(win, bytes, mime, filename);
+    let taken = false;
+    for (const type of ['dragenter', 'dragover', 'drop']) {
+      const event = new win.DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: transfer });
+      const uncancelled = el.dispatchEvent(event);
+      if (type === 'drop') taken = !uncancelled;
+    }
+    return {
+      ok: taken,
+      strategy: 'drop',
+      readBack: taken ? filename : '',
+      ...(taken ? {} : { reason: 'nothing on the page took the dropped file' }),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: `could not drop the file: ${error instanceof Error ? error.message : 'unknown error'}`,
     };
   }
 }
@@ -338,10 +392,21 @@ export interface FileValue {
 export function fillElement(el: Element, value: string | FileValue): FillOutcome {
   const tag = el.tagName.toLowerCase();
 
-  if (tag === 'select') return fillSelect(el as HTMLSelectElement, value as string);
+  if (typeof value !== 'string') {
+    if (tag === 'input' && (el.getAttribute('type') ?? '').toLowerCase() === 'file') {
+      return fillFile(el as HTMLInputElement, value.bytes, value.mime, value.filename);
+    }
+    if (tag === 'input' || tag === 'select' || tag === 'textarea') {
+      return { ok: false, reason: 'a text field needs text, not a document' };
+    }
+    // Anything else a document was aimed at is a drop area (§ document attachment).
+    return fillDrop(el, value.bytes, value.mime, value.filename);
+  }
+
+  if (tag === 'select') return fillSelect(el as HTMLSelectElement, value);
 
   if (tag === 'textarea') {
-    return fillText(el as HTMLTextAreaElement, value as string);
+    return fillText(el as HTMLTextAreaElement, value);
   }
 
   if (tag === 'input') {
@@ -349,14 +414,7 @@ export function fillElement(el: Element, value: string | FileValue): FillOutcome
     const type = (input.getAttribute('type') ?? 'text').toLowerCase();
 
     if (type === 'file') {
-      if (typeof value === 'string') {
-        return { ok: false, reason: 'a file input needs a document, not text' };
-      }
-      return fillFile(input, value.bytes, value.mime, value.filename);
-    }
-
-    if (typeof value !== 'string') {
-      return { ok: false, reason: 'a text field needs text, not a document' };
+      return { ok: false, reason: 'a file input needs a document, not text' };
     }
 
     if (type === 'radio') return fillRadioGroup(input, value);
@@ -375,22 +433,42 @@ export interface FieldSnapshot {
   ref: string;
   value: string;
   checked?: boolean;
+  /**
+   * A file box's previous contents. A `FileList` rather than `.value`: a file
+   * box's value can only ever be set to empty, so restoring the user's own
+   * pick means handing the list itself back.
+   */
+  files?: FileList | null;
+  /** Not a form control — a drop area. Nothing of ours to put back. */
+  inert?: true;
 }
+
+const FORM_CONTROLS = new Set(['input', 'select', 'textarea']);
 
 /** Capture what a field held before we touched it (§Phase 5 Should: Undo). */
 export function snapshot(ref: string, el: Element): FieldSnapshot {
+  if (!FORM_CONTROLS.has(el.tagName.toLowerCase())) return { ref, value: '', inert: true };
   const input = el as HTMLInputElement;
+  if (input.type === 'file') return { ref, value: '', files: input.files };
   const snap: FieldSnapshot = { ref, value: input.value ?? '' };
   if (input.type === 'radio' || input.type === 'checkbox') snap.checked = input.checked;
   return snap;
 }
 
-export function restore(el: Element, snap: FieldSnapshot): void {
+/** Put a field back. False when there was nothing we could restore. */
+export function restore(el: Element, snap: FieldSnapshot): boolean {
+  if (snap.inert) return false;
   const input = el as HTMLInputElement;
-  if (snap.checked !== undefined) {
+  if (snap.files !== undefined) {
+    // Setting `.value` to anything but '' throws on a file box, which is how
+    // Undo used to break on one that held a file.
+    if (snap.files && snap.files.length > 0) input.files = snap.files;
+    else input.value = '';
+  } else if (snap.checked !== undefined) {
     input.checked = snap.checked;
   } else {
     setNativeValue(input, snap.value);
   }
   dispatchEdit(el);
+  return true;
 }

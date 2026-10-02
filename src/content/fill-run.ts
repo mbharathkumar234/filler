@@ -209,8 +209,7 @@ export function undoFill(
   for (const snap of snapshots) {
     const el = resolve(snap.ref);
     if (!el) continue;
-    restore(el, snap);
-    restored += 1;
+    if (restore(el, snap)) restored += 1;
   }
   return restored;
 }

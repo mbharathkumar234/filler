@@ -33,7 +33,7 @@ import type { FieldKey } from '@/matching/taxonomy';
 import type { ShapeReading } from './trim';
 import { READABLE_SOURCE_MIMES, unreadableFormatLabel } from './constraints';
 
-export type IntakeRole = 'photo' | 'signature' | 'document';
+export type IntakeRole = 'photo' | 'signature' | 'thumb' | 'document';
 
 /**
  * `blocker` — the derived file will be rejected or useless; replace the source.
@@ -114,6 +114,22 @@ export const ROLE_TARGETS: Readonly<Record<IntakeRole, RoleTarget>> = {
     inkAspect: { min: 0.45, max: 10 },
     noun: 'signature',
   },
+  thumb: {
+    /*
+     * A thumb impression is a signature's sibling, not a signature.
+     *
+     * Portals ask for it at much the same size, but the ink is a print: about
+     * as tall as it is wide, and a signature's landscape window would reject
+     * every correct one. The floor is lower than a signature's for the same
+     * reason — a thumbprint is a smaller mark, so a smaller scan of it is
+     * still all the detail there is.
+     */
+    minWidth: 200,
+    minHeight: 200,
+    aspect: { min: 0.5, max: 2.0 },
+    inkAspect: { min: 0.4, max: 2.5 },
+    noun: 'thumb impression',
+  },
   document: {
     // A certificate has to stay legible; shape is whatever the paper was.
     minWidth: 600,
@@ -128,7 +144,23 @@ export const ROLE_TARGETS: Readonly<Record<IntakeRole, RoleTarget>> = {
 export function roleFor(key: FieldKey): IntakeRole {
   if (key === 'doc.photo') return 'photo';
   if (key === 'doc.signature') return 'signature';
+  if (key === 'doc.thumb_impression') return 'thumb';
   return 'document';
+}
+
+/**
+ * Whether a derivation may trim this document down to where its ink is.
+ *
+ * Right for anything drawn on paper — a signature, a thumbprint, a scanned
+ * certificate — where the margin really is blank and the portal's box should
+ * be planned against what is written. Wrong for a photograph, which has no
+ * blank paper: the background above the head is part of what a portal asks
+ * for, and on a light wall the top of somebody's hair reads as margin. A test
+ * portal that asked only for a JPEG of 20–200 KB received a photo with the
+ * top of the head cut off, for exactly that reason.
+ */
+export function trimsToInk(role: IntakeRole): boolean {
+  return role !== 'photo';
 }
 
 /**

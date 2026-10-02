@@ -141,7 +141,17 @@ describe('what a compromised content script cannot ask for', () => {
   it('cannot reach the vault, the documents, or an approval', () => {
     // Named individually because these are the ones whose compromise matters
     // most, and a regression in the set should read as a deleted test.
-    for (const type of ['vault:list', 'vault:export', 'vault:set', 'doc:list', 'approval:grant', 'approval:submit']) {
+    for (const type of [
+      'vault:list',
+      'vault:export-begin',
+      'vault:export-chunk',
+      'vault:import-chunk',
+      'vault:import-commit',
+      'vault:set',
+      'doc:list',
+      'approval:grant',
+      'approval:submit',
+    ]) {
       expect(() => assertSenderMayRequest(type, contentScript()), type).toThrow();
     }
   });
@@ -205,6 +215,8 @@ describe('the privileged list is complete, or the build fails', () => {
     'fill:apply': 'the worker intersects these against its own plan',
     'fill:refill': 'same, and the refs are checked against the run',
     'fill:submit': 'carries an approval token that is verified separately',
+    'fill:press-upload':
+      'worker to page only, carrying a token the worker already burned; the worker has no handler for it',
     'fill:undo': 'reverts our own writes',
     'field:focus': 'moves the caret on the page the script already controls',
     'field:apply-edit': 'writes a value the panel supplied',
@@ -212,6 +224,9 @@ describe('the privileged list is complete, or the build fails', () => {
     'teach:pick-start': 'starts the picker',
     'teach:pick-stop': 'stops the picker',
     'run:hello': 'announces a run',
+    'run:active': 'answers yes or no for the sender’s own tab; no user data',
+    'run:release':
+      'worker to page only, telling a page its run is over; the worker has no handler for it',
     'run:state': 'reports state the worker already knows',
     'run:continue': 'the user pressed continue',
     'run:abort': 'the user aborted; failing closed is the safe direction',

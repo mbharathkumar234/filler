@@ -1,6 +1,6 @@
 # Privacy policy — AutoFill Assistant
 
-Last updated: 2026-08-26. This describes what the software actually does; if you
+Last updated: 2026-09-18. This describes what the software actually does; if you
 find a discrepancy between this document and the behaviour, the behaviour is a
 bug and the document is the specification.
 
@@ -53,6 +53,42 @@ Where a number carries a check digit — Aadhaar does — the extension verifies
 and tells you whether it passed. A number that fails is not offered for saving
 at all; you are told it was probably misread.
 
+## Putting your documents into forms
+
+When a form asks for a document — a photograph, a signature, an Aadhaar card —
+the extension fits your saved copy to what the form says it accepts (size,
+format, dimensions) and puts it into the form's own upload box, the same way it
+types your details into the form's text boxes. The fitting happens on your
+device, in the background worker that holds your key.
+
+- **The extension sends nothing.** The site receives a document when the form
+  sends it, exactly as if you had chosen the file yourself. Some sites start
+  uploading the moment a file lands in their box; that is the site's own code,
+  as with sites that check a value while you type it.
+- **The name the site sees is the kind of document** — `photo.jpg`,
+  `aadhaar_card.pdf` — never your original filename, which is not stored.
+- **A site's own Upload button is pressed only after you approve it**, one
+  document at a time, with the same hold-to-approve as the final submit. Where
+  that button sends the whole form, the extension first empties the form's
+  other upload boxes, so only the document you approved goes with it.
+- **Upload windows** (Google Forms' "Add file"): a document is attached there
+  only by uploading it to the form owner's Google Drive, so it takes your
+  approval first. One press-and-hold approves the form's documents; the
+  extension then, one at a time, presses each question's Add file, puts the
+  document in, and waits for the upload to finish. Or do it one document at a
+  time with "Put … in the upload window". Either way nothing is uploaded
+  without a deliberate action of yours.
+- **A copy on disk, only if you ask.** If a site's upload window will not take
+  the file, the panel can prepare a copy for you to choose by hand. Saving it
+  writes an unencrypted copy to your Downloads folder, which stays there until
+  you delete it. The panel says so beside the link.
+- **High-sensitivity documents ask for your passphrase again** — a signature,
+  an Aadhaar card, a PAN card — if it has been a few minutes since you last
+  entered it, exactly as an Aadhaar *number* does.
+
+The audit log records which kind of document went into which form, and which
+uploads you approved — never a document's contents or its name.
+
 ## What leaves your device
 
 **One thing, and only if you turn it on.** If you supply an Anthropic API key,
@@ -74,7 +110,8 @@ If you do not set a key, the extension makes no network requests whatsoever.
 
 ## What we never do
 
-- We never submit a form without an explicit approval action from you.
+- We never submit a form without an explicit approval action from you, and we
+  never press a site's own Upload button without one either.
 - We never read, solve, or bypass a CAPTCHA, a one-time code, or an electronic
   signature. Those steps are yours; the extension stops and waits.
 - We never fill a password field.
@@ -99,6 +136,7 @@ You are also responsible for the terms of the sites you use it on.
 | `scripting` | To inject the form-reading code into that tab on that click. Nothing is injected automatically. |
 | `storage` | The local stores in the table above. |
 | `sidePanel` | The panel is the extension's entire interface. |
+| `offscreen` | To read text out of a document you asked it to read. The reader runs in a worker that a service worker cannot start, so it is started from one of the extension's own hidden pages, which is closed again afterwards. No document leaves the device. |
 
 **No `host_permissions`.** The extension has no standing access to any site.
 
@@ -108,7 +146,9 @@ moment you click. This exists for one specific case: if a portal reloads the
 page with your values already in it and submits them automatically, the guard
 would otherwise arrive too late. Nothing is granted unless you press the button,
 it applies to that one site, and the panel lists every site you have granted
-with a way to take it back.
+with a way to take it back. The same per-site access is what the panel asks for
+if a form's upload window is served by another site, and only when you press the
+button to allow it.
 **No declared content scripts** — nothing runs on a page until you ask it to.
 **No `tabs`, `webRequest`, `cookies`, `history`, or `downloads`.**
 
@@ -122,6 +162,18 @@ with a way to take it back.
 Uninstalling removes all of it. There is no copy anywhere else, which also
 means **there is no recovery**: if you forget your passphrase, your vault is
 gone. Export a backup and keep it somewhere safe.
+
+The setup questions — your board, what you studied, your category and any
+reservation you claim — are stored **sealed in the vault**, like everything
+else, because the answers say something about you. They decide only what this
+panel offers you; no form is ever filled from them.
+
+A backup holds the saved details **and the saved documents**, each still
+encrypted exactly as the vault holds them — the export never decrypts
+anything, so no plaintext copy of a document exists at any point. The file
+opens only with the passphrase the vault had when it was written, and it is as
+large as the documents inside it. The derived, portal-sized copies are left
+out: they are a cache, and they rebuild from the originals.
 
 ## Contact
 

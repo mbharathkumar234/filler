@@ -10,6 +10,7 @@ function facts(overrides: Partial<SetupFacts> = {}): SetupFacts {
     usableDocuments: 0,
     unusableDocuments: 0,
     hasReviewedFill: false,
+    pathAnswered: false,
     ...overrides,
   };
 }
@@ -28,6 +29,7 @@ describe('setup progress is read from the vault, not from clicks', () => {
         filledCoreKeys: [...CORE_KEYS],
         usableDocuments: 2,
         hasReviewedFill: true,
+        pathAnswered: true,
       }),
     );
     expect(steps.every((s) => s.done)).toBe(true);
@@ -66,7 +68,14 @@ describe('the checklist knows when to leave', () => {
   });
 
   it('goes once everything is done, without being dismissed', () => {
-    const steps = stepsFor(facts({ filledCoreKeys: [...CORE_KEYS], usableDocuments: 1, hasReviewedFill: true }));
+    const steps = stepsFor(
+      facts({
+        filledCoreKeys: [...CORE_KEYS],
+        usableDocuments: 1,
+        hasReviewedFill: true,
+        pathAnswered: true,
+      }),
+    );
     expect(shouldShowChecklist(steps, false)).toBe(false);
   });
 
@@ -75,19 +84,36 @@ describe('the checklist knows when to leave', () => {
   });
 
   it('points at the first unfinished step', () => {
-    const steps = stepsFor(facts({ vaultReady: true, filledCoreKeys: [...CORE_KEYS] }));
+    const steps = stepsFor(
+      facts({ vaultReady: true, pathAnswered: true, filledCoreKeys: [...CORE_KEYS] }),
+    );
     expect(currentStep(steps)!.id).toBe('documents');
   });
 
   it('points nowhere when there is nothing left', () => {
-    const steps = stepsFor(facts({ filledCoreKeys: [...CORE_KEYS], usableDocuments: 1, hasReviewedFill: true }));
+    const steps = stepsFor(
+      facts({
+        filledCoreKeys: [...CORE_KEYS],
+        usableDocuments: 1,
+        hasReviewedFill: true,
+        pathAnswered: true,
+      }),
+    );
     expect(currentStep(steps)).toBeUndefined();
   });
 });
 
 describe('the steps themselves', () => {
-  it('are the four the plan names, in the order it names them', () => {
-    expect(stepsFor(facts()).map((s) => s.id)).toEqual(['vault', 'profile', 'documents', 'first-fill']);
+  it('are the five, in the order they have to happen', () => {
+    // The path comes before the details, because it decides which details are
+    // asked for; both come before the documents they name.
+    expect(stepsFor(facts()).map((s) => s.id)).toEqual([
+      'vault',
+      'path',
+      'profile',
+      'documents',
+      'first-fill',
+    ]);
   });
 
   it('describe what the user gets, and say it without jargon', () => {

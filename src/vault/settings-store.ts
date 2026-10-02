@@ -18,6 +18,14 @@ import type { StoredSetting, VaultDb } from './db';
 
 export const API_KEY_SETTING = 'llm.apiKey';
 export const MODEL_SETTING = 'llm.model';
+/**
+ * The user's own academic path (§ vault structure), as JSON.
+ *
+ * Sealed like every other setting, because it names a reservation category.
+ * It decides which blocks and slots the editor offers, so it is configuration
+ * rather than a value any form is ever filled from.
+ */
+export const PATH_SETTING = 'vault.path';
 
 export async function putSetting(
   db: VaultDb,

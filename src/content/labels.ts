@@ -13,6 +13,8 @@
  * network. A portal must not be able to tell that we looked.
  */
 
+import { NEARBY_SEPARATOR } from '@/shared/types';
+
 /** Longest label we will keep. Beyond this it is prose, not a label. */
 const MAX_LABEL = 120;
 
@@ -35,6 +37,8 @@ export interface ResolvedLabel {
     | 'placeholder'
     | 'title'
     | 'name-attribute'
+    /** A file box with no label of its own, named by its question's caption. */
+    | 'question-heading'
     | 'none';
 }
 
@@ -99,7 +103,7 @@ function collectText(node: Node, parts: string[]): void {
   if (separates) parts.push(' ');
 }
 
-function textOf(el: Element | null): string {
+export function textOf(el: Element | null): string {
   if (!el) return '';
   // Exclude nested form controls: a wrapping <label> containing the input
   // would otherwise pick up the input's own value or option text.
@@ -296,44 +300,55 @@ export function resolveLabel(el: Element): ResolvedLabel {
  * The nearest section heading, plus any legend or fieldset caption. This is
  * what distinguishes "Address Line 1" under *Permanent Address* from the
  * identical field under *Correspondence Address*.
+ *
+ * Nearest first, joined by `NEARBY_SEPARATOR`. The matcher lets the nearest
+ * heading decide whose details a box asks for (`frame.ts`), so the order is
+ * load-bearing, not cosmetic.
  */
 export function resolveNearbyText(el: Element): string {
+  const fieldset = el.closest('fieldset');
+  const legendEl = fieldset?.querySelector('legend') ?? null;
+  const headingEl = findPrecedingHeading(el);
+
+  // A heading inside the fieldset sits between its legend and the field, so it
+  // is the nearer of the two; a heading outside the fieldset is further away.
+  const headingIsNearer = headingEl !== null && fieldset !== null && fieldset.contains(headingEl);
+  const ordered = headingIsNearer ? [headingEl, legendEl] : [legendEl, headingEl];
+
   const parts: string[] = [];
-
-  const legend = el.closest('fieldset')?.querySelector('legend');
-  if (legend) {
-    const text = textOf(legend);
-    if (text) parts.push(text);
+  for (const node of ordered) {
+    const text = node ? textOf(node) : '';
+    if (text && !parts.includes(text)) parts.push(text);
   }
-
-  const heading = findPrecedingHeading(el);
-  if (heading && !parts.includes(heading)) parts.push(heading);
-
-  return cleanLabel(parts.join(' — '));
+  return cleanLabel(parts.join(NEARBY_SEPARATOR));
 }
 
-function findPrecedingHeading(el: Element): string {
+const HEADINGS = 'h1, h2, h3, h4, h5, h6';
+
+/**
+ * The nearest heading before `el`, walking outwards through its ancestors.
+ *
+ * Nearest means the *last* heading in a preceding block, not the first. A block
+ * holding "Father's Details" and then "Mother's Details" is followed by the
+ * mother's boxes; taking the first heading put them under the father.
+ */
+function findPrecedingHeading(el: Element): Element | null {
   let node: Element | null = el;
   let depth = 0;
 
   while (node && depth < SECTION_DEPTH) {
     let sibling: Element | null = node.previousElementSibling;
     while (sibling) {
-      if (/^h[1-6]$/i.test(sibling.tagName)) {
-        const text = textOf(sibling);
-        if (text) return text;
-      }
-      // Section headings are often styled divs, not <h*>.
-      const heading = sibling.querySelector?.('h1, h2, h3, h4, h5, h6');
-      if (heading) {
-        const text = textOf(heading);
-        if (text) return text;
-      }
+      if (/^h[1-6]$/i.test(sibling.tagName) && textOf(sibling)) return sibling;
+      // Section headings are often inside styled divs, not <h*> siblings.
+      const inner = [...(sibling.querySelectorAll?.(HEADINGS) ?? [])].reverse();
+      const found = inner.find((heading) => textOf(heading) !== '');
+      if (found) return found;
       sibling = sibling.previousElementSibling;
     }
     node = node.parentElement;
     depth += 1;
   }
 
-  return '';
+  return null;
 }

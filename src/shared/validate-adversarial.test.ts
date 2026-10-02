@@ -53,7 +53,25 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
     optional: ['fromDocument'],
   },
   'vault:delete': { payload: { key: 'identity.full_name' } },
-  'vault:import': { payload: { text: '{}', passphrase: 'pass' } },
+  'vault:export-chunk': { payload: { index: 0 } },
+  'vault:import-chunk': { payload: { index: 0, text: '{}' } },
+  'vault:import-commit': { payload: { passphrase: 'pass' } },
+  'vault:set-path': {
+    payload: {
+      path: {
+        version: 1,
+        state: 'karnataka',
+        board10: 'cbse',
+        afterTen: 'puc',
+        stream: 'pcmb',
+        now: 'undergraduate',
+        degreeFamily: 'engineering',
+        entrance: ['kcet'],
+        category: 'st',
+        claims: ['371j'],
+      },
+    },
+  },
 
   'doc:put': {
     payload: {
@@ -66,9 +84,15 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
     },
   },
   'doc:delete': { payload: { id: 'doc-1' } },
+  // A rendered page of a document, on its way to the reader.
+  'ocr:recognise': { payload: { image: 'aGVsbG8=', mime: 'image/jpeg' } },
   'doc:derive': { payload: { key: 'doc.photo', constraint: {} } },
   'doc:extract': { payload: { id: 'doc-1' } },
   'doc:preflight': { payload: { key: 'doc.photo', constraint: {} } },
+  'doc:to-window': {
+    payload: { tabId: 7, slotRef: 'u0', mode: 'drop', key: 'doc.photo' },
+    optional: ['mode', 'key'],
+  },
 
   'harvest:tab': { payload: { tabId: 7 } },
   'fill:tab': { payload: { tabId: 7 } },
@@ -76,6 +100,7 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
   'fill:apply': { payload: { writes: [] } },
   'fill:refill': { payload: { refs: ['f1'] } },
   'fill:submit': { payload: { token: {} } },
+  'fill:press-upload': { payload: { token: {}, ref: 'f3' } },
 
   'review:build': { payload: { tabId: 7 } },
   'review:collect': { payload: { refs: ['f1'] } },
@@ -91,6 +116,8 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
   'approval:submit': { payload: { tabId: 7 } },
   'approval:revoke': { payload: { tabId: 7 } },
   'approval:status': { payload: { tabId: 7 } },
+  'approval:upload': { payload: { tabId: 7, ref: 'f3' } },
+  'approval:upload-all': { payload: { tabId: 7, picks: { u0: 'doc.photo' } }, optional: ['picks'] },
 
   // Every field optional — `audit:read` with no limit is a legitimate message,
   // so the removal property below has nothing to assert for it.

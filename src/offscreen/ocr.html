@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>AutoFill Assistant — document reader</title>
+  </head>
+  <body>
+    <!--
+      Never seen by anybody. An offscreen document exists so that work needing a
+      DOM or a Web Worker can run without a tab: recognising a page of text
+      needs a Web Worker, and a service worker cannot start one.
+
+      Nothing is rendered here, nothing is fetched from the network, and the
+      page closes when the reading is done.
+    -->
+    <script type="module" src="./ocr.ts"></script>
+  </body>
+</html>

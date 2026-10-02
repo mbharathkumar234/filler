@@ -15,3 +15,7 @@ Thumbs.db
 *.afvault
 fixtures/**/private/
 fixtures/_harness/
+.chrome-dev-profile/
+
+# PaddleOCR model archives, fetched and hash-checked at build time (scripts/fetch-ocr-models.mjs)
+vendor/

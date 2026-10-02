@@ -8,6 +8,7 @@ import { buildReview } from '@/runtime/review';
 import type { FieldDescriptor, MatchResult } from '@/shared/types';
 import type { FieldKey } from '@/matching/taxonomy';
 import { GettingStarted } from '@/ui/onboarding/GettingStarted';
+import { PathSetup } from '@/ui/onboarding/PathSetup';
 import { VaultGate } from '@/ui/vault-editor/VaultGate';
 import { LanguagePicker } from '@/ui/lib/LanguagePicker';
 import { LocaleProvider } from '@/ui/lib/LocaleProvider';
@@ -216,6 +217,10 @@ const SCREENS: Array<{ name: string; mount: () => RenderResult; minText?: number
   {
     name: 'vault gate (returning)',
     mount: () => render(<VaultGate exists onUnlocked={() => {}} />),
+  },
+  {
+    name: 'path setup',
+    mount: () => render(<PathSetup path={null} onSave={() => {}} onSkip={() => {}} />),
   },
   { name: 'review screen', mount: () => render(<ReviewScreen tabId={7} onDone={() => {}} />) },
   { name: 'language picker', mount: () => render(<LanguagePicker />), minText: 20 },

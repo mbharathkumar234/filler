@@ -118,6 +118,42 @@ test('produces a real PDF when the portal demands PDF', async ({ page }) => {
   expect(result.bytes).toBeLessThanOrEqual(200 * KB);
 });
 
+/*
+ * The test portal's own rules, word for word (§ test portal).
+ *
+ * Its photo box asks for a type and a size and nothing about shape; its
+ * category-certificate box takes PDF only, with a floor as well as a ceiling.
+ */
+test('keeps the whole photo when the portal asks only for a type and a size', async ({ page }) => {
+  const [untouched, fitted] = await page.evaluate(
+    async ([url]) => [
+      await window.__derive(url!, 'image/jpeg', 'JPEG, maximum 10 MB'),
+      await window.__derive(url!, 'image/jpeg', 'Accepts .jpg, .jpeg, .png | 20 KB – 200 KB'),
+    ],
+    [PHOTO],
+  );
+
+  expect(fitted.ok, fitted.reason).toBe(true);
+  expect(fitted.bytes!).toBeGreaterThanOrEqual(20 * KB);
+  expect(fitted.bytes!).toBeLessThanOrEqual(200 * KB);
+  // Same shape as the original: made smaller, never cut.
+  const aspect = (r: { width?: number; height?: number }) => r.width! / r.height!;
+  expect(aspect(fitted)).toBeCloseTo(aspect(untouched), 2);
+});
+
+test('wraps a JPEG in a PDF for a PDF-only box with a floor', async ({ page }) => {
+  const result = await page.evaluate(
+    ([url]) => window.__derive(url!, 'image/jpeg', 'Accepts .pdf | 50 KB – 2 MB'),
+    [PHOTO],
+  );
+
+  expect(result.ok, result.reason).toBe(true);
+  expect(result.mime).toBe('application/pdf');
+  expect(result.magic?.slice(0, 4)).toEqual(PDF_MAGIC);
+  expect(result.bytes!).toBeGreaterThanOrEqual(50 * KB);
+  expect(result.bytes!).toBeLessThanOrEqual(2 * 1024 * KB);
+});
+
 test('fails loudly, and readably, on an impossible window', async ({ page }) => {
   // The plan's own example of an unsatisfiable request.
   const result = await page.evaluate(

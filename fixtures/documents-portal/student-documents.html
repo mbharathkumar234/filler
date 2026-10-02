@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Student Documents — the folders a Karnataka applicant actually keeps</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 48rem; color: #0f172a; }
+      .banner { background: #e2e8f0; padding: .75rem; font-size: .8rem; margin-bottom: 1.5rem; }
+      h2 { font-size: 1rem; margin-top: 1.75rem; border-bottom: 1px solid #cbd5e1; padding-bottom: .25rem; }
+      .q { border: 1px solid #cbd5e1; border-radius: 6px; padding: .6rem; margin: .5rem 0; }
+      label { display: block; font-size: .85rem; margin-bottom: .3rem; }
+      .hint { color: #475569; font-size: .75rem; margin: .25rem 0 0; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>Synthetic fixture.</strong> One question per document a student keeps — identity, Class 10,
+      PUC, caste and reservation, 371(J), KCET, photographs, and scholarship — in the words Karnataka
+      boards, KEA and college portals use for them. Two of them are numbers printed on a certificate
+      rather than a file, which is why they are text boxes. Not a copy of any real portal; contains no
+      personal data.
+    </p>
+
+    <h1>Upload Documents</h1>
+    <form id="docs" action="uploaded.html" method="get">
+      <h2>Identity</h2>
+      <div class="q">
+        <label for="voter">Upload Voter ID card</label>
+        <input type="file" id="voter" name="voter" accept="application/pdf" data-expect="doc.voter_id" />
+      </div>
+      <div class="q">
+        <label for="birth">Birth certificate</label>
+        <input type="file" id="birth" name="birth" accept="application/pdf" data-expect="doc.birth_certificate" />
+      </div>
+      <div class="q">
+        <label for="passport">Upload passport copy</label>
+        <input type="file" id="passport" name="passport" accept="application/pdf" data-expect="doc.passport" />
+      </div>
+      <div class="q">
+        <label for="dl">Driving licence copy</label>
+        <input type="file" id="dl" name="dl" accept="application/pdf" data-expect="doc.driving_licence" />
+      </div>
+
+      <h2>Class 10 (SSLC / CBSE)</h2>
+      <div class="q">
+        <label for="pass10">Class 10 passing certificate</label>
+        <input type="file" id="pass10" name="pass10" accept="application/pdf" data-expect="doc.passing_certificate_10" />
+      </div>
+      <div class="q">
+        <label for="study10">SSLC study certificate</label>
+        <input type="file" id="study10" name="study10" accept="application/pdf" data-expect="doc.study_certificate_10" />
+      </div>
+      <div class="q">
+        <label for="tc10">Class 10 transfer certificate (TC)</label>
+        <input type="file" id="tc10" name="tc10" accept="application/pdf" data-expect="doc.transfer_certificate_10" />
+      </div>
+      <div class="q">
+        <label for="mig10">Migration certificate of Class 10</label>
+        <input type="file" id="mig10" name="mig10" accept="application/pdf" data-expect="doc.migration_certificate_10" />
+      </div>
+
+      <h2>PUC (Karnataka)</h2>
+      <div class="q">
+        <label for="puc1">1st PUC marks card</label>
+        <input type="file" id="puc1" name="puc1" accept="application/pdf" data-expect="doc.marksheet_11" />
+        <p class="hint">Optional</p>
+      </div>
+      <div class="q">
+        <label for="puc2">2nd PUC marks card</label>
+        <input type="file" id="puc2" name="puc2" accept="application/pdf" data-expect="doc.marksheet_12" />
+      </div>
+      <div class="q">
+        <label for="studypuc">PUC study certificate</label>
+        <input type="file" id="studypuc" name="studypuc" accept="application/pdf" data-expect="doc.study_certificate_12" />
+      </div>
+      <div class="q">
+        <label for="tcpuc">PUC transfer certificate</label>
+        <input type="file" id="tcpuc" name="tcpuc" accept="application/pdf" data-expect="doc.transfer_certificate_12" />
+      </div>
+      <div class="q">
+        <label for="conduct">Conduct certificate</label>
+        <input type="file" id="conduct" name="conduct" accept="application/pdf" data-expect="doc.conduct_certificate" />
+      </div>
+
+      <h2>Caste and reservation</h2>
+      <div class="q">
+        <label for="caste">ST caste certificate</label>
+        <input type="file" id="caste" name="caste" accept="application/pdf" data-expect="doc.caste_certificate" />
+      </div>
+      <div class="q">
+        <label for="casterd">Caste certificate RD number</label>
+        <input type="text" id="casterd" name="casterd" maxlength="20" data-expect="eligibility.caste_certificate_number" />
+        <p class="hint">As printed on the Nadakacheri certificate.</p>
+      </div>
+      <div class="q">
+        <label for="income">Income certificate</label>
+        <input type="file" id="income" name="income" accept="application/pdf" data-expect="doc.income_certificate" />
+      </div>
+      <div class="q">
+        <label for="incomerd">Income certificate RD number</label>
+        <input type="text" id="incomerd" name="incomerd" maxlength="20" data-expect="eligibility.income_certificate_number" />
+      </div>
+
+      <h2>Article 371(J) — Kalyana Karnataka</h2>
+      <div class="q">
+        <label for="annexure">371(J) Annexure-A eligibility certificate</label>
+        <input type="file" id="annexure" name="annexure" accept="application/pdf" data-expect="doc.article_371j_certificate" />
+      </div>
+      <div class="q">
+        <label for="annexurerd">Annexure-A RD number</label>
+        <input type="text" id="annexurerd" name="annexurerd" maxlength="20" data-expect="eligibility.article_371j_number" />
+      </div>
+
+      <h2>KCET / KEA</h2>
+      <div class="q">
+        <label for="kcetform">KCET application form</label>
+        <input type="file" id="kcetform" name="kcetform" accept="application/pdf" data-expect="doc.entrance_application_form" />
+      </div>
+      <div class="q">
+        <label for="kcetfee">KCET application fee receipt</label>
+        <input type="file" id="kcetfee" name="kcetfee" accept="application/pdf" data-expect="doc.entrance_fee_receipt" />
+      </div>
+      <div class="q">
+        <label for="ticket">KCET admission ticket</label>
+        <input type="file" id="ticket" name="ticket" accept="application/pdf" data-expect="doc.entrance_admission_ticket" />
+      </div>
+      <div class="q">
+        <label for="result">KCET result sheet</label>
+        <input type="file" id="result" name="result" accept="application/pdf" data-expect="doc.entrance_result" />
+      </div>
+      <div class="q">
+        <label for="rank">KCET rank card</label>
+        <input type="file" id="rank" name="rank" accept="application/pdf" data-expect="doc.entrance_rank_card" />
+      </div>
+      <div class="q">
+        <label for="verify">Document verification slip</label>
+        <input type="file" id="verify" name="verify" accept="application/pdf" data-expect="doc.entrance_verification_slip" />
+      </div>
+      <div class="q">
+        <label for="claim">Claim verification slip</label>
+        <input type="file" id="claim" name="claim" accept="application/pdf" data-expect="doc.entrance_claim_verification" />
+      </div>
+      <div class="q">
+        <label for="option">Option entry printout</label>
+        <input type="file" id="option" name="option" accept="application/pdf" data-expect="doc.entrance_option_entry" />
+      </div>
+      <div class="q">
+        <label for="allot">Seat allotment letter</label>
+        <input type="file" id="allot" name="allot" accept="application/pdf" data-expect="doc.seat_allotment_letter" />
+      </div>
+      <div class="q">
+        <label for="feepaid">Admission fee payment receipt</label>
+        <input type="file" id="feepaid" name="feepaid" accept="application/pdf" data-expect="doc.admission_fee_receipt" />
+      </div>
+      <div class="q">
+        <label for="order">Admission order</label>
+        <input type="file" id="order" name="order" accept="application/pdf" data-expect="doc.admission_order" />
+      </div>
+
+      <h2>Photographs and signature</h2>
+      <div class="q">
+        <label for="dphoto">Digital photograph</label>
+        <input type="file" id="dphoto" name="dphoto" accept="image/jpeg" data-expect="doc.photo" />
+        <p class="hint">JPEG, 20 KB to 50 KB</p>
+      </div>
+      <div class="q">
+        <label for="sign">Scanned signature</label>
+        <input type="file" id="sign" name="sign" accept="image/jpeg" data-expect="doc.signature" />
+      </div>
+      <div class="q">
+        <label for="thumb">Left thumb impression</label>
+        <input type="file" id="thumb" name="thumb" accept="image/jpeg" data-expect="doc.thumb_impression" />
+      </div>
+
+      <h2>Financial and scholarship</h2>
+      <div class="q">
+        <label for="passbook">Bank passbook first page</label>
+        <input type="file" id="passbook" name="passbook" accept="application/pdf" data-expect="doc.bank_passbook" />
+      </div>
+      <div class="q">
+        <label for="ssp">Scholarship application copy</label>
+        <input type="file" id="ssp" name="ssp" accept="application/pdf" data-expect="doc.scholarship_application" />
+      </div>
+
+      <h2>College (current course)</h2>
+      <div class="q">
+        <label for="sem">Semester marks card</label>
+        <input type="file" id="sem" name="sem" accept="application/pdf" data-expect="doc.semester_marksheet" />
+      </div>
+      <div class="q">
+        <label for="consol">Consolidated marks card</label>
+        <input type="file" id="consol" name="consol" accept="application/pdf" data-expect="doc.consolidated_marksheet" />
+      </div>
+      <div class="q">
+        <label for="bonafide">Bonafide certificate</label>
+        <input type="file" id="bonafide" name="bonafide" accept="application/pdf" data-expect="doc.bonafide_certificate" />
+      </div>
+      <div class="q">
+        <label for="collegeid">College ID card</label>
+        <input type="file" id="collegeid" name="collegeid" accept="application/pdf" data-expect="doc.college_id_card" />
+      </div>
+      <div class="q">
+        <label for="admission">Provisional admission letter</label>
+        <input type="file" id="admission" name="admission" accept="application/pdf" data-expect="doc.admission_letter" />
+      </div>
+      <div class="q">
+        <label for="sem-no">Current semester</label>
+        <input type="text" id="sem-no" name="sem-no" maxlength="2" data-expect="education[].semester" />
+      </div>
+      <div class="q">
+        <label for="study-year">Year of study</label>
+        <input type="text" id="study-year" name="study-year" maxlength="2" data-expect="education[].year_of_study" />
+      </div>
+
+      <h2>Entrance exam</h2>
+      <div class="q">
+        <label for="exam">Entrance exam written</label>
+        <input type="text" id="exam" name="exam" maxlength="40" data-expect="entrance.exam_name" />
+      </div>
+      <div class="q">
+        <label for="cetreg">CET registration number</label>
+        <input type="text" id="cetreg" name="cetreg" maxlength="20" data-expect="entrance.registration_number" />
+      </div>
+      <div class="q">
+        <label for="cetrank">KCET rank</label>
+        <input type="text" id="cetrank" name="cetrank" maxlength="8" data-expect="entrance.rank" />
+      </div>
+      <div class="q">
+        <label for="cetscore">Entrance exam score</label>
+        <input type="text" id="cetscore" name="cetscore" maxlength="8" data-expect="entrance.score" />
+      </div>
+      <div class="q">
+        <label for="cetyear">Year of the entrance exam</label>
+        <input type="text" id="cetyear" name="cetyear" maxlength="4" data-expect="entrance.year" />
+      </div>
+
+      <h2>Reservation certificates by category</h2>
+      <div class="q">
+        <label for="formd">Form-D caste certificate</label>
+        <input type="file" id="formd" name="formd" accept="application/pdf" data-expect="doc.caste_certificate_form_d" />
+      </div>
+      <div class="q">
+        <label for="ews">EWS certificate</label>
+        <input type="file" id="ews" name="ews" accept="application/pdf" data-expect="doc.ews_certificate" />
+      </div>
+      <div class="q">
+        <label for="obc">OBC certificate</label>
+        <input type="file" id="obc" name="obc" accept="application/pdf" data-expect="doc.obc_certificate" />
+      </div>
+      <div class="q">
+        <label for="claim371">Do you claim reservation under Article 371(J)?</label>
+        <input type="text" id="claim371" name="claim371" maxlength="3" data-expect="eligibility.article_371j" />
+      </div>
+
+      <h2>Work and skills</h2>
+      <div class="q">
+        <label for="cv">Resume / CV</label>
+        <input type="file" id="cv" name="cv" accept="application/pdf" data-expect="doc.resume" />
+      </div>
+      <div class="q">
+        <label for="intoffer">Internship offer letter</label>
+        <input type="file" id="intoffer" name="intoffer" accept="application/pdf" data-expect="doc.internship_offer_letter" />
+      </div>
+      <div class="q">
+        <label for="intcert">Internship completion certificate</label>
+        <input type="file" id="intcert" name="intcert" accept="application/pdf" data-expect="doc.internship_certificate" />
+      </div>
+      <div class="q">
+        <label for="exp">Work experience certificate</label>
+        <input type="file" id="exp" name="exp" accept="application/pdf" data-expect="doc.experience_certificate" />
+      </div>
+      <div class="q">
+        <label for="lor">Letter of recommendation</label>
+        <input type="file" id="lor" name="lor" accept="application/pdf" data-expect="doc.recommendation_letter" />
+      </div>
+      <div class="q">
+        <label for="course">Online course certificate</label>
+        <input type="file" id="course" name="course" accept="application/pdf" data-expect="doc.course_certificate" />
+      </div>
+      <div class="q">
+        <label for="training">Training certificate</label>
+        <input type="file" id="training" name="training" accept="application/pdf" data-expect="doc.training_certificate" />
+      </div>
+      <div class="q">
+        <label for="workshop">Workshop certificate</label>
+        <input type="file" id="workshop" name="workshop" accept="application/pdf" data-expect="doc.workshop_certificate" />
+      </div>
+      <div class="q">
+        <label for="procert">Professional certification</label>
+        <input type="file" id="procert" name="procert" accept="application/pdf" data-expect="doc.professional_certification" />
+      </div>
+
+      <h2>Achievements and projects</h2>
+      <div class="q">
+        <label for="hack">Hackathon certificate</label>
+        <input type="file" id="hack" name="hack" accept="application/pdf" data-expect="doc.hackathon_certificate" />
+      </div>
+      <div class="q">
+        <label for="comp">Competition certificate</label>
+        <input type="file" id="comp" name="comp" accept="application/pdf" data-expect="doc.competition_certificate" />
+      </div>
+      <div class="q">
+        <label for="achieve">Merit / achievement certificate</label>
+        <input type="file" id="achieve" name="achieve" accept="application/pdf" data-expect="doc.achievement_certificate" />
+      </div>
+      <div class="q">
+        <label for="projrep">Project report</label>
+        <input type="file" id="projrep" name="projrep" accept="application/pdf" data-expect="doc.project_report" />
+      </div>
+      <div class="q">
+        <label for="projcert">Project completion certificate</label>
+        <input type="file" id="projcert" name="projcert" accept="application/pdf" data-expect="doc.project_certificate" />
+      </div>
+      <div class="q">
+        <label for="paper">Published paper</label>
+        <input type="file" id="paper" name="paper" accept="application/pdf" data-expect="doc.publication" />
+      </div>
+      <div class="q">
+        <label for="patent">Patent document</label>
+        <input type="file" id="patent" name="patent" accept="application/pdf" data-expect="doc.patent_document" />
+      </div>
+
+      <h2>Sports and service</h2>
+      <div class="q">
+        <label for="sports">Sports certificate</label>
+        <input type="file" id="sports" name="sports" accept="application/pdf" data-expect="doc.sports_certificate" />
+      </div>
+      <div class="q">
+        <label for="ncc">NCC certificate</label>
+        <input type="file" id="ncc" name="ncc" accept="application/pdf" data-expect="doc.ncc_certificate" />
+      </div>
+      <div class="q">
+        <label for="nss">NSS certificate</label>
+        <input type="file" id="nss" name="nss" accept="application/pdf" data-expect="doc.nss_certificate" />
+      </div>
+      <div class="q">
+        <label for="volunteer">Volunteering certificate</label>
+        <input type="file" id="volunteer" name="volunteer" accept="application/pdf" data-expect="doc.volunteering_certificate" />
+      </div>
+
+      <h2>ITI</h2>
+      <div class="q">
+        <label for="itimarks">ITI marks card</label>
+        <input type="file" id="itimarks" name="itimarks" accept="application/pdf" data-expect="doc.iti_marksheet" />
+      </div>
+      <div class="q">
+        <label for="iticert">National Trade Certificate (ITI)</label>
+        <input type="file" id="iticert" name="iticert" accept="application/pdf" data-expect="doc.iti_certificate" />
+      </div>
+
+      <!-- A trap: a portal's catch-all box names no document at all. -->
+      <div class="q">
+        <label for="misc">Upload any other supporting document</label>
+        <input type="file" id="misc" name="misc" accept="application/pdf" data-expect="unknown" />
+      </div>
+    </form>
+  </body>
+</html>

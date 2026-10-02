@@ -258,6 +258,67 @@ describe('fillElement dispatch', () => {
     mount('<div id="d"></div>');
     expect(fillElement(el('#d'), 'x').ok).toBe(false);
   });
+
+  it('refuses a document for a dropdown', () => {
+    mount('<select id="s"><option>a</option></select>');
+    const outcome = fillElement(el('#s'), { bytes: new Uint8Array([1]), mime: 'image/jpeg', filename: 'p.jpg' });
+    expect(outcome.reason).toMatch(/needs text/);
+  });
+});
+
+describe('dropping a document on a drag-and-drop area', () => {
+  /*
+   * jsdom has neither `DataTransfer` nor `DragEvent`. These stand-ins carry
+   * exactly what `fillDrop` uses; the real objects are exercised in a real
+   * browser by `tests/e2e/documents.spec.ts`.
+   */
+  class FakeTransfer {
+    readonly list: File[] = [];
+    readonly items = { add: (file: File) => this.list.push(file) };
+    get files() {
+      return this.list;
+    }
+  }
+  class FakeDragEvent extends Event {
+    readonly dataTransfer: FakeTransfer;
+    constructor(type: string, init: EventInit & { dataTransfer: FakeTransfer }) {
+      super(type, init);
+      this.dataTransfer = init.dataTransfer;
+    }
+  }
+
+  beforeEach(() => {
+    Object.assign(window, { DataTransfer: FakeTransfer, DragEvent: FakeDragEvent });
+    return () => {
+      Reflect.deleteProperty(window, 'DataTransfer');
+      Reflect.deleteProperty(window, 'DragEvent');
+    };
+  });
+
+  const doc = { bytes: new Uint8Array([1, 2, 3]), mime: 'image/jpeg', filename: 'signature.jpg' };
+
+  it('delivers the file, and counts it taken when the widget says so', () => {
+    mount('<div id="zone"><span id="msg">Drop files here</span></div>');
+    const received: string[] = [];
+    el('#zone').addEventListener('drop', (event) => {
+      event.preventDefault();
+      const files = (event as unknown as FakeDragEvent).dataTransfer.files;
+      received.push(...files.map((f) => `${f.name}:${f.type}:${f.size}`));
+    });
+
+    // Aimed at the message inside the widget: the drop bubbles to its handler.
+    const outcome = fillElement(el('#msg'), doc);
+
+    expect(outcome).toMatchObject({ ok: true, strategy: 'drop' });
+    expect(received).toEqual(['signature.jpg:image/jpeg:3']);
+  });
+
+  it('reports a drop that nothing took, rather than claiming success', () => {
+    mount('<div id="zone">Drop files here</div>');
+    const outcome = fillElement(el('#zone'), doc);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.reason).toMatch(/nothing on the page took/);
+  });
 });
 
 describe('undo', () => {
@@ -283,6 +344,31 @@ describe('undo', () => {
 
     restore(box, before);
     expect(box.checked).toBe(true);
+  });
+
+  it('empties a file box that was empty before, without throwing', () => {
+    mount('<input type="file" id="f">');
+    const input = el<HTMLInputElement>('#f');
+    const before = snapshot('f0', input);
+    expect(before.files).toBeDefined();
+
+    // `.value` on a file box can only be set to ''. Undo used to set it to
+    // the snapshot's value, which throws once the box holds a file.
+    expect(restore(input, before)).toBe(true);
+    expect(input.value).toBe('');
+  });
+
+  it('never writes to a drop area — there is nothing of ours to put back', () => {
+    mount('<div id="zone">Drop files here</div>');
+    const zone = el('#zone');
+    const before = snapshot('u0', zone);
+    const seen = vi.fn();
+    zone.addEventListener('change', seen);
+
+    expect(before.inert).toBe(true);
+    expect(restore(zone, before)).toBe(false);
+    expect(seen).not.toHaveBeenCalled();
+    expect(zone.outerHTML).toBe('<div id="zone">Drop files here</div>');
   });
 
   it('dispatches events on restore, so the page sees the revert', () => {
