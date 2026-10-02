@@ -370,6 +370,29 @@ describe('backup export / import', () => {
       expect([...(restored?.bytes ?? [])]).toEqual([...PDF]);
     });
 
+    it('carries the password a locked PDF opens with, sealed, and restores it', async () => {
+      // Without it a restored e-Aadhaar is a file the vault holds and cannot open.
+      const meta = await seedVault();
+      await putMaster(db, key, {
+        key: 'doc.aadhaar_card',
+        label: 'Aadhaar card',
+        bytes: PDF,
+        meta: { mime: 'application/pdf', bytes: PDF.length, width: 0, height: 0, capturedAt: '2026-01-01T00:00:00.000Z' },
+        password: 'PASSWORD-CANARY-1998',
+      });
+
+      const text = await exportVault(db, meta);
+      expect(text).not.toContain('PASSWORD-CANARY');
+      expect(parseBackup(text).documents?.[0]?.password).toMatchObject({ iv: expect.any(String), ct: expect.any(String) });
+
+      await clearVault(db);
+      await importVault(db, text, PASSPHRASE);
+      const restoredKey = await deriveKey(PASSPHRASE, (await readMeta(db))!.kdf);
+      const restored = await getMasterByKey(db, restoredKey, 'doc.aadhaar_card');
+      expect(restored?.password).toBe('PASSWORD-CANARY-1998');
+      expect(restored?.locked).toBe(true);
+    });
+
     it('skips a document whose key this build does not have', async () => {
       const meta = await seedWithDocument();
       const file = parseBackup(await exportVault(db, meta));

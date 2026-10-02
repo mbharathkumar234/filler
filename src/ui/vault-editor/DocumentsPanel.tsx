@@ -81,8 +81,19 @@ export function DocumentsPanel({ onLocked, path }: Props) {
   const [pending, setPending] = useState<Map<FieldKey, Pending>>(new Map());
   const [constraintText, setConstraintText] = useState(SAMPLE_CONSTRAINT);
   const [previews, setPreviews] = useState<Map<FieldKey, Preview | { failed: string }>>(new Map());
-  /** Which stored document, if any, is currently being read for details. */
-  const [reading, setReading] = useState<{ id: string; label: string } | null>(null);
+  /**
+   * Which slot, if any, is being read for details.
+   *
+   * The slot, not the stored document's id: saving a new file over a stored
+   * one gives the slot a new document, and a reading held by id lost its panel
+   * with the old one — mid-read, with nothing on the screen to say so. Held by
+   * slot, the panel stays and reads whatever the slot now holds.
+   */
+  const [reading, setReading] = useState<FieldKey | null>(null);
+  /** Slots whose staged PDF the worker would not save without a password, and why. */
+  const [locks, setLocks] = useState<Map<FieldKey, 'needs-password' | 'wrong-password'>>(new Map());
+  /** What the user has typed for those, until it is sent once. Never stored. */
+  const [typedPasswords, setTypedPasswords] = useState<Map<FieldKey, string>>(new Map());
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
 
   // Revoke object URLs on unmount so previews do not leak memory.
@@ -158,17 +169,19 @@ export function DocumentsPanel({ onLocked, path }: Props) {
   }
 
   /** Write a staged file to the vault. The only path that stores a document. */
-  async function save(key: FieldKey) {
+  async function save(key: FieldKey, password?: string) {
     const staged = pending.get(key);
     if (!staged) return;
 
     setBusyKey(key);
     setError(null);
+    // Used once, for this one message, and gone from the screen either way.
+    forgetTypedPassword(key);
     try {
       // Read the bytes now, at the moment of the deliberate action, so they
       // exist for one message rather than for as long as the panel is open.
       const bytes = new Uint8Array(await staged.file.arrayBuffer());
-      await send({
+      const outcome = await send({
         type: 'doc:put',
         key,
         label: labelFor(key),
@@ -176,7 +189,14 @@ export function DocumentsPanel({ onLocked, path }: Props) {
         width: staged.meta.width,
         height: staged.meta.height,
         bytes: Array.from(bytes),
+        ...(password === undefined || password === '' ? {} : { password }),
       });
+      // A PDF that opens only with a password: nothing was saved, so ask.
+      // (Not `locked`: a saved locked PDF's summary says `locked: true`.)
+      if (outcome !== null && typeof outcome === 'object' && 'notSaved' in outcome) {
+        setLocks((prev) => new Map(prev).set(key, outcome.notSaved));
+        return;
+      }
       discard(key);
       await refresh();
       await checkQuality(key);
@@ -191,6 +211,22 @@ export function DocumentsPanel({ onLocked, path }: Props) {
   /** Drop a staged pick. The vault is untouched either way. */
   function discard(key: FieldKey) {
     setPending((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+    // And everything about the lock on it: the question, and any answer typed.
+    setLocks((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+    forgetTypedPassword(key);
+  }
+
+  function forgetTypedPassword(key: FieldKey) {
+    setTypedPasswords((prev) => {
+      if (!prev.has(key)) return prev;
       const next = new Map(prev);
       next.delete(key);
       return next;
@@ -443,14 +479,11 @@ export function DocumentsPanel({ onLocked, path }: Props) {
                           {roleFor(key) === 'document' && (
                             <button
                               type="button"
-                              onClick={() =>
-                                setReading((was) =>
-                                  was?.id === master.id
-                                    ? null
-                                    : { id: master.id, label: labelFor(key) },
-                                )
-                              }
-                              className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50"
+                              onClick={() => setReading((was) => (was === key ? null : key))}
+                              // Not while a new copy is being saved over this
+                              // one: it would read the copy on its way out.
+                              disabled={busy}
+                              className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                             >
                               Read details from this
                             </button>
@@ -478,10 +511,31 @@ export function DocumentsPanel({ onLocked, path }: Props) {
                       </p>
                     )}
 
-                    {reading?.id === master?.id && reading !== null && (
+                    {staged && locks.has(key) && (
+                      <PdfPasswordPrompt
+                        slotKey={key}
+                        reason={locks.get(key)!}
+                        value={typedPasswords.get(key) ?? ''}
+                        busy={busy}
+                        onChange={(value) => setTypedPasswords((prev) => new Map(prev).set(key, value))}
+                        onSubmit={() => void save(key, typedPasswords.get(key))}
+                      />
+                    )}
+
+                    {master?.locked && !staged && (
+                      <p className="mt-1 text-[10px] text-slate-500">
+                        A locked PDF. Its password is kept with it, sealed in your vault, so it
+                        opens without asking.
+                      </p>
+                    )}
+
+                    {reading === key && master && (
                       <ExtractedDetails
-                        documentId={reading.id}
-                        documentLabel={reading.label}
+                        // A new document in the slot is a new reading, from
+                        // the start: none of the old one's answers carry over.
+                        key={master.id}
+                        documentId={master.id}
+                        documentLabel={labelFor(key)}
                         onLocked={onLocked}
                         onClose={() => setReading(null)}
                         onSaved={(count) => {
@@ -572,5 +626,86 @@ export function DocumentsPanel({ onLocked, path }: Props) {
         </button>
       )}
     </section>
+  );
+}
+
+/**
+ * What the common locked documents are locked with. A reminder of the pattern,
+ * for the user to apply — never filled in for them.
+ */
+const PASSWORD_HINTS: Partial<Record<FieldKey, string>> = {
+  'doc.aadhaar_card':
+    'An e-Aadhaar’s password is the first four letters of your name, in capitals, then your year of birth — for example SURE1990.',
+  'doc.pan_card': 'An e-PAN’s password is your date of birth, written DDMMYYYY — for example 14031998.',
+};
+
+/**
+ * The question a locked PDF raises when it is saved.
+ *
+ * The user types the password. The vault holds enough to build an e-Aadhaar's
+ * from the name and birth year, and that was offered and turned down: the
+ * person whose file it is opens it. What they type is sent once, with the file,
+ * and kept with the document, sealed — so they are asked once, not every time
+ * the document is read or attached.
+ */
+function PdfPasswordPrompt({
+  slotKey,
+  reason,
+  value,
+  busy,
+  onChange,
+  onSubmit,
+}: {
+  slotKey: FieldKey;
+  reason: 'needs-password' | 'wrong-password';
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+  onSubmit: () => void;
+}) {
+  const inputId = `pdf-password-${slotKey}`;
+  const hint = PASSWORD_HINTS[slotKey];
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit();
+      }}
+      className="mt-1.5 rounded border border-amber-300 bg-amber-50 p-2"
+    >
+      <p className="text-[11px] text-amber-900">
+        This PDF is locked with a password, so it has not been saved yet. Type the password to
+        save it. It is kept with the document, sealed in your vault, so you are asked only once —
+        and it never leaves this device.
+      </p>
+      {hint !== undefined && <p className="mt-1 text-[11px] text-amber-900">{hint}</p>}
+      {reason === 'wrong-password' && (
+        <p role="alert" className="mt-1 text-[11px] font-medium text-red-700">
+          That password did not open it. Passwords are case-sensitive.
+        </p>
+      )}
+      <label htmlFor={inputId} className="mt-1.5 block text-[11px] font-medium text-slate-800">
+        Password for this PDF
+      </label>
+      <div className="mt-0.5 flex gap-1.5">
+        <input
+          id={inputId}
+          type="password"
+          autoComplete="off"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          disabled={busy}
+          className="min-w-0 flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
+        />
+        <button
+          type="submit"
+          disabled={busy || value === ''}
+          className="rounded border border-slate-800 bg-slate-800 px-2 py-1 text-[11px] text-white hover:bg-slate-700 disabled:opacity-50"
+        >
+          Unlock and save
+        </button>
+      </div>
+    </form>
   );
 }

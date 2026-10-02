@@ -86,6 +86,10 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
   'doc:delete': { payload: { id: 'doc-1' } },
   // A rendered page of a document, on its way to the reader.
   'ocr:recognise': { payload: { image: 'aGVsbG8=', mime: 'image/jpeg' } },
+  // A PDF, on its way to the page that can open one (a service worker cannot load pdf.js).
+  'pdf:lock': { payload: { pdf: 'JVBERi0=', password: 'RAVI1998' }, optional: ['password'] },
+  'pdf:text': { payload: { pdf: 'JVBERi0=', password: 'RAVI1998' }, optional: ['password'] },
+  'pdf:render': { payload: { pdf: 'JVBERi0=', password: 'RAVI1998', width: 2000 }, optional: ['password'] },
   'doc:derive': { payload: { key: 'doc.photo', constraint: {} } },
   'doc:extract': { payload: { id: 'doc-1' } },
   'doc:preflight': { payload: { key: 'doc.photo', constraint: {} } },
@@ -394,6 +398,16 @@ describe('content-script originated messages, checked in full', () => {
     ];
     for (const bytes of attacks) {
       expect(validateRequest({ ...base, bytes }).ok, JSON.stringify(bytes)).toBe(false);
+    }
+  });
+
+  it('doc:put carries a locked PDF’s password, and nothing shaped otherwise', () => {
+    const base = { type: 'doc:put', key: 'doc.aadhaar_card', label: 'L', mime: 'application/pdf', width: 0, height: 0, bytes: [1] };
+    expect(validateRequest(base).ok).toBe(true);
+    expect(validateRequest({ ...base, password: 'RAVI1998' }).ok).toBe(true);
+    // A PDF password is at most 127 bytes; anything far past that is not one.
+    for (const bad of ['x'.repeat(257), 1998, null, {}, ['RAVI1998']]) {
+      expect(validateRequest({ ...base, password: bad }).ok, JSON.stringify(bad)?.slice(0, 20)).toBe(false);
     }
   });
 

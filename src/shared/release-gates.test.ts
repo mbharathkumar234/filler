@@ -187,7 +187,6 @@ describe('the dependency licences (§ Phase F)', () => {
       'hash-wasm',
       'idb',
       'onnxruntime-web',
-      'pdf-lib',
       'pdfjs-dist',
       'react',
       'react-dom',

@@ -40,11 +40,12 @@ describe('exact beats guessed, every time', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('says that a text-layer read is exact', async () => {
+  it('marks a text-layer read as exact, for the screen to say so once', async () => {
     const result = await readDocumentText(new Uint8Array([1]), { mime: 'application/pdf' }, {
       pdfText: async () => `Government of India\nRavi Kumar\nDOB: 14/03/1998\n${AADHAAR}`,
     });
-    expect(result.notes.join(' ')).toMatch(/exact/i);
+    expect(result.source).toBe('pdf-text-layer');
+    expect(result.notes.join(' ')).not.toMatch(/exact/i);
   });
 
   it('falls through to OCR when a PDF is a scan with no real text', async () => {
@@ -75,11 +76,15 @@ describe('exact beats guessed, every time', () => {
     expect(result.source).toBe('ocr');
   });
 
-  it('tells the user to check every value when it guessed', async () => {
+  it('says it guessed through its source, and leaves the words to the screen', async () => {
+    // The screen captions every reading from `source` ("Recognised from an
+    // image. Please compare each value…"). A note saying the same thing put
+    // the same warning on the screen twice, one line under the other.
     const result = await readDocumentText(new Uint8Array([1]), { mime: 'image/jpeg' }, {
       ocr: engine(`Ravi Kumar\n${AADHAAR}`),
     });
-    expect(result.notes.join(' ')).toMatch(/check each value/i);
+    expect(result.source).toBe('ocr');
+    expect(result.notes.join(' ')).not.toMatch(/check each value|recognised from/i);
   });
 });
 
@@ -244,5 +249,59 @@ describe('where on the page the text was', () => {
     });
     expect(read.source).toBe('pdf-text-layer');
     expect(read.lines).toBeUndefined();
+  });
+});
+
+describe('a PDF that opens with a password', () => {
+  /*
+   * The vault keeps a locked PDF's password with it (`pdf-lock.ts`). Reading
+   * the file must use it on both paths: the exact text layer, and the pages
+   * rendered for recognition when there is no text layer to read.
+   */
+  const TEXT = `Government of India\nRavi Kumar\nDOB: 14/03/1998\n${AADHAAR}`;
+
+  it('opens the text layer with it', async () => {
+    const given: Array<string | undefined> = [];
+    const read = await readDocumentText(
+      new Uint8Array([1]),
+      { mime: 'application/pdf', password: 'RAVI1998' },
+      {
+        pdfText: async (_bytes, password) => {
+          given.push(password);
+          return TEXT;
+        },
+      },
+    );
+    expect(given).toEqual(['RAVI1998']);
+    expect(read.source).toBe('pdf-text-layer');
+  });
+
+  it('opens the pages with it, when they have to be recognised', async () => {
+    const given: Array<string | undefined> = [];
+    await readDocumentText(
+      new Uint8Array([1]),
+      { mime: 'application/pdf', password: 'RAVI1998' },
+      {
+        pdfText: async () => 'Page 1',
+        ocr: engine('', {
+          recognise: async (_bytes, _mime, _scripts, password) => {
+            given.push(password);
+            return { text: TEXT };
+          },
+        }),
+      },
+    );
+    expect(given).toEqual(['RAVI1998']);
+  });
+
+  it('passes no password for a document that has none', async () => {
+    const given: Array<string | undefined> = [];
+    await readDocumentText(new Uint8Array([1]), { mime: 'application/pdf' }, {
+      pdfText: async (_bytes, password) => {
+        given.push(password);
+        return TEXT;
+      },
+    });
+    expect(given).toEqual([undefined]);
   });
 });

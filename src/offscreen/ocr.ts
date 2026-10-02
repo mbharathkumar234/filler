@@ -16,8 +16,20 @@
  * package, and the CSP (`connect-src 'self'`) refuses anything else.
  */
 
-import { isEnvelope, type ExtensionRequest, type OcrItem } from '@/shared/messages';
-import { base64ToBytes } from '@/shared/base64';
+import {
+  OFFSCREEN_TYPES,
+  isEnvelope,
+  isPrivilegedSender,
+  type ExtensionRequest,
+  type OcrItem,
+  type PdfRequest,
+  type ResponseMap,
+} from '@/shared/messages';
+import { validateRequest } from '@/shared/validate';
+import { base64ToBytes, bytesToBase64 } from '@/shared/base64';
+import { lockFromError, pdfLock } from '@/documents/pdf-lock';
+import { readPdfText } from '@/documents/pdf-text';
+import { createRasterBackend } from '@/documents/raster';
 import type { ReadRequest, ReadResponse } from './reader-worker';
 
 type PageReading = { items: OcrItem[]; width: number; height: number; turns: 0 | 1 | 2 | 3 };
@@ -73,8 +85,8 @@ function recognise(image: string, mime: string): Promise<PageReading> {
  */
 let queue: Promise<void> = Promise.resolve();
 
-function recogniseInTurn(image: string, mime: string) {
-  const mine = queue.then(() => recognise(image, mime));
+function inTurn<T>(job: () => Promise<T>): Promise<T> {
+  const mine = queue.then(job);
   queue = mine.then(
     () => undefined,
     () => undefined,
@@ -82,20 +94,82 @@ function recogniseInTurn(image: string, mime: string) {
   return mine;
 }
 
+// ---------------------------------------------------------------------------
+// PDFs
+// ---------------------------------------------------------------------------
+
+/**
+ * Open a PDF for the service worker, which cannot (`documents/pdfjs.ts`).
+ *
+ * pdf.js runs here, on this page's own thread: it was made for a page, with a
+ * document to make canvases from and fonts to load into, and a worker has
+ * neither. The bytes and the password arrive with the request and are dropped
+ * with it.
+ */
+async function openPdf<T extends PdfRequest['type']>(
+  request: Extract<PdfRequest, { type: T }>,
+): Promise<ResponseMap[T]>;
+async function openPdf(request: PdfRequest): Promise<ResponseMap[PdfRequest['type']]> {
+  const bytes = base64ToBytes(request.pdf);
+  switch (request.type) {
+    case 'pdf:lock':
+      return { lock: await pdfLock(bytes, request.password) };
+    case 'pdf:text':
+      return { text: await readPdfText(bytes, request.password) };
+    case 'pdf:render': {
+      const backend = createRasterBackend();
+      const page = await backend.rasterisePdf(bytes, request.width, request.password);
+      try {
+        const png = await backend.encodePng(page);
+        return { image: bytesToBase64(png), width: page.width, height: page.height };
+      } finally {
+        backend.release?.(page);
+      }
+    }
+  }
+}
+
+/** What went wrong with a PDF, in words the person who saved it can act on. */
+function pdfFailure(error: unknown): string {
+  switch (lockFromError(error)) {
+    case 'needs-password':
+      // A locked PDF saved before the vault asked for passwords.
+      return 'This PDF is locked with a password the vault does not have. Save it again, and it will ask you for the password.';
+    case 'wrong-password':
+      return 'The password kept with this PDF no longer opens it. Save it again with the right password.';
+    default:
+      return error instanceof Error ? error.message : 'The PDF could not be opened.';
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!isEnvelope(message)) return false;
-  if (sender.id !== chrome.runtime.id) return false;
-
   const request = message.payload as ExtensionRequest;
-  if (request.type !== 'ocr:recognise') return false;
+  if (!OFFSCREEN_TYPES.has(request.type)) return false;
 
-  recogniseInTurn(request.image, request.mime).then(
-    (result) => sendResponse({ ok: true, data: result }),
-    (error: unknown) =>
-      sendResponse({
-        ok: false,
-        error: error instanceof Error ? error.message : 'The document could not be read.',
-      }),
-  );
-  return true;
+  // The worker leaves these to this page, so this page applies the worker's
+  // rules: from this extension, from an extension page — never from a content
+  // script, which carries a tab — and shaped as the type says.
+  if (!isPrivilegedSender(sender) || !validateRequest(request).ok) {
+    sendResponse({ ok: false, error: 'Rejected.' });
+    return true;
+  }
+
+  const answer = (job: Promise<unknown>, failure: (error: unknown) => string) => {
+    job.then(
+      (data) => sendResponse({ ok: true, data }),
+      (error: unknown) => sendResponse({ ok: false, error: failure(error) }),
+    );
+    return true;
+  };
+
+  if (request.type === 'ocr:recognise') {
+    return answer(inTurn(() => recognise(request.image, request.mime)), (error) =>
+      error instanceof Error ? error.message : 'The document could not be read.',
+    );
+  }
+  if (request.type === 'pdf:lock' || request.type === 'pdf:text' || request.type === 'pdf:render') {
+    return answer(inTurn(() => openPdf(request)), pdfFailure);
+  }
+  return false;
 });

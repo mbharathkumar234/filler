@@ -34,7 +34,7 @@ describe('the document reader is installed', () => {
     // The worker hears every extension message, including this one, which is
     // addressed to the offscreen reader. Replying on its behalf is how the
     // reader's answer got thrown away.
-    expect(worker).toContain("if (message.payload.type === 'ocr:recognise') return false;");
+    expect(worker).toContain('if (OFFSCREEN_TYPES.has(message.payload.type)) return false;');
   });
 });
 

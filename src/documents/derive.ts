@@ -28,6 +28,7 @@ import {
   type QualityAttempt,
   type SearchOptions,
 } from './quality-search';
+import { PDF_WRAPPER_BYTES } from './pdf-wrap';
 
 // ---------------------------------------------------------------------------
 // The backend seam
@@ -49,8 +50,11 @@ export interface RasterBackend {
   encodeJpeg(source: RasterSource, quality: number): Promise<Uint8Array>;
   /** Encode to PNG. Lossless, so no quality parameter. */
   encodePng(source: RasterSource): Promise<Uint8Array>;
-  /** Render the first page(s) of a PDF to a raster source. */
-  rasterisePdf(bytes: Uint8Array, targetWidth: number): Promise<RasterSource>;
+  /**
+   * Render the first page(s) of a PDF to a raster source — opened with
+   * `password` when the PDF is locked (`documents/pdf-lock.ts`).
+   */
+  rasterisePdf(bytes: Uint8Array, targetWidth: number, password?: string): Promise<RasterSource>;
   /** Wrap already-encoded JPEG bytes in a single-page PDF. */
   wrapJpegInPdf(jpeg: Uint8Array, width: number, height: number): Promise<Uint8Array>;
   /**
@@ -99,6 +103,8 @@ export interface DerivationFailure {
     | 'decode-failed';
   /** Present when we got far enough to measure something. */
   attempts?: QualityAttempt[];
+  /** What actually went wrong, for the log. Never shown: `reason` is the user's. */
+  detail?: string;
 }
 
 export type DerivationResult =
@@ -127,6 +133,11 @@ export interface DeriveOptions extends SearchOptions {
    * cutting them off destroys it.
    */
   fit?: FitMode;
+  /**
+   * What a locked PDF opens with. The copy made from it is an ordinary,
+   * unlocked file: a portal is never handed a document it cannot open.
+   */
+  password?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -225,7 +236,7 @@ export async function derive(
   try {
     if (sourceMime === 'application/pdf') {
       // Rasterise generously; the resize step below scales down to the target.
-      source = await backend.rasterisePdf(bytes, pdfRasterWidth(constraint));
+      source = await backend.rasterisePdf(bytes, pdfRasterWidth(constraint), options.password);
     } else if (RASTER_MIMES.has(sourceMime)) {
       source = await backend.decode(bytes, sourceMime);
     } else {
@@ -242,7 +253,7 @@ export async function derive(
       reason:
         'That file could not be opened as an image. It may be corrupt, or its ' +
         `contents may not match its ${shortMime(sourceMime)} extension.`,
-      ...(error instanceof Error ? {} : {}),
+      detail: error instanceof Error ? error.message : String(error),
     };
   }
 
@@ -296,7 +307,7 @@ export async function derive(
 
     // JPEG, and PDF-wrapping-a-JPEG, both search the same quality dial.
     // For a PDF the byte window applies to the finished PDF, so leave headroom
-    // for the container: pdf-lib adds a small fixed overhead around the image.
+    // for the container: the wrapper (`pdf-wrap.ts`) adds a few hundred bytes.
     const wrapping = outputMime === 'application/pdf';
     const window = pick(constraint);
     const searchWindow = wrapping ? shrinkForPdfOverhead(window) : window;
@@ -372,10 +383,11 @@ function pick(constraint: DocConstraint): { minBytes?: number; maxBytes?: number
 
 /** Reserve room for the PDF container so the wrapped result still fits. */
 function shrinkForPdfOverhead(window: { minBytes?: number; maxBytes?: number }) {
-  const OVERHEAD = 2 * 1024;
+  // The most the wrapper can add comes off the cap, the least off the floor:
+  // the finished PDF is then inside the window, whatever the JPEG's size.
   const out = { ...window };
-  if (out.maxBytes !== undefined) out.maxBytes = Math.max(1024, out.maxBytes - OVERHEAD);
-  if (out.minBytes !== undefined) out.minBytes = Math.max(0, out.minBytes - OVERHEAD);
+  if (out.maxBytes !== undefined) out.maxBytes = Math.max(1024, out.maxBytes - PDF_WRAPPER_BYTES.most);
+  if (out.minBytes !== undefined) out.minBytes = Math.max(0, out.minBytes - PDF_WRAPPER_BYTES.least);
   return out;
 }
 

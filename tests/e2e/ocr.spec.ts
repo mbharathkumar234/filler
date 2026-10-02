@@ -1,8 +1,8 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { chromium, expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, expect, test, type BrowserContext, type Page, type Worker } from '@playwright/test';
 
 /**
  * The document reader, in the artefact that ships (§ reading a document).
@@ -48,8 +48,10 @@ type Answer = {
 
 /**
  * The reader's page opened as an ordinary tab — same page, same origin, same
- * CSP — plus a second extension page that draws text and asks for it back.
- * Every request the reader makes is recorded.
+ * CSP — plus a second extension page that draws text. The request goes from
+ * the service worker, as it does for real: the page refuses one from a tab,
+ * which is what a content script looks like. Every request the reader makes is
+ * recorded.
  */
 async function readerAndSender() {
   const launched = await launch();
@@ -71,7 +73,15 @@ async function readerAndSender() {
 
   const sender = await launched.context.newPage();
   await sender.goto(`chrome-extension://${launched.id}/practice/first-fill.html`);
-  return { reader, sender, outside, seen, cspViolations };
+  return { reader, sender, worker: launched.worker, outside, seen, cspViolations };
+}
+
+/** Send a request to the reader's page from the service worker, as the extension does. */
+function fromWorker<T>(worker: Worker, payload: Record<string, unknown>): Promise<T> {
+  return worker.evaluate(
+    (p) => chrome.runtime.sendMessage({ __af: true, at: Date.now(), payload: p }),
+    payload,
+  ) as Promise<T>;
 }
 
 /**
@@ -79,9 +89,15 @@ async function readerAndSender() {
  * many quarter turns clockwise the page is turned before it is handed over —
  * the phone held the wrong way round.
  */
-function drawAndAsk(sender: Page, lines: string[], copies = 1, turned = 0): Promise<Answer[]> {
-  return sender.evaluate(
-    async ([text, count, quarters]) => {
+async function drawAndAsk(
+  sender: Page,
+  worker: Worker,
+  lines: string[],
+  copies = 1,
+  turned = 0,
+): Promise<Answer[]> {
+  const image = await sender.evaluate(
+    async ([text, quarters]) => {
       const upright = document.createElement('canvas');
       upright.width = 1400;
       upright.height = 140 + text.length * 110;
@@ -103,17 +119,14 @@ function drawAndAsk(sender: Page, lines: string[], copies = 1, turned = 0): Prom
         turn.rotate((quarters * Math.PI) / 2);
         turn.drawImage(upright, -upright.width / 2, -upright.height / 2);
       }
-      const image = canvas.toDataURL('image/png').split(',')[1]!;
-
-      const ask = () =>
-        chrome.runtime.sendMessage({
-          __af: true,
-          at: Date.now(),
-          payload: { type: 'ocr:recognise', image, mime: 'image/png' },
-        }) as Promise<Answer>;
-      return Promise.all(Array.from({ length: count }, ask));
+      return canvas.toDataURL('image/png').split(',')[1]!;
     },
-    [lines, copies, turned] as const,
+    [lines, turned] as const,
+  );
+  return Promise.all(
+    Array.from({ length: copies }, () =>
+      fromWorker<Answer>(worker, { type: 'ocr:recognise', image, mime: 'image/png' }),
+    ),
   );
 }
 
@@ -145,9 +158,9 @@ test('the worker can open the reader’s page, and closes it again', async () =>
 
 test('reads the words off a rendered page, under the extension’s CSP, with nothing fetched', async () => {
   test.setTimeout(120_000);
-  const { sender, outside, seen, cspViolations } = await readerAndSender();
+  const { sender, worker, outside, seen, cspViolations } = await readerAndSender();
 
-  const [answer] = await drawAndAsk(sender, ['Name : RAVI KUMAR', 'Roll No 1234567']);
+  const [answer] = await drawAndAsk(sender, worker, ['Name : RAVI KUMAR', 'Roll No 1234567']);
 
   // The watch sees the worker's own traffic: the models were fetched, locally.
   expect(seen.some((url) => url.endsWith('/ocr/PP-OCRv5_mobile_det.onnx'))).toBe(true);
@@ -175,10 +188,10 @@ test('reads the words off a rendered page, under the extension’s CSP, with not
 
 test('scores a Kannada word it cannot read below the line the field rules use', async () => {
   test.setTimeout(120_000);
-  const { sender } = await readerAndSender();
+  const { sender, worker } = await readerAndSender();
 
   // English in one place, Kannada well apart from it, so each is its own box.
-  const [answer] = await drawAndAsk(sender, ['PRIYA S', 'ಕರ್ನಾಟಕ ಸರ್ಕಾರ']);
+  const [answer] = await drawAndAsk(sender, worker, ['PRIYA S', 'ಕರ್ನಾಟಕ ಸರ್ಕಾರ']);
   expect(answer!.ok, answer!.error).toBe(true);
 
   const items = answer!.data!.items;
@@ -193,10 +206,10 @@ test('scores a Kannada word it cannot read below the line the field rules use', 
 
 test('answers two overlapping readings, both of them', async () => {
   test.setTimeout(120_000);
-  const { sender } = await readerAndSender();
+  const { sender, worker } = await readerAndSender();
 
   // The StrictMode double press, at the reader's own door.
-  const answers = await drawAndAsk(sender, ['Register No 800417'], 2);
+  const answers = await drawAndAsk(sender, worker, ['Register No 800417'], 2);
 
   for (const answer of answers) {
     expect(answer.ok, answer.error).toBe(true);
@@ -225,9 +238,9 @@ for (const [turned, back, name] of [
 ] as const) {
   test(`stands a page photographed ${name} upright, and reads it`, async () => {
     test.setTimeout(120_000);
-    const { sender } = await readerAndSender();
+    const { sender, worker } = await readerAndSender();
 
-    const [answer] = await drawAndAsk(sender, CERTIFICATE, 1, turned);
+    const [answer] = await drawAndAsk(sender, worker, CERTIFICATE, 1, turned);
     expect(answer!.ok, answer!.error).toBe(true);
 
     // How far it was turned back, and the page's size once upright.
@@ -245,7 +258,7 @@ for (const [turned, back, name] of [
 
 test('reads on more than one CPU thread, because its page is isolated', async () => {
   test.setTimeout(120_000);
-  const { reader, sender, seen, outside, cspViolations } = await readerAndSender();
+  const { reader, sender, worker, seen, outside, cspViolations } = await readerAndSender();
 
   // The manifest's two cross-origin keys, as the browser actually applied them.
   const page = await reader.evaluate(() => ({
@@ -256,7 +269,7 @@ test('reads on more than one CPU thread, because its page is isolated', async ()
   expect(page.isolated).toBe(true);
   expect(page.shared).toBe(true);
 
-  const [answer] = await drawAndAsk(sender, ['Name : RAVI KUMAR', 'Roll No 1234567']);
+  const [answer] = await drawAndAsk(sender, worker, ['Name : RAVI KUMAR', 'Roll No 1234567']);
   expect(answer!.ok, answer!.error).toBe(true);
   expect(textOf(answer!)).toContain('RAVI KUMAR');
 
@@ -266,6 +279,56 @@ test('reads on more than one CPU thread, because its page is isolated', async ()
   const runtime = seen.filter((url) => /\/assets\/ort\.wasm[^/]*\.js$/.test(url));
   const threads = Math.max(1, Math.min(4, Math.floor(page.cores / 2)));
   expect(runtime).toHaveLength(threads);
+
+  expect(cspViolations).toEqual([]);
+  expect(outside).toEqual([]);
+});
+
+test('refuses a reading asked for from a tab, which is what a content script looks like', async () => {
+  const { sender } = await readerAndSender();
+  const answer = (await sender.evaluate(() =>
+    chrome.runtime.sendMessage({
+      __af: true,
+      at: Date.now(),
+      payload: { type: 'pdf:lock', pdf: 'JVBERi0xLjQ=' },
+    }),
+  )) as Answer;
+  expect(answer.ok).toBe(false);
+  expect(answer.error).toBe('Rejected.');
+});
+
+test('opens a locked PDF for the worker, with its password, under the extension’s CSP', async () => {
+  // The service worker cannot load pdf.js, so it asks this page. Until it did,
+  // no PDF opened anywhere in the extension.
+  test.setTimeout(120_000);
+  const { worker, outside, cspViolations } = await readerAndSender();
+  const pdf = readFileSync(fileURLToPath(new URL('../../fixtures/pdf/locked-aadhaar.pdf', import.meta.url))).toString('base64');
+  type Reply<T> = { ok: boolean; data?: T; error?: string };
+
+  const lock = (password?: string) =>
+    fromWorker<Reply<{ lock: string }>>(worker, { type: 'pdf:lock', pdf, ...(password ? { password } : {}) });
+  expect((await lock()).data?.lock).toBe('needs-password');
+  expect((await lock('ravi1998')).data?.lock).toBe('wrong-password');
+  expect((await lock('RAVI1998')).data?.lock).toBe('open');
+
+  const text = await fromWorker<Reply<{ text: string }>>(worker, { type: 'pdf:text', pdf, password: 'RAVI1998' });
+  expect(text.ok, text.error).toBe(true);
+  expect(text.data?.text).toContain('9999 9999 0019');
+
+  const page = await fromWorker<Reply<{ image: string; width: number; height: number }>>(worker, {
+    type: 'pdf:render',
+    pdf,
+    password: 'RAVI1998',
+    width: 1000,
+  });
+  expect(page.ok, page.error).toBe(true);
+  expect(page.data?.width).toBe(1000);
+  expect(page.data?.image.startsWith('iVBORw0KGgo')).toBe(true); // a PNG
+
+  // Without the password, a reading says what to do about it.
+  const locked = await fromWorker<Reply<unknown>>(worker, { type: 'pdf:text', pdf });
+  expect(locked.ok).toBe(false);
+  expect(locked.error).toMatch(/locked with a password the vault does not have/i);
 
   expect(cspViolations).toEqual([]);
   expect(outside).toEqual([]);

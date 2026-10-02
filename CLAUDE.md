@@ -60,6 +60,11 @@ If a requested feature conflicts with these, stop and flag it rather than implem
 - Run state machine: `src/runtime/machine.ts` (pure reducer) + `store.ts` + `persistence.ts`.
   The behaviour that uses them — pause, resume, drift recovery — is `content/run-controller.ts`,
   which takes ports rather than reaching for `chrome.*` so it can be driven against a fixture.
+- PDFs and the reader run in the offscreen page, never in the service worker: a service worker
+  may not call `import()`, so pdf.js can only load there. The worker asks it
+  (`background/ocr-host.ts` → `offscreenPdf`, `offscreenJobs` — one queue for everything the
+  page does). A locked PDF's password is asked for once at save (`documents/pdf-lock.ts`) and
+  sealed with the document (`vault/document-store.ts`); it is never derived from vault values.
 - Documents into forms: `documents/field-constraint.ts` (which requirement a box means),
   `background/fill-service.ts` (file boxes and drop areas, during Fill),
   `content/upload-slots.ts` (upload controls that are not file boxes),

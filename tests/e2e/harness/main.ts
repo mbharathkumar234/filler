@@ -3,7 +3,7 @@
  *
  * Unit tests cover the pipeline's decisions against a fake backend (§6.1: no
  * DOM). This harness exists so the *real* backend — OffscreenCanvas, the JPEG
- * encoder, pdf-lib — can be exercised in a real browser by Playwright. It is a
+ * encoder, pdf.js — can be exercised in a real browser by Playwright. It is a
  * test fixture and is never bundled into the extension.
  */
 
@@ -38,6 +38,9 @@ import type { FieldSnapshot } from '@/content/filler';
 import { findUploadButton, findUploadSlots } from '@/content/upload-slots';
 import { placeFileInWindow, probeUploadWindow, questionShowsFile } from '@/content/upload-window';
 import { pressUpload } from '@/content/upload-press';
+import { pdfLock } from '@/documents/pdf-lock';
+import { readPdfText } from '@/documents/pdf-text';
+import { extractFromText } from '@/documents/extract';
 import { constraintForField, fileNameFor } from '@/documents/field-constraint';
 import { bandOf, matchForm } from '@/matching/deterministic';
 import { isDocumentKey, isFieldKey } from '@/matching/taxonomy';
@@ -735,6 +738,35 @@ async function uploadAll(keysByLabel: Record<string, string>) {
     token: () => ({ value: 'e2e-approved', expiresAt: Date.now() + 90_000 }),
   });
 }
+
+async function bytesAt(url: string): Promise<Uint8Array> {
+  return new Uint8Array(await (await fetch(url)).arrayBuffer());
+}
+
+window.__pdf = {
+  lock: async (url, password) => pdfLock(await bytesAt(url), password),
+  read: async (url, password) => {
+    const text = await readPdfText(await bytesAt(url), password);
+    return extractFromText(text, { documentKey: 'doc.aadhaar_card' }).candidates.map((c) => ({
+      key: c.key,
+      value: c.value,
+      verified: c.verified,
+    }));
+  },
+  raster: async (url, password) => {
+    const page = await createRasterBackend().rasterisePdf(await bytesAt(url), 800, password);
+    return { width: page.width, height: page.height };
+  },
+  derive: async (url, password, constraintText) => {
+    const { constraint } = parseConstraint(constraintText);
+    const result = await derive(createRasterBackend(), await bytesAt(url), 'application/pdf', constraint, {
+      password,
+    });
+    if (!result.ok) return { ok: false, reason: result.reason };
+    const opens = result.mime === 'application/pdf' ? (await pdfLock(result.bytes)) === 'open' : true;
+    return { ok: true, mime: result.mime, opensWithoutPassword: opens };
+  },
+};
 
 window.__documents = {
   uploadAll,

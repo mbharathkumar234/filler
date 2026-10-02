@@ -73,6 +73,11 @@ export interface SerializedDocument extends SerializedSealed {
   label: string;
   meta: DocumentMeta;
   createdAt: string;
+  /**
+   * The password a locked PDF opens with, sealed, copied verbatim like the
+   * bytes. Absent for every other document, and in a file written before it.
+   */
+  password?: SerializedSealed;
 }
 
 /**

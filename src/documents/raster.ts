@@ -14,6 +14,8 @@
 import type { RasterBackend, RasterSource } from './derive';
 import type { TargetBox } from './geometry';
 import { readShape, type ContentBox, type LuminanceImage, type ShapeReading } from './trim';
+import { loadPdfJs } from './pdfjs';
+import { jpegInPdf } from './pdf-wrap';
 
 /** White, so a letterboxed photograph looks like a photograph and not a hole. */
 const PAD_COLOUR = '#ffffff';
@@ -179,7 +181,17 @@ export async function measureShape(
   }
 }
 
-export function createRasterBackend(): RasterBackend {
+/**
+ * Where a PDF's page is rendered, when not here.
+ *
+ * pdf.js cannot be loaded in a service worker (`documents/pdfjs.ts`), so the
+ * worker's backend hands a PDF to the offscreen page and gets a PNG back
+ * (`background/ocr-host.ts` → `workerRasterBackend`). Everywhere else pdf.js
+ * runs in place and this is left out.
+ */
+export type PdfRenderer = (bytes: Uint8Array, width: number, password?: string) => Promise<Uint8Array>;
+
+export function createRasterBackend(options: { renderPdf?: PdfRenderer } = {}): RasterBackend {
   return {
     async decode(bytes, mime) {
       const bitmap = await createImageBitmap(new Blob([bytes as BlobPart], { type: mime }));
@@ -267,10 +279,18 @@ export function createRasterBackend(): RasterBackend {
       return toBytes(await canvas.convertToBlob({ type: 'image/png' }));
     },
 
-    async rasterisePdf(bytes, targetWidth) {
+    async rasterisePdf(bytes, targetWidth, password) {
+      if (options.renderPdf !== undefined) {
+        const png = await options.renderPdf(bytes, targetWidth, password);
+        const bitmap = await createImageBitmap(new Blob([png as BlobPart], { type: 'image/png' }));
+        return { width: bitmap.width, height: bitmap.height, handle: bitmap };
+      }
       const { getDocument } = await loadPdfJs();
       // `data` is transferred, so hand pdf.js a copy the caller still owns.
-      const task = getDocument({ data: new Uint8Array(bytes) });
+      const task = getDocument({
+        data: new Uint8Array(bytes),
+        ...(password === undefined ? {} : { password }),
+      });
       const pdf = await task.promise;
       try {
         const page = await pdf.getPage(1);
@@ -290,6 +310,16 @@ export function createRasterBackend(): RasterBackend {
           canvas: canvas as unknown as HTMLCanvasElement,
           canvasContext: ctx as unknown as CanvasRenderingContext2D,
           viewport,
+          /*
+           * "print", not the default "display". A display render paces itself
+           * by `requestAnimationFrame`, and a page nobody can see — the
+           * offscreen page, where this runs — never gets an animation frame:
+           * the render waited forever and every portal copy of a PDF timed out
+           * after two and a half minutes. Print renders straight through, and
+           * draws the page as it would come out on paper, which is the copy a
+           * portal wants anyway.
+           */
+          intent: 'print',
         }).promise;
 
         const bitmap = canvas.transferToImageBitmap();
@@ -302,14 +332,9 @@ export function createRasterBackend(): RasterBackend {
     },
 
     async wrapJpegInPdf(jpeg, width, height) {
-      // Loaded lazily, like pdf.js: most derivations never touch a PDF, and a
-      // static import would put ~700 KB into the service worker's cold start.
-      const { PDFDocument } = await import('pdf-lib');
-      const doc = await PDFDocument.create();
-      const image = await doc.embedJpg(jpeg);
-      const page = doc.addPage([width, height]);
-      page.drawImage(image, { x: 0, y: 0, width, height });
-      return doc.save({ useObjectStreams: true });
+      // Written here rather than by pdf-lib, which had to be loaded with
+      // `import()` — not allowed in the service worker, where fills run.
+      return jpegInPdf(jpeg, width, height);
     },
 
     release(source) {
@@ -327,18 +352,4 @@ function drawToCanvas(bitmap: ImageBitmap): OffscreenCanvas {
   if (!ctx) throw new Error('OffscreenCanvas 2D context unavailable.');
   ctx.drawImage(bitmap, 0, 0);
   return canvas;
-}
-
-/**
- * Load pdf.js lazily and with its worker disabled.
- *
- * It is ~1 MB, only needed when a PDF is actually involved, and a separate
- * worker script is awkward to ship under the extension's strict CSP. Running
- * on the calling thread is slower but keeps `script-src 'self'` intact and
- * avoids a second code path to audit (§ Phase 10).
- */
-async function loadPdfJs() {
-  const pdfjs = await import('pdfjs-dist');
-  pdfjs.GlobalWorkerOptions.workerSrc = '';
-  return pdfjs;
 }

@@ -117,11 +117,16 @@ export function constraintForField(input: FieldRequirementInput): FieldRequireme
  * into a picture of one. A physical size, an aspect or a DPI always goes
  * through the pipeline, because whether a file "is 3.5 × 4.5 cm" depends on a
  * plan, not on a measurement.
+ *
+ * Never a locked PDF: whoever opens it on the portal's side has no password.
+ * The copy made from it, opened with the password the vault keeps, is an
+ * ordinary file.
  */
 export function canPassThrough(
-  meta: Pick<DocumentMeta, 'mime' | 'bytes' | 'width' | 'height'>,
+  meta: Pick<DocumentMeta, 'mime' | 'bytes' | 'width' | 'height'> & { locked?: true },
   constraint: DocConstraint,
 ): boolean {
+  if (meta.locked === true) return false;
   if (!READABLE_SOURCE_MIMES.has(meta.mime)) return false;
   if (constraint.mime.length > 0 && !constraint.mime.includes(meta.mime)) return false;
 

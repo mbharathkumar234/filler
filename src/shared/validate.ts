@@ -137,6 +137,16 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   // document upload cap with room for base64's third.
   'ocr:recognise': (r) => str(r.image, Math.ceil(LIMITS.bytes * 1.4)) && str(r.mime, 100),
 
+  // One stored PDF as base64, under the same ceiling, and what it opens with.
+  'pdf:lock': (r) => str(r.pdf, Math.ceil(LIMITS.bytes * 1.4)) && optionalStr(r.password, 256),
+  'pdf:text': (r) => str(r.pdf, Math.ceil(LIMITS.bytes * 1.4)) && optionalStr(r.password, 256),
+  'pdf:render': (r) =>
+    str(r.pdf, Math.ceil(LIMITS.bytes * 1.4)) &&
+    optionalStr(r.password, 256) &&
+    num(r.width) &&
+    (r.width as number) >= 1 &&
+    (r.width as number) <= 4000,
+
   'doc:put': (r) =>
     key(r.key) &&
     str(r.label) &&
@@ -145,7 +155,9 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
     num(r.height) &&
     Array.isArray(r.bytes) &&
     r.bytes.length <= LIMITS.bytes &&
-    r.bytes.every((byte) => typeof byte === 'number' && byte >= 0 && byte <= 255),
+    r.bytes.every((byte) => typeof byte === 'number' && byte >= 0 && byte <= 255) &&
+    // What a locked PDF opens with. PDF allows 127 bytes; this is room, not a target.
+    optionalStr(r.password, 256),
   'doc:delete': (r) => str(r.id, 200),
   'doc:derive': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,
   'doc:preflight': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,

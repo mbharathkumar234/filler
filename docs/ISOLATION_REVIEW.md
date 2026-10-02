@@ -171,7 +171,15 @@ matter for isolation:
 
 - The offscreen page is one of the extension's own pages. It is never injected
   into a tab, has no `web_accessible_resources` entry, and a site cannot address
-  it: `ocr:recognise` is refused from anything with a `sender.tab`.
+  it: `ocr:recognise` and the `pdf:*` requests are refused from anything with a
+  `sender.tab`, by the page itself (`offscreen/ocr.ts`), which also checks each
+  request's shape — the worker leaves these messages to the page, so the page
+  applies the worker's rules.
+- PDFs are opened there too, with pdf.js on the page's own thread: a service
+  worker may not call `import()`, so it hands each PDF over (`pdf:lock`,
+  `pdf:text`, `pdf:render`) and gets back an answer, a text layer or a PNG. A
+  locked PDF's password travels with the request that needs it and is dropped
+  with it; it is kept only in the vault, sealed with the document.
 - The recognition engine is **not in the content script**. `dist/content.js` is
   checked after every build for the reader's own names (`readPage`,
   `uprightPage`, `findTextBoxes`, `decodeCtc`, `layoutText`), for `onnxruntime` and

@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
  *
  * The unit suite proves the pipeline's *decisions* against a fake backend. This
  * spec proves the actual output: a real JPEG encoder, real OffscreenCanvas
- * resampling, real pdf-lib output — in a real browser, which is the only place
+ * resampling, a real PDF around it — in a real browser, which is the only place
  * any of that exists.
  *
  * Assertions check file magic bytes rather than trusting the reported mime, so

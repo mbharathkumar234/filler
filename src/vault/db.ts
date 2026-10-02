@@ -64,6 +64,12 @@ export interface StoredDocument {
   label: string;
   meta: DocumentMeta;
   sealed: SealedRecord;
+  /**
+   * The password a locked PDF opens with, sealed like the bytes. Absent for
+   * everything else. Optional, so no migration: a record without it is a
+   * document that needs none.
+   */
+  sealedPassword?: SealedRecord;
   createdAt: string;
 }
 

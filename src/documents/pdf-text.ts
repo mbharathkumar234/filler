@@ -24,6 +24,7 @@
  */
 
 import type { PdfTextReader } from './read-document';
+import { loadPdfJs } from './pdfjs';
 
 /**
  * Two fragments within this many units of the same baseline are on one line.
@@ -74,26 +75,12 @@ export function reconstructLines(fragments: readonly Fragment[]): string[] {
   ).filter((line) => line !== '');
 }
 
-/**
- * Load pdf.js with its worker disabled.
- *
- * The same choice `raster.ts` makes and for the same reason: a separate worker
- * script is awkward under `script-src 'self'`, and running on the calling
- * thread keeps the CSP intact. Text extraction is far cheaper than rendering,
- * so the cost is smaller here than there.
- */
-async function loadPdfJs() {
-  const pdfjs = await import('pdfjs-dist');
-  pdfjs.GlobalWorkerOptions.workerSrc = '';
-  return pdfjs;
-}
-
 /** How many pages to read. An ID document is one or two; a statement is not. */
 const MAX_PAGES = 5;
 
-export const readPdfText: PdfTextReader = async (bytes) => {
+export const readPdfText: PdfTextReader = async (bytes, password) => {
   const { getDocument } = await loadPdfJs();
-  const task = getDocument({ data: new Uint8Array(bytes) });
+  const task = getDocument({ data: new Uint8Array(bytes), ...(password === undefined ? {} : { password }) });
   const pdf = await task.promise;
 
   try {

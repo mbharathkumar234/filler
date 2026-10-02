@@ -37,7 +37,7 @@
  * value stays visible beside the line it came from either way.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { DocumentExtraction, ExtractedCandidate } from '@/background/document-service';
 import { groupFor, groupOrder, labelFor } from '@/ui/lib/field-groups';
@@ -52,6 +52,13 @@ interface Props {
 }
 
 type Draft = { value: string; checked: boolean };
+
+/**
+ * Detail, value, tick. The detail column is kept narrow: in the side panel the
+ * row is about 250 pixels, and every pixel the label does not need is one the
+ * value can show.
+ */
+const ROW_COLUMNS = 'grid-cols-[minmax(5rem,6.5rem)_1fr_auto]';
 
 const SOURCE_TEXT: Record<DocumentExtraction['source'], string> = {
   'pdf-text-layer':
@@ -239,7 +246,7 @@ export function ExtractedDetails({ documentId, documentLabel, onLocked, onSaved,
                      */}
                     <div
                       aria-hidden="true"
-                      className="mt-2 grid grid-cols-[minmax(6rem,8rem)_1fr_auto] gap-2 border-b border-slate-100 pb-1 text-[10px] uppercase tracking-wide text-slate-400"
+                      className={`mt-2 grid ${ROW_COLUMNS} gap-2 border-b border-slate-100 pb-1 text-[10px] uppercase tracking-wide text-slate-400`}
                     >
                       <span>Detail</span>
                       <span>Value read</span>
@@ -334,9 +341,26 @@ function Row({
   onChange: (patch: Partial<Draft>) => void;
 }) {
   const inputId = `extract-${candidate.key}`;
+  const field = useRef<HTMLTextAreaElement>(null);
+  /** Whether the picture is shown at its own size rather than fitted to the row. */
+  const [fullSize, setFullSize] = useState(false);
+  /** Whether fitting it to the row made it smaller than it is. */
+  const [shrunk, setShrunk] = useState(false);
+
+  // As tall as the value, so every word of it is on screen to compare with the
+  // card. (CSS can do this with `field-sizing`, which the oldest Chrome this
+  // supports does not have.)
+  useLayoutEffect(() => {
+    const box = field.current;
+    if (box === null) return;
+    box.style.height = 'auto';
+    // The scroll height is the text and its padding; the box is sized border
+    // to border, so its two borders are added back or the last line is clipped.
+    box.style.height = `${box.scrollHeight + box.offsetHeight - box.clientHeight}px`;
+  }, [draft.value]);
 
   return (
-    <li className="grid grid-cols-[minmax(6rem,8rem)_1fr_auto] items-start gap-2 py-1.5">
+    <li className={`grid ${ROW_COLUMNS} items-start gap-x-2 gap-y-1 py-1.5`}>
       <label
         id={`${inputId}-label`}
         htmlFor={inputId}
@@ -345,20 +369,63 @@ function Row({
         {labelFor(candidate.key)}
       </label>
 
-      <div className="min-w-0">
-        <input
-          id={inputId}
-          value={draft.value}
-          onChange={(event) => onChange({ value: event.target.value })}
-          className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
-        />
+      {/*
+       * Wraps like a paragraph, saves like the one line it is. The side panel
+       * leaves the value about a hundred pixels, and a one-line box showed the
+       * start of a name and scrolled the rest out of sight.
+       */}
+      <textarea
+        id={inputId}
+        ref={field}
+        rows={1}
+        value={draft.value}
+        onChange={(event) => onChange({ value: event.target.value.replace(/\s*[\r\n]+\s*/g, ' ') })}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') event.preventDefault();
+        }}
+        className="min-w-0 w-full resize-none overflow-hidden rounded border border-slate-300 px-2 py-1 text-sm leading-snug"
+      />
 
+      {/* At the end of the pair: the last thing you do, after reading across. */}
+      <input
+        type="checkbox"
+        checked={draft.checked}
+        onChange={(event) => onChange({ checked: event.target.checked })}
+        aria-labelledby={`${inputId}-label`}
+        className="mt-2 h-4 w-4"
+      />
+
+      {/*
+       * Under the pair, across the whole row. In the value's column the picture
+       * was squeezed to that column's hundred pixels, and a row of a marks
+       * table came out as a sliver nobody could read.
+       */}
+      <div data-evidence className="col-span-3 min-w-0">
         {candidate.crop !== undefined && (
-          <img
-            src={`data:image/jpeg;base64,${candidate.crop}`}
-            alt={`The part of the document ${labelFor(candidate.key)} was read from`}
-            className="mt-1 max-h-28 w-full rounded border border-slate-200 bg-slate-50 object-contain object-left"
-          />
+          <>
+            <div className={fullSize ? 'overflow-x-auto' : ''}>
+              <img
+                src={`data:image/jpeg;base64,${candidate.crop}`}
+                alt={`The part of the document ${labelFor(candidate.key)} was read from`}
+                onLoad={(event) => {
+                  const picture = event.currentTarget;
+                  setShrunk(picture.naturalWidth > picture.clientWidth + 1);
+                }}
+                className={`block h-auto rounded border border-slate-200 bg-slate-50 ${
+                  fullSize ? 'max-w-none' : 'max-w-full'
+                }`}
+              />
+            </div>
+            {(shrunk || fullSize) && (
+              <button
+                type="button"
+                onClick={() => setFullSize((was) => !was)}
+                className="mt-0.5 text-[11px] text-blue-700 underline"
+              >
+                {fullSize ? 'Fit the picture to the panel' : 'Show the picture at full size'}
+              </button>
+            )}
+          </>
         )}
 
         <p className="mt-0.5 text-[11px] text-slate-500">
@@ -371,15 +438,6 @@ function Row({
           )}
         </p>
       </div>
-
-      {/* At the end of the pair: the last thing you do, after reading across. */}
-      <input
-        type="checkbox"
-        checked={draft.checked}
-        onChange={(event) => onChange({ checked: event.target.checked })}
-        aria-labelledby={`${inputId}-label`}
-        className="mt-2 h-4 w-4"
-      />
     </li>
   );
 }

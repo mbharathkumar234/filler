@@ -102,6 +102,8 @@ export async function exportVault(db: VaultDb, meta: VaultMeta): Promise<string>
       meta: d.meta,
       createdAt: d.createdAt,
       ...seal(d.sealed),
+      // A locked PDF travels with what opens it, or it is restored unopenable.
+      ...(d.sealedPassword === undefined ? {} : { password: seal(d.sealedPassword) }),
     })),
     settings: settings.map((setting) => ({
       name: setting.name,
@@ -168,6 +170,18 @@ function looksLikeSetting(row: SerializedSetting): boolean {
     typeof row.updatedAt === 'string' &&
     typeof row.iv === 'string' &&
     typeof row.ct === 'string'
+  );
+}
+
+/** A sealed value as a backup carries it: base64 IV and ciphertext. */
+function looksSealed(value: unknown): value is SerializedSealed {
+  const sealed = value as Partial<SerializedSealed> | undefined;
+  return (
+    typeof sealed === 'object' &&
+    sealed !== null &&
+    typeof sealed.iv === 'string' &&
+    typeof sealed.ct === 'string' &&
+    typeof sealed.v === 'number'
   );
 }
 
@@ -253,6 +267,7 @@ export async function importVault(
       label: row.label,
       meta: { ...row.meta, key: row.key as FieldKey },
       sealed: unseal(row),
+      ...(looksSealed(row.password) ? { sealedPassword: unseal(row.password) } : {}),
       createdAt: row.createdAt,
     });
   }

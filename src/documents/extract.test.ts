@@ -317,6 +317,17 @@ describe('dates, in the shapes Indian cards actually print them', () => {
     const result = extractFromText('Date of Issue: 01/01/2020\nValid Until: 01/01/2030');
     expect(candidateFor(result, 'identity.dob')).toBeUndefined();
   });
+
+  it('reads the label through a speck the photograph glued to it', () => {
+    // An Aadhaar letter photographed sideways, read in the real extension:
+    // "0DOB:" — a mark on the paper read as a zero, touching the label. The
+    // date was perfect and the rule never looked at it.
+    expect(candidateFor(extractFromText('0DOB:14/03/2005 -'), 'identity.dob')?.value).toBe('2005-03-14');
+  });
+
+  it('still wants the label to be a word of its own, not the end of another', () => {
+    expect(candidateFor(extractFromText('Rebirth 14/03/2005'), 'identity.dob')).toBeUndefined();
+  });
 });
 
 describe('what it refuses to look for at all', () => {

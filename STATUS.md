@@ -582,6 +582,9 @@ answer for DOM-dependent processing and is a piece of work in its own right.
 Until then, PDF rasterisation and PDF text extraction in the worker are the
 untested-in-a-real-worker paths, and should be treated as such.
 
+> **Closed in Phase 3, step 2.** Tested in a real worker, they had never worked
+> at all; PDFs are now opened by the offscreen page. See below.
+
 ---
 
 # The content script never ran
@@ -1381,9 +1384,120 @@ on one thread, as before.
 - **PAN, passbook and cheque, and the KCET papers are not measured.** The
   rules for them are tested against fixtures of what a reading looks like, not
   against the user's own documents. It needs pictures.
-- **Not yet pressed in the installed extension.** Every number above is from
-  the extension's own modules and its built package driven by tests; nobody has
-  yet reloaded it and pressed "Read details from this" on a saved document.
+- ~~**Not yet pressed in the installed extension.**~~ Done in Phase 3, step 1,
+  below.
 - **One language box.** An SSLC card has three languages; the second and third
   are read and kept in the subject list only.
 - **Kannada text is not read**, and **handwriting** is not read.
+
+# Phase 3, step 1: the real extension, pressed
+
+The built extension, its real side panel, a new vault, and the user's five
+documents saved and read through the panel's own buttons: "Add", "Save to
+vault", "Read details from this", every tick, "Save … to my vault". Then the
+Aadhaar letter again, photographed sideways, saved over the first.
+
+| | |
+|---|---|
+| Fields found, against the answer key | **34 / 34**, and **11 / 11** for the sideways letter |
+| A picture beside each value | every row, all six readings |
+| Time per document, button to answer | 3–7 s on this machine (the first includes loading the models); up to 11 s while the machine was busy |
+| Saved to the vault through the screen | 42 details, read back from the vault afterwards |
+| Requests that left the extension | none |
+| Errors or warnings in the panel | none |
+
+**How it was driven.** The worker refuses vault requests from an extension page
+opened in a tab — a tab is what a content script looks like, and that refusal is
+the guard (`messages.ts` → `isPrivilegedSender`). So the panel has to be the real
+side panel: it is opened by a real click (`chrome.sidePanel.open` needs one) and
+driven over the DevTools protocol, the only way into a side panel from outside.
+The driver, the documents and the screenshots stay in the session's scratchpad.
+
+## What pressing it found
+
+| Found | Fixed | Proof |
+|-------|-------|-------|
+| The sideways letter read its date of birth as `0DOB:dd/mm/yyyy` — a mark on the paper touching the label — and the rule, anchored on `\bDOB`, never saw a label: a digit is a word character | The label must not follow a *letter*, rather than a word character | `extract.test.ts` → "reads the label through a speck the photograph glued to it", which failed first; 11 / 11 in the panel |
+| "Read details from this" pressed while a new file was still being saved over the old one: the reading started on the copy on its way out, its panel vanished when the slot got the new copy, and nothing said what had happened (one run waited 94 s) | Read is not pressable while the slot is saving; and a reading belongs to its slot, not to a document id, so a reading open during a replacement reads the new copy | `DocumentsPanel.test.tsx` → "reading a document that is being replaced", both failing first; in the panel, Read was disabled during the save, and a reading open across a replacement showed the new copy's details |
+| "Recognised from an image … compare each value" said twice, one line under the other — once from how the reading was made, once as a note | The reader's notes no longer repeat what its `source` says; the screen says it once | `read-document.test.ts`; counted in the panel: once per reading |
+| In the real panel (360 pixels) the value box was 92 pixels wide — "M Kiran Kum", "CENTRAL BOARD O" — and the picture was squeezed into the same 92 pixels, which made a row of a marks table unreadable | The value wraps in a box that grows with it, and never takes a line break; the picture spans the whole row (250 pixels), with "Show the picture at full size" when fitting shrank it; the detail column is narrower | `ExtractedDetails.test.tsx` → "the shape of a row"; measured in the panel: all 16 rows of the CBSE card whole, every tick inside its row, no sideways scrolling |
+
+None of the four showed in any unit test, the bench or the e2e suite before the
+panel was pressed: the bench reads documents without the panel, the e2e suite
+reads rendered text without the vault, and jsdom has no layout.
+
+## Still open
+
+- **This is not yet a test that runs every time.** The driver proves the path
+  once, on this machine, with the user's documents. An e2e test could drive the
+  real side panel the same way with a drawn document; it does not exist yet.
+- Everything under Phase 2's "Still open", except the line this closes.
+
+# Phase 3, step 2: PDFs locked with a password — and PDFs at all
+
+An e-Aadhaar and an e-PAN are downloaded locked. The user chose how the
+password is got: **asked for**, never worked out from the name and birth year
+the vault already holds.
+
+## What happens now
+
+1. **Saving a PDF tries it first.** One that opens by itself is saved as before
+   — including one with only an owner password, which opens freely and keeps no
+   password (`documents/pdf-lock.ts` → `admitPdf`).
+2. **One that needs a password is not saved,** and the slot asks for it: what
+   the password is for, that it is kept sealed and never leaves the device, and
+   the pattern for an e-Aadhaar (first four letters of the name in capitals,
+   then the birth year) or an e-PAN (date of birth as DDMMYYYY) — a reminder,
+   never filled in. A wrong one is said to be wrong, and the box is emptied.
+3. **The right one saves the document with its password,** encrypted with the
+   vault key like the bytes (`vault/document-store.ts` → `sealedPassword`). The
+   listing says only that it is locked. A backup carries it sealed and a restore
+   puts it back; replacing or removing the document removes it.
+4. **Every later use opens it with that password, without asking:** the exact
+   text layer (an e-Aadhaar's number read exactly and checksum-verified), the
+   page rendered for recognition, the pictures beside each value, and the copy
+   made for a portal — which is never the locked file as it is
+   (`canPassThrough` refuses a locked master), always an ordinary one.
+
+## What pressing it found: no PDF had ever opened
+
+The locked-PDF tests were the first to open a real PDF in a real browser, and
+it failed in a way that had nothing to do with passwords. Three faults, each
+alone enough:
+
+| Fault | Fix | Proof |
+|-------|-----|-------|
+| pdf.js finds its parsing code at `globalThis.pdfjsWorker` or loads it from `workerSrc`. `workerSrc` had been emptied and the worker code never loaded, so every `getDocument` rejected — "No GlobalWorkerOptions.workerSrc specified" | `documents/pdfjs.ts` loads the worker module, which sets `globalThis.pdfjsWorker`; `verify-dist.mjs` fails a build without it | `e2e/pdf-lock.spec.ts`, failing first with exactly that message |
+| A service worker may not call `import()` — the HTML specification forbids it — and pdf.js and pdf-lib were both loaded that way, in the worker, where reading and portal copies run. Confirmed by calling `import()` in the extension's own worker | PDFs are opened by the offscreen page (`pdf:lock`, `pdf:text`, `pdf:render`), in the same single queue as readings (`ocr-host.ts` → `offscreenJobs`, `offscreenPdf`). pdf-lib is gone: a JPEG on a PDF page is a few hundred bytes of fixed structure, written by `documents/pdf-wrap.ts` and checked offset by offset; the dependency is removed | `e2e/ocr.spec.ts` → "opens a locked PDF for the worker…"; `pdf-wrap.test.ts`; the release gates' dependency list and record |
+| In the offscreen page, rendering never finished: pdf.js paces a display render by `requestAnimationFrame`, and a page nobody can see never gets one. Every portal copy of a PDF timed out after 150 seconds | Render with the `print` intent, which runs straight through (`raster.ts`) | Driven through the real panel: the copy took 150 036 ms before, 345 ms after |
+
+The messages the offscreen page answers are now checked **by the page** for an
+extension sender with no tab, and for shape. Before, the page checked only that
+the sender was this extension, and the worker — which leaves these messages to
+the page — checked nothing.
+
+## Driven through the real panel
+
+The built extension, its real side panel, a new vault, and two made-up PDFs
+(`fixtures/pdf/`, generated by `scripts/make-locked-pdf-fixtures.py`):
+
+| Step | Result |
+|------|--------|
+| Save the AES-256 e-Aadhaar stand-in | asked for the password; nothing in the vault |
+| Type a wrong one | "That password did not open it"; still nothing in the vault |
+| Type `RAVI1998` | saved; the listing says `locked`, and never the password |
+| Read details from this | 264 ms, read exactly from the text layer; name, father, date of birth, gender, and the Aadhaar number ticked because its checksum verified |
+| Ask for a PDF copy for a portal | made fresh (never passed through), and not locked |
+| Save a PDF with only an owner password | no question; read normally |
+| Requests that left the extension; errors or warnings | none |
+
+2,854 unit tests and 126 browser tests pass; `npm audit` finds nothing.
+
+## Still open
+
+- **JPEG 2000 and JBIG2 images inside a PDF** are not drawn: pdf.js decodes them
+  with WebAssembly modules this package does not ship yet. Text and ordinary
+  images are unaffected.
+- **A scanned PDF is read from its first page only** — Phase 3, step 3.
+- **A PDF saved locked before this change** has no password with it; reading it
+  says so and asks for it to be saved again.

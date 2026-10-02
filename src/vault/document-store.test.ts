@@ -134,6 +134,65 @@ describe('masters', () => {
   });
 });
 
+describe('a PDF that opens with a password', () => {
+  /*
+   * An e-Aadhaar is downloaded locked. The user types its password once, when
+   * they save it; it is kept with the document, sealed like the document, so
+   * every later reading and every portal copy can open it without asking again.
+   * The vault's own passphrase guards both: the key is kept in the same safe as
+   * the box it opens, never beside it in the clear.
+   */
+  const LOCKED = new TextEncoder().encode('%PDF-1.7 locked stand-in');
+  const PDF_META = { mime: 'application/pdf', bytes: LOCKED.length, width: 0, height: 0, capturedAt: '2026-08-25T00:00:00Z' };
+  const save = (password?: string) =>
+    putMaster(db, key, {
+      key: 'doc.aadhaar_card',
+      label: 'Aadhaar card',
+      bytes: LOCKED,
+      meta: PDF_META,
+      ...(password === undefined ? {} : { password }),
+    });
+
+  it('gives the password back with the document', async () => {
+    const summary = await save('RAVI1998');
+    expect((await getMaster(db, key, summary.id))?.password).toBe('RAVI1998');
+    expect((await getMasterByKey(db, key, 'doc.aadhaar_card'))?.password).toBe('RAVI1998');
+  });
+
+  it('says the document is locked, without saying with what', async () => {
+    const summary = await save('RAVI1998');
+    expect(summary.locked).toBe(true);
+    expect((await listMasters(db))[0]?.locked).toBe(true);
+    expect(JSON.stringify(await listMasters(db))).not.toContain('RAVI1998');
+  });
+
+  it('never keeps the password in the clear', async () => {
+    await save('PASSWORD-CANARY-1998');
+    const raw = JSON.stringify(await db.getAll('documents'), (_k, v: unknown) =>
+      v instanceof Uint8Array ? new TextDecoder().decode(v) + Array.from(v).join(',') : v,
+    );
+    expect(raw).not.toContain('PASSWORD-CANARY');
+  });
+
+  it('forgets the password when the slot gets a document that needs none', async () => {
+    await save('RAVI1998');
+    const replaced = await putMaster(db, key, {
+      key: 'doc.aadhaar_card',
+      label: 'Aadhaar card',
+      bytes: PHOTO,
+      meta: META,
+    });
+    expect(replaced.locked).toBeUndefined();
+    expect((await getMaster(db, key, replaced.id))?.password).toBeUndefined();
+  });
+
+  it('says nothing about a password for a document that never had one', async () => {
+    const summary = await putMaster(db, key, { key: 'doc.photo', label: 'Photo', bytes: PHOTO, meta: META });
+    expect(summary.locked).toBeUndefined();
+    expect((await getMaster(db, key, summary.id))?.password).toBeUndefined();
+  });
+});
+
 describe('variant cache', () => {
   const { constraint } = parseConstraint('JPEG, 20 KB to 50 KB, 3.5 cm × 4.5 cm');
   const VARIANT = new Uint8Array(30 * 1024).fill(0x7f);

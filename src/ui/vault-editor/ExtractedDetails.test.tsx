@@ -175,6 +175,13 @@ describe('what it says it could not save', () => {
     // read, kept in the subject list, and said to be.
     expect(screen.getByText(/saved only in the subject list: HINDI/i)).toBeTruthy();
   });
+
+  it('says once that a recognised reading must be checked', async () => {
+    // Driven through the real panel, it said so twice, one line under the
+    // other: once from how the reading was made, once as a note of its own.
+    await open();
+    expect(screen.getAllByText(/compare each value|check each value/i)).toHaveLength(1);
+  });
 });
 
 describe('the shape of a row', () => {
@@ -190,15 +197,36 @@ describe('the shape of a row', () => {
     // the tick is the tick *for that detail*. Find the row by the value box.
     const value = document.getElementById('extract-education.class_10.registration_number')!;
     const row = value.closest('li')!;
-    const controls = [...row.querySelectorAll('input')];
+    const controls = [...row.querySelectorAll('textarea, input')];
     expect(controls).toHaveLength(2);
-    expect(controls[0]!.type).toBe('text');
-    expect(controls[1]!.type).toBe('checkbox');
+    expect(controls[0]).toBe(value);
+    expect((controls[1] as HTMLInputElement).type).toBe('checkbox');
   });
 
   it('heads each group with what the two columns are', async () => {
     await open();
     expect(screen.getAllByText('Value read').length).toBeGreaterThan(0);
+  });
+
+  it('shows the whole value, however long, rather than the start of it', async () => {
+    // In the real side panel the value column is about a hundred pixels wide.
+    // A one-line box showed "M Kiran Kum" of a name and "CENTRAL BOARD O" of
+    // a board — the rest scrolled out of sight, on the screen whose one job is
+    // comparing the value with the card. A box that wraps shows all of it.
+    await open();
+    const board = document.getElementById('extract-education.class_10.board_or_university')!;
+    expect(board.tagName).toBe('TEXTAREA');
+  });
+
+  it('never puts a line break into a value', async () => {
+    // It wraps like a paragraph and saves like the one line it is: Enter does
+    // nothing, and a line break pasted in becomes a space.
+    const user = await open();
+    const school = document.getElementById('extract-education.class_10.institution') as HTMLTextAreaElement;
+    await user.clear(school);
+    await user.type(school, 'GOVT HIGH SCHOOL{Enter}');
+    await user.paste('TUMKUR\nTALUK');
+    expect(school.value).toBe('GOVT HIGH SCHOOLTUMKUR TALUK');
   });
 });
 
@@ -220,5 +248,15 @@ describe('the piece of the card a value was read from', () => {
     await open();
     expect(screen.getAllByRole('img')).toHaveLength(1);
     expect(screen.getAllByText(/^Read from:/).length).toBeGreaterThan(5);
+  });
+
+  it('gives the picture the width of the whole row, not the value’s column', async () => {
+    // Squeezed into the value's column the picture was shrunk to a hundred
+    // pixels, and a row of a marks table came out as an unreadable sliver.
+    await open();
+    const picture = screen.getByRole('img', { name: /Registration number/i });
+    const value = document.getElementById('extract-education.class_10.registration_number')!;
+    expect(picture.closest('div')?.contains(value)).toBe(false);
+    expect(picture.closest('[data-evidence]')).not.toBeNull();
   });
 });

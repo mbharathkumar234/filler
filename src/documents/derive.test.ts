@@ -61,7 +61,8 @@ function fakeBackend(
     },
     async wrapJpegInPdf(jpeg) {
       calls.wrapJpegInPdf += 1;
-      return new Uint8Array(jpeg.length + 1200);
+      // What the real wrapper (`pdf-wrap.ts`) adds, give or take.
+      return new Uint8Array(jpeg.length + 700);
     },
     release() {
       calls.release += 1;
@@ -233,7 +234,7 @@ describe('PDF paths', () => {
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    // The JPEG search targets 48 KB; the container's ~1.2 KB must still fit.
+    // The JPEG search leaves room for the wrapper's few hundred bytes.
     expect(result.bytes.length).toBeLessThanOrEqual(50 * KB);
     expect(result.bytes.length).toBeGreaterThan(48 * KB - 2 * KB);
   });

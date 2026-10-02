@@ -2,8 +2,6 @@
 
 exports[`the dependency licences (§ Phase F) > records what ships, so a new one is visible in the diff 1`] = `
 [
-  "@pdf-lib/standard-fonts",
-  "@pdf-lib/upng",
   "@protobufjs/aspromise",
   "@protobufjs/base64",
   "@protobufjs/codegen",
@@ -23,15 +21,12 @@ exports[`the dependency licences (§ Phase F) > records what ships, so a new one
   "loose-envify",
   "onnxruntime-common",
   "onnxruntime-web",
-  "pako",
-  "pdf-lib",
   "pdfjs-dist",
   "platform",
   "protobufjs",
   "react",
   "react-dom",
   "scheduler",
-  "tslib",
   "undici-types",
 ]
 `;

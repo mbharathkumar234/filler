@@ -91,7 +91,8 @@ time. Nothing is synced.
 
 **`sidePanel`** — The side panel is the extension's entire user interface.
 
-**`offscreen`** — Used only to read a document the user has saved. The
+**`offscreen`** — Used only to read a document the user has saved, and to open
+a saved PDF (pdf.js cannot be loaded in a service worker). The
 reader runs in a dedicated Web Worker, and a service worker cannot start one, so
 the extension opens one of its own hidden pages (`chrome.offscreen`, reason
 `WORKERS`), starts the reader there, and closes the page — and the worker with

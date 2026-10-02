@@ -189,5 +189,20 @@ declare global {
       sourceMime: string,
       constraintText: string,
     ) => Promise<HarnessResult>;
+    __pdf: PdfHarness;
   }
+}
+
+/** A locked PDF, opened by the real pdf.js the extension ships (`documents/pdf-lock.ts`). */
+interface PdfHarness {
+  lock(url: string, password?: string): Promise<'open' | 'needs-password' | 'wrong-password'>;
+  /** The values the rules find in the text layer, read with `password`. */
+  read(url: string, password?: string): Promise<Array<{ key: string; value: string; verified: boolean }>>;
+  raster(url: string, password?: string): Promise<{ width: number; height: number }>;
+  /** A portal copy made with `password`, and whether that copy opens without one. */
+  derive(
+    url: string,
+    password: string,
+    constraintText: string,
+  ): Promise<{ ok: boolean; mime?: string; opensWithoutPassword?: boolean; reason?: string }>;
 }

@@ -101,6 +101,24 @@ export type OcrRequest = {
   mime: string;
 };
 
+/**
+ * A PDF, opened by the page that can open one.
+ *
+ * A service worker cannot load pdf.js — `import()` is not allowed there, and
+ * pdf.js is too large to load on every wake — so the worker hands each PDF to
+ * the offscreen page (`offscreen/ocr.ts`), which opens it with pdf.js and
+ * answers. Privileged, like `ocr:recognise`: the bytes are one document's, the
+ * password is what that one document opens with, and neither goes anywhere
+ * else.
+ */
+export type PdfRequest =
+  /** Whether it opens: by itself, not without a password, or not with this one. */
+  | { type: 'pdf:lock'; pdf: string; password?: string }
+  /** Its text layer, as lines. */
+  | { type: 'pdf:text'; pdf: string; password?: string }
+  /** Its first page as a PNG this many pixels wide. */
+  | { type: 'pdf:render'; pdf: string; password?: string; width: number };
+
 /** One piece of text on the page, and where it sits (page pixels). */
 export interface OcrItem {
   text: string;
@@ -121,6 +139,11 @@ export type DocumentRequest =
       height: number;
       /** Plain array — structured clone over the bus does not keep Uint8Array. */
       bytes: number[];
+      /**
+       * What a locked PDF opens with, typed by the user when the worker said it
+       * needs one. Kept sealed with the document; never sent anywhere else.
+       */
+      password?: string;
     }
   | { type: 'doc:delete'; id: string }
   | { type: 'doc:derive'; key: FieldKey; constraint: DocConstraint }
@@ -345,8 +368,23 @@ export type ExtensionRequest =
   | TeachRequest
   | GuardRequest
   | OcrRequest
+  | PdfRequest
   | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
+
+/**
+ * Requests the offscreen page answers, and the service worker leaves alone.
+ *
+ * Every extension context hears every `runtime.sendMessage`. The worker answers
+ * in microseconds and the page in seconds, so a worker that answered these too
+ * would answer first — "Rejected." — and the page's real answer would be lost.
+ */
+export const OFFSCREEN_TYPES: ReadonlySet<string> = new Set([
+  'ocr:recognise',
+  'pdf:lock',
+  'pdf:text',
+  'pdf:render',
+]);
 
 /** Request types that must never be honoured for a content script. */
 export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
@@ -374,6 +412,10 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'doc:extract',
   // Carries a rendered page of somebody's document: extension contexts only.
   'ocr:recognise',
+  // Carry somebody's PDF, and the password it opens with: extension contexts only.
+  'pdf:lock',
+  'pdf:text',
+  'pdf:render',
   'doc:to-window',
   'harvest:tab',
   'fill:tab',
@@ -443,7 +485,11 @@ export interface ResponseMap {
   /** false means a wrong passphrase — the gate stays shut. */
   'vault:reauth': boolean;
   'doc:list': DocumentSummary[];
-  'doc:put': DocumentSummary;
+  /**
+   * The saved document — or, for a PDF that opens only with a password,
+   * nothing saved yet and why: none was given, or the one given did not open it.
+   */
+  'doc:put': DocumentSummary | { notSaved: 'needs-password' | 'wrong-password' };
   'doc:delete': null;
   /** A derived file, or a readable explanation of why it could not be made. */
   'doc:derive': DerivedPayload | { failed: true; reason: string; code: string };
@@ -455,6 +501,10 @@ export interface ResponseMap {
    * stood it there.
    */
   'ocr:recognise': { items: OcrItem[]; width: number; height: number; turns?: 0 | 1 | 2 | 3 };
+  'pdf:lock': { lock: 'open' | 'needs-password' | 'wrong-password' };
+  'pdf:text': { text: string };
+  /** A PNG, base64, and its size. */
+  'pdf:render': { image: string; width: number; height: number };
   'doc:to-window': WindowPlacement;
   'harvest:tab': TabHarvest;
   'fill:tab': FillReport;

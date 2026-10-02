@@ -93,6 +93,8 @@ export interface OcrEngine {
     bytes: Uint8Array,
     mime: string,
     scripts: IndicScript[],
+    /** What a locked PDF opens with (`pdf-lock.ts`). */
+    password?: string,
   ): Promise<{
     text: string;
     confidence?: number;
@@ -111,7 +113,10 @@ export interface OcrEngine {
 }
 
 /** Reads a PDF's embedded text layer. Supplied by the caller for testability. */
-export type PdfTextReader = (bytes: Uint8Array) => Promise<string>;
+export type PdfTextReader = (bytes: Uint8Array, password?: string) => Promise<string>;
+
+/** What reading needs to know about the file: its type, and what a locked PDF opens with. */
+export type ReadMeta = Pick<DocumentMeta, 'mime'> & { password?: string };
 
 export interface ReadOptions {
   pdfText?: PdfTextReader;
@@ -140,7 +145,7 @@ const MIN_TEXT_LAYER = 40;
 
 export async function readDocumentText(
   bytes: Uint8Array,
-  meta: Pick<DocumentMeta, 'mime'>,
+  meta: ReadMeta,
   options: ReadOptions = {},
 ): Promise<DocumentText> {
   const notes: string[] = [];
@@ -148,13 +153,14 @@ export async function readDocumentText(
   // 1. The exact path.
   if (meta.mime === 'application/pdf' && options.pdfText) {
     try {
-      const text = (await options.pdfText(bytes)).trim();
+      const text = (await options.pdfText(bytes, meta.password)).trim();
       if (text.length >= MIN_TEXT_LAYER) {
         return {
           text,
           source: 'pdf-text-layer',
           scripts: detectScripts(text),
-          notes: ['Read directly from the document, so the characters are exact.'],
+          // How it was read is `source`, which the screen puts in its own words.
+          notes: [],
         };
       }
       if (text.length > 0) {
@@ -193,7 +199,7 @@ export async function readDocumentText(
     };
   }
 
-  const result = await options.ocr.recognise(bytes, meta.mime, wanted);
+  const result = await options.ocr.recognise(bytes, meta.mime, wanted, meta.password);
   const text = result.text.trim();
 
   // Boxes are kept only if they are, line for line, the text being returned.
@@ -209,11 +215,12 @@ export async function readDocumentText(
     ...(inStep && text !== '' && result.turns !== undefined && result.turns !== 0
       ? { turns: result.turns }
       : {}),
+    // Not "recognised from an image, so check each value": that is what
+    // `source` says, and the screen says it once, in its own words. Driven
+    // through the real panel, the two said it one under the other.
     notes: [
       ...notes,
-      ...(text === ''
-        ? ['Nothing could be read from this image. A sharper, straighter photo in better light usually fixes it.']
-        : ['Recognised from the image, so please check each value against the card.']),
+      ...(text === '' ? ['A sharper, straighter photo in better light usually fixes it.'] : []),
       ...(result.notes ?? []),
     ],
   };
@@ -229,7 +236,7 @@ export async function readDocumentText(
  */
 export async function readAndExtract(
   bytes: Uint8Array,
-  meta: Pick<DocumentMeta, 'mime'>,
+  meta: ReadMeta,
   options: ReadOptions = {},
 ): Promise<ExtractionResult & { read: DocumentText }> {
   const read = await readDocumentText(bytes, meta, options);

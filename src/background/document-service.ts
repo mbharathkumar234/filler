@@ -11,7 +11,6 @@ import type { DocumentRequest, Result, ResponseMap } from '@/shared/messages';
 import { derive, type DerivedFile } from '@/documents/derive';
 import { measureShape } from '@/documents/raster';
 import { roleFor, trimsToInk } from '@/documents/intake';
-import { createRasterBackend } from '@/documents/raster';
 import { openVaultDb } from '@/vault/db';
 import {
   deleteMaster,
@@ -25,7 +24,9 @@ import {
 import { readAndExtract, type OcrEngine, type TextLine } from '@/documents/read-document';
 import { regionForLine, unturnBox } from '@/documents/evidence-region';
 import { bytesToBase64 } from '@/shared/base64';
-import { readPdfText } from '@/documents/pdf-text';
+import { admitPdf, type PdfAdmission } from '@/documents/pdf-lock';
+// pdf.js cannot load in this worker: PDFs are opened by the offscreen page.
+import { offscreenPdf, workerRasterBackend } from './ocr-host';
 import type { Candidate, DocumentType } from '@/documents/extract';
 import type { TextSource } from '@/documents/read-document';
 import { VaultLockedError, isUnlocked, withKey } from '@/vault/session';
@@ -169,17 +170,18 @@ async function evidenceCrops(
   candidates: readonly Candidate[],
   lines: readonly TextLine[] | undefined,
   turns: 0 | 1 | 2 | 3,
+  password: string | undefined,
 ): Promise<Map<FieldKey, string>> {
   const crops = new Map<FieldKey, string>();
   if (lines === undefined || candidates.length === 0) return crops;
 
   try {
-    const backend = createRasterBackend();
+    const backend = workerRasterBackend();
     if (backend.crop === undefined) return crops;
 
     const page =
       mime === 'application/pdf'
-        ? await backend.rasterisePdf(bytes, 2000)
+        ? await backend.rasterisePdf(bytes, 2000, password)
         : await backend.decode(bytes, mime);
 
     // Several values often come from one line; each piece is cut once.
@@ -237,9 +239,10 @@ async function extractOnce(id: string): Promise<DocumentExtraction> {
 
   const result = await readAndExtract(
     document.bytes,
-    { mime: document.meta.mime },
+    // A locked PDF opens with the password kept with it (`pdf-lock.ts`).
+    { mime: document.meta.mime, ...(document.password === undefined ? {} : { password: document.password }) },
     {
-      pdfText: readPdfText,
+      pdfText: (bytes, password) => offscreenPdf.text(bytes, password),
       ...(ocrEngine === null ? {} : { ocr: ocrEngine }),
       // The slot the user filed it under: what tells a marks card whose marks
       // it carries. The vault has always known; it was simply never passed on.
@@ -253,6 +256,7 @@ async function extractOnce(id: string): Promise<DocumentExtraction> {
     result.candidates,
     result.read.lines,
     result.read.turns ?? 0,
+    document.password,
   );
 
   return {
@@ -285,6 +289,22 @@ export async function handleDocumentRequest(
       case 'doc:put': {
         const bytes = Uint8Array.from(request.bytes);
         /*
+         * A PDF that opens only with a password is saved with it, once the
+         * password given opens it — and until then is not saved at all: the
+         * panel is told why, and asks the user (`documents/pdf-lock.ts`). A
+         * file pdf.js cannot open for any other reason is stored as before,
+         * and says so when it is read.
+         */
+        let password: string | undefined;
+        if (request.mime === 'application/pdf') {
+          const admission = await admitPdf(
+            (given) => offscreenPdf.lock(bytes, given),
+            request.password,
+          ).catch((): PdfAdmission => ({ save: true }));
+          if (!admission.save) return ok({ notSaved: admission.locked });
+          password = admission.password;
+        }
+        /*
          * Measure the ink here, once, while the bytes are in hand.
          *
          * It has to be the worker rather than the panel: the panel never sees a
@@ -308,6 +328,7 @@ export async function handleDocumentRequest(
               capturedAt: new Date().toISOString(),
               ...(shape ? { content: shape.content } : {}),
             },
+            ...(password === undefined ? {} : { password }),
           }),
         );
         return ok(summary);
@@ -379,7 +400,7 @@ export async function variantFor(key: FieldKey, constraint: DocConstraint): Prom
       };
     }
 
-    if (canPassThrough(master.meta, constraint)) {
+    if (canPassThrough({ ...master.meta, ...(master.locked ? { locked: true as const } : {}) }, constraint)) {
       return {
         ok: true,
         bytes: master.bytes,
@@ -420,12 +441,16 @@ export async function variantFor(key: FieldKey, constraint: DocConstraint): Prom
      * whole, and still recognisably the user's mark.
      */
     const role = roleFor(key);
-    const result = await derive(createRasterBackend(), master.bytes, master.meta.mime, constraint, {
+    const result = await derive(workerRasterBackend(), master.bytes, master.meta.mime, constraint, {
       // Never for a photograph (`trimsToInk`): its background is not margin.
       ...(master.meta.content && trimsToInk(role) ? { content: master.meta.content } : {}),
       ...(role === 'signature' ? { fit: 'pad' as const } : {}),
+      // A locked PDF is opened with its password; the copy made is unlocked.
+      ...(master.password === undefined ? {} : { password: master.password }),
     });
     if (!result.ok) {
+      // The user is told `reason`; what actually failed goes to the log.
+      if (result.detail !== undefined) console.warn('[autofill] could not make the copy:', result.detail);
       return { ok: false, code: result.code, reason: result.reason };
     }
 

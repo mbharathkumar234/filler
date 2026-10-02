@@ -26,14 +26,22 @@
  */
 
 import { createRasterBackend } from '@/documents/raster';
+import type { RasterBackend } from '@/documents/derive';
+import type { PdfLock } from '@/documents/pdf-lock';
 import { readableWithBundled } from '@/documents/ocr';
 import { readingScale, tooSmallToRead } from '@/documents/preprocess';
 import { layoutLines, SCRIPT_MISREAD_BELOW } from '@/documents/layout';
 import { toFractions } from '@/documents/evidence-region';
 import type { OcrEngine } from '@/documents/read-document';
 import type { IndicScript } from '@/documents/indic';
-import { bytesToBase64 } from '@/shared/base64';
-import { envelope, type OcrItem } from '@/shared/messages';
+import { base64ToBytes, bytesToBase64 } from '@/shared/base64';
+import {
+  envelope,
+  type ExtensionRequest,
+  type OcrItem,
+  type PdfRequest,
+  type ResponseMap,
+} from '@/shared/messages';
 
 const OFFSCREEN_PAGE = 'src/offscreen/ocr.html';
 
@@ -75,9 +83,9 @@ async function openOffscreen(): Promise<void> {
       url: OFFSCREEN_PAGE,
       reasons: ['WORKERS' as chrome.offscreen.Reason],
       justification:
-        'Recognising text in a document the user asked to have read. It runs the text ' +
-        'recognition models away from the service worker. Nothing is displayed and nothing is ' +
-        'sent anywhere.',
+        'Reading a document the user saved: recognising its text with models that run in a ' +
+        'worker this page starts, and opening it with pdf.js when it is a PDF, which a service ' +
+        'worker cannot load. Nothing is displayed and nothing is sent anywhere.',
     })
     .catch((error: unknown) => {
       // A race with another call can report "already exists"; that is the state
@@ -199,14 +207,18 @@ export interface RenderedPage {
  * is scaled down, and only then re-encoded. A PDF — whose text layer was tried
  * first and found wanting, or this would not be running — is rasterised.
  */
-async function renderForReading(bytes: Uint8Array, mime: string): Promise<RenderedPage> {
+async function renderForReading(
+  bytes: Uint8Array,
+  mime: string,
+  password?: string,
+): Promise<RenderedPage> {
   const backend = createRasterBackend();
   const notes: string[] = [];
 
   if (mime === 'application/pdf') {
-    const page = await backend.rasterisePdf(bytes, PDF_RENDER_WIDTH);
-    const png = await backend.encodePng(page);
-    backend.release?.(page);
+    // Rendered by the offscreen page — this worker cannot load pdf.js — and
+    // opened with the password the vault keeps for a locked PDF.
+    const png = await offscreenPdf.render(bytes, PDF_RENDER_WIDTH, password);
     return { image: png, mime: 'image/png', notes };
   }
 
@@ -237,9 +249,22 @@ async function renderForReading(bytes: Uint8Array, mime: string): Promise<Render
 
 /** Ask the offscreen page to read a page, with an end to the waiting. */
 async function recogniseIn(image: Uint8Array, mime: string): Promise<PageReading> {
-  const ask = chrome.runtime.sendMessage(
-    envelope({ type: 'ocr:recognise', image: bytesToBase64(image), mime }),
-  ) as Promise<{ ok: true; data: PageReading } | { ok: false; error: string } | undefined>;
+  return askOffscreen({ type: 'ocr:recognise', image: bytesToBase64(image), mime });
+}
+
+/**
+ * Ask the offscreen page for something, with an end to the waiting.
+ *
+ * The page answers `ocr:recognise` and the `pdf:*` requests; the worker leaves
+ * them to it (`OFFSCREEN_TYPES`). Called inside a job of `offscreenJobs`, which
+ * is what makes sure the page is open, and stays open, while it answers.
+ */
+async function askOffscreen<T extends 'ocr:recognise' | PdfRequest['type']>(
+  request: Extract<ExtensionRequest, { type: T }>,
+): Promise<ResponseMap[T]> {
+  const ask = chrome.runtime.sendMessage(envelope(request)) as Promise<
+    { ok: true; data: ResponseMap[T] } | { ok: false; error: string } | undefined
+  >;
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   const response = await Promise.race([
@@ -273,6 +298,77 @@ const offscreenReader: Reader = {
 };
 
 /**
+ * Every job the offscreen page does, one at a time, in one queue.
+ *
+ * Reading a page and opening a PDF both need the page open, and whichever
+ * finishes last closes it. Two queues would each think themselves last and
+ * close it under the other — the very failure `serialiseReads` was written
+ * against — so there is exactly one.
+ */
+export const offscreenJobs = serialiseReads(offscreenReader);
+
+// ---------------------------------------------------------------------------
+// PDFs, opened in the same page
+// ---------------------------------------------------------------------------
+
+/**
+ * pdf.js, as this worker reaches it: through the offscreen page.
+ *
+ * A service worker cannot load pdf.js — `import()` is disallowed there by the
+ * HTML specification — so every PDF this worker handles is opened by the page,
+ * which can. Until this existed no PDF opened at all: the text layer of an
+ * e-Aadhaar was never read, and no PDF could be made into a portal's copy.
+ */
+export interface PdfEngine {
+  lock(bytes: Uint8Array, password?: string): Promise<PdfLock>;
+  /** The text layer, as lines. */
+  text(bytes: Uint8Array, password?: string): Promise<string>;
+  /** The first page, as a PNG `width` pixels wide. */
+  render(bytes: Uint8Array, width: number, password?: string): Promise<Uint8Array>;
+}
+
+type Jobs = <T>(job: () => Promise<T>) => Promise<T>;
+type AskPdf = <T extends PdfRequest['type']>(
+  request: Extract<PdfRequest, { type: T }>,
+) => Promise<ResponseMap[T]>;
+
+export function createPdfEngine(ask: AskPdf, jobs: Jobs): PdfEngine {
+  const opening = (bytes: Uint8Array, password?: string) => ({
+    pdf: bytesToBase64(bytes),
+    ...(password === undefined ? {} : { password }),
+  });
+  return {
+    async lock(bytes, password) {
+      const { lock } = await jobs(() => ask({ type: 'pdf:lock', ...opening(bytes, password) }));
+      return lock;
+    },
+    async text(bytes, password) {
+      const { text } = await jobs(() => ask({ type: 'pdf:text', ...opening(bytes, password) }));
+      return text;
+    },
+    async render(bytes, width, password) {
+      const { image } = await jobs(() =>
+        ask({ type: 'pdf:render', width, ...opening(bytes, password) }),
+      );
+      return base64ToBytes(image);
+    },
+  };
+}
+
+/** The engine this worker uses. */
+export const offscreenPdf: PdfEngine = createPdfEngine((request) => askOffscreen(request), offscreenJobs);
+
+/**
+ * A raster backend for this worker: a PDF's page is rendered by the offscreen
+ * page and handed back as a picture; everything else is done here.
+ */
+export function workerRasterBackend(): RasterBackend {
+  return createRasterBackend({
+    renderPdf: (bytes, width, password) => offscreenPdf.render(bytes, width, password),
+  });
+}
+
+/**
  * The engine `document-service.ts` installs through `setOcrEngine`.
  *
  * The reader and the renderer are injectable so that the parts with a history
@@ -281,20 +377,22 @@ const offscreenReader: Reader = {
  */
 export function createOcrHost(
   reader: Reader = offscreenReader,
-  render: (bytes: Uint8Array, mime: string) => Promise<RenderedPage> = renderForReading,
+  render: (bytes: Uint8Array, mime: string, password?: string) => Promise<RenderedPage> = renderForReading,
 ): OcrEngine {
-  const read = serialiseReads(reader);
+  // The real page shares its one queue with the PDF engine; a test's reader
+  // gets a queue of its own.
+  const read = reader === offscreenReader ? offscreenJobs : serialiseReads(reader);
 
   return {
     availableScripts: async (): Promise<IndicScript[]> => readableWithBundled(),
 
-    async recognise(bytes, mime, scripts) {
+    async recognise(bytes, mime, scripts, password) {
       // Nothing here reads anything but Latin; say so rather than guess.
       if (!scripts.includes('Latin')) return { text: '' };
 
       // Preparing the page is this worker's own work and needs no reader; only
       // the recognising is queued.
-      const page = await render(bytes, mime);
+      const page = await render(bytes, mime, password);
       const reading = await read(() => reader.recognise(page.image, page.mime));
 
       const kept = reading.items.filter((item) => item.score >= SCRIPT_MISREAD_BELOW);

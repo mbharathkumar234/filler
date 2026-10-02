@@ -27,6 +27,12 @@ const sent: { type: string; key?: string }[] = [];
 /** What `doc:list` answers with. Empty unless a test saves something first. */
 let listing: unknown[] = [];
 
+/** How long a save takes: at once, unless a test holds it open. */
+let putDone: Promise<unknown> = Promise.resolve(null);
+
+/** What each save answers, in turn, when a test scripts it; then `putDone`. */
+let putAnswers: unknown[] = [];
+
 vi.mock('@/ui/lib/client', async () => {
   const actual = await vi.importActual<typeof Client>('@/ui/lib/client');
   return {
@@ -35,6 +41,9 @@ vi.mock('@/ui/lib/client', async () => {
       sent.push(request);
       if (request.type === 'doc:list') return Promise.resolve(listing);
       if (request.type === 'doc:preflight') return Promise.resolve({ warnings: [] });
+      if (request.type === 'doc:put') return putAnswers.length > 0 ? Promise.resolve(putAnswers.shift()) : putDone;
+      // A reading that is still going: the panel shows "Reading…" until told.
+      if (request.type === 'doc:extract') return new Promise(() => {});
       return Promise.resolve(null);
     },
   };
@@ -48,6 +57,8 @@ function photo(name = 'passport.jpg') {
 beforeEach(() => {
   sent.length = 0;
   listing = [];
+  putDone = Promise.resolve(null);
+  putAnswers = [];
   // jsdom decodes no images; the panel only wants the dimensions.
   vi.stubGlobal('createImageBitmap', () =>
     Promise.resolve({ width: 900, height: 1200, close() {} }),
@@ -177,5 +188,141 @@ describe('reading a document', () => {
       expect(screen.getAllByRole('button', { name: 'Preview for this portal' })).toHaveLength(2),
     );
     expect(screen.getAllByRole('button', { name: 'Read details from this' })).toHaveLength(1);
+  });
+});
+
+describe('reading a document that is being replaced', () => {
+  /*
+   * Found by driving the real extension: a new file was saved over a stored
+   * marks card and "Read details from this" pressed before the save finished.
+   * The reading started on the copy being replaced; the save gave the slot a
+   * new document, the reading's panel vanished with the old one, and nothing
+   * on the screen said what had happened.
+   */
+  const CARD = 'doc.marksheet_10' as const;
+  const CARD_INDEX = DOCUMENT_KEYS.indexOf(CARD);
+  const stored = (id: string) => ({ id, key: CARD, meta: { key: CARD, mime: 'image/jpeg', bytes: 400_000 } });
+  const extracts = () => sent.filter((m) => m.type === 'doc:extract').map((m) => (m as { id?: string }).id);
+
+  async function withStoredCard() {
+    const user = userEvent.setup();
+    listing = [stored('old')];
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await screen.findByRole('button', { name: 'Read details from this' });
+    return user;
+  }
+
+  async function stageReplacement(user: ReturnType<typeof userEvent.setup>) {
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[type="file"]');
+    await user.upload(inputs[CARD_INDEX]!, photo('new-card.jpg'));
+    return screen.findByRole('button', { name: `Save ${labelFor(CARD)} to vault` });
+  }
+
+  it('cannot be read while the new copy is still being saved', async () => {
+    const user = await withStoredCard();
+    let finish!: (value: unknown) => void;
+    putDone = new Promise((resolve) => (finish = resolve));
+
+    await user.click(await stageReplacement(user));
+    const read = screen.getByRole('button', { name: 'Read details from this' }) as HTMLButtonElement;
+    expect(read.disabled).toBe(true);
+    await user.click(read);
+    expect(extracts()).toEqual([]);
+
+    listing = [stored('new')];
+    finish(stored('new'));
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Read details from this' }) as HTMLButtonElement).disabled).toBe(false),
+    );
+  });
+
+  it('follows its slot when the document is replaced, and reads the new one', async () => {
+    const user = await withStoredCard();
+    await user.click(screen.getByRole('button', { name: 'Read details from this' }));
+    await waitFor(() => expect(extracts()).toEqual(['old']));
+
+    listing = [stored('new')];
+    await user.click(await stageReplacement(user));
+
+    // The panel stays open, and what it reads is the document now in the slot.
+    await waitFor(() => expect(extracts()).toEqual(['old', 'new']));
+    expect(screen.getByRole('heading', { name: `Details found in ${labelFor(CARD)}` })).toBeTruthy();
+  });
+});
+
+describe('a PDF that opens only with a password', () => {
+  /*
+   * An e-Aadhaar is downloaded locked. The worker says so when it is saved, and
+   * saves nothing; the panel asks for the password and tries again with it.
+   * The user types it — the vault could build an e-Aadhaar's password from the
+   * name and birth year it holds, and that was offered and turned down.
+   */
+  const AADHAAR = 'doc.aadhaar_card' as const;
+  const AADHAAR_INDEX = DOCUMENT_KEYS.indexOf(AADHAAR);
+  const SAVE = `Save ${labelFor(AADHAAR)} to vault`;
+  // As the worker answers for a locked PDF it saved: `locked: true` — which is
+  // not the "not saved, needs a password" answer, and must not be taken for it.
+  const saved = {
+    id: 'new',
+    key: AADHAAR,
+    locked: true,
+    meta: { key: AADHAAR, mime: 'application/pdf', bytes: 1726, width: 0, height: 0 },
+  };
+  const puts = () => sent.filter((m) => m.type === 'doc:put') as Array<{ password?: string }>;
+
+  async function saveLockedPdf() {
+    const user = userEvent.setup();
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await waitFor(() => expect(sent.some((m) => m.type === 'doc:list')).toBe(true));
+    const inputs = document.querySelectorAll<HTMLInputElement>('input[type="file"]');
+    await user.upload(inputs[AADHAAR_INDEX]!, new File([new Uint8Array(1726)], 'e-aadhaar.pdf', { type: 'application/pdf' }));
+    await user.click(await screen.findByRole('button', { name: SAVE }));
+    return user;
+  }
+
+  it('asks for the password, and saves nothing until it opens the file', async () => {
+    putAnswers = [{ notSaved: 'needs-password' }, saved];
+    const user = await saveLockedPdf();
+
+    const field = await screen.findByLabelText('Password for this PDF');
+    // Nothing is in the vault yet, and the file waits where it was.
+    expect(screen.getByText(/Ready to save/)).toBeTruthy();
+    expect(puts()).toEqual([expect.not.objectContaining({ password: expect.anything() })]);
+
+    await user.type(field, 'RAVI1998');
+    listing = [saved];
+    await user.click(screen.getByRole('button', { name: 'Unlock and save' }));
+
+    await waitFor(() => expect(puts().map((m) => m.password)).toEqual([undefined, 'RAVI1998']));
+    await waitFor(() => expect(screen.queryByLabelText('Password for this PDF')).toBeNull());
+  });
+
+  it('says when the password did not open it, and asks again', async () => {
+    putAnswers = [{ notSaved: 'needs-password' }, { notSaved: 'wrong-password' }];
+    const user = await saveLockedPdf();
+
+    await user.type(await screen.findByLabelText('Password for this PDF'), 'ravi1998');
+    await user.click(screen.getByRole('button', { name: 'Unlock and save' }));
+
+    expect(await screen.findByText(/did not open it/i)).toBeTruthy();
+    // Typed again from nothing, rather than corrected in a box nobody can see into.
+    expect((screen.getByLabelText('Password for this PDF') as HTMLInputElement).value).toBe('');
+  });
+
+  it('tells an e-Aadhaar’s owner what its password is made of', async () => {
+    putAnswers = [{ notSaved: 'needs-password' }];
+    await saveLockedPdf();
+    expect(await screen.findByText(/first four letters of your name/i)).toBeTruthy();
+  });
+
+  it('forgets the file and the password when the user discards it', async () => {
+    putAnswers = [{ notSaved: 'needs-password' }];
+    const user = await saveLockedPdf();
+    await user.type(await screen.findByLabelText('Password for this PDF'), 'RAVI1998');
+
+    await user.click(screen.getByRole('button', { name: `Discard the ${labelFor(AADHAAR)} you chose` }));
+
+    await waitFor(() => expect(screen.queryByLabelText('Password for this PDF')).toBeNull());
+    expect(puts()).toHaveLength(1);
   });
 });

@@ -196,7 +196,9 @@ const FATHER_LABEL =
   /^(?:father'?s?\s*(?:\/\s*guardian'?s?\s*)?name|name of (?:the )?father|पिता का नाम|पिता)\s*[:-]?\s*(.*)$/i;
 const MOTHER_LABEL =
   /^(?:mother'?s?\s*name|name of (?:the )?mother|माता का नाम|माता)\s*[:-]?\s*(.*)$/i;
-const DOB_LABEL = /\b(?:dob|date\s+of\s+birth|birth)\b|जन्म|பிறந்த/i;
+// Not preceded by a letter, rather than `\b`: a speck touching the label reads
+// as a digit ("0DOB:"), and a digit is a word character, so `\b` saw no label.
+const DOB_LABEL = /(?<![a-z])(?:dob|date\s+of\s+birth|birth)\b|जन्म|பிறந்த/i;
 
 /** Looks like a person's name rather than a caption or a number. */
 function looksLikeName(line: string): boolean {

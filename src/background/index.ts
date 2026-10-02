@@ -9,6 +9,7 @@
  */
 
 import {
+  OFFSCREEN_TYPES,
   assertSenderMayRequest,
   envelope,
   isEnvelope,
@@ -472,14 +473,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   /*
    * Not every extension message is for the worker.
    *
-   * `ocr:recognise` is addressed to the offscreen reader, and every extension
-   * context hears every `runtime.sendMessage`. Answering it here would be
+   * `ocr:recognise` and the `pdf:*` requests are addressed to the offscreen
+   * page (`OFFSCREEN_TYPES`), and every extension context hears every
+   * `runtime.sendMessage`. Answering it here would be
    * answering on the reader's behalf — and because the worker replies in
    * microseconds while reading a page takes seconds, the worker's answer is
    * the one the sender gets. That is what it did: "Rejected.", every time,
    * while the reader was still working and about to succeed.
    */
-  if (message.payload.type === 'ocr:recognise') return false;
+  if (OFFSCREEN_TYPES.has(message.payload.type)) return false;
 
   try {
     assertSenderMayRequest(message.payload.type, sender);

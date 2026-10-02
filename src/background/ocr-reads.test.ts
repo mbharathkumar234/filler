@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createOcrHost, type PageReading, type Reader, type RenderedPage } from './ocr-host';
+import { createOcrHost, createPdfEngine, type PageReading, type Reader, type RenderedPage } from './ocr-host';
 import type { OcrItem } from '@/shared/messages';
 
 /**
@@ -218,5 +218,53 @@ describe('a page that was photographed sideways', () => {
       expect(result.turns).toBeUndefined();
       expect(result.notes?.join(' ') ?? '').not.toMatch(/turned/i);
     }
+  });
+});
+
+describe('a locked PDF', () => {
+  it('renders its page with the password the vault keeps for it', async () => {
+    const given: Array<string | undefined> = [];
+    const { reader } = recordingReader(() => reading(CLEAN));
+    const render = async (_bytes: Uint8Array, _mime: string, password?: string): Promise<RenderedPage> => {
+      given.push(password);
+      return { image: new Uint8Array([1]), mime: 'image/png', notes: [] };
+    };
+    await createOcrHost(reader, render).recognise(new Uint8Array(), 'application/pdf', ['Latin'], 'RAVI1998');
+    expect(given).toEqual(['RAVI1998']);
+  });
+});
+
+describe('PDFs, opened by the offscreen page', () => {
+  /*
+   * A service worker cannot load pdf.js — `import()` is disallowed there — so
+   * no PDF ever opened until the worker started handing them to the page.
+   * Each request goes through the same queue as a reading, so the page is open
+   * while it answers and is closed by whoever is last, never under anyone.
+   */
+  it('asks the page, in the shared queue, and hands back what it answered', async () => {
+    const asked: unknown[] = [];
+    let queued = 0;
+    const ask = (async (request: { type: string }) => {
+      asked.push(request);
+      if (request.type === 'pdf:lock') return { lock: 'needs-password' };
+      if (request.type === 'pdf:text') return { text: 'Name : Ravi Kumar' };
+      return { image: 'iVBORw==', width: 10, height: 20 };
+    }) as never;
+    const jobs = async <T,>(job: () => Promise<T>) => {
+      queued += 1;
+      return job();
+    };
+    const engine = createPdfEngine(ask, jobs);
+
+    expect(await engine.lock(new Uint8Array([1, 2]), 'RAVI1998')).toBe('needs-password');
+    expect(await engine.text(new Uint8Array([1, 2]))).toBe('Name : Ravi Kumar');
+    expect([...(await engine.render(new Uint8Array([1, 2]), 2000, 'RAVI1998'))]).toEqual([137, 80, 78, 71]);
+
+    expect(queued).toBe(3);
+    expect(asked).toEqual([
+      { type: 'pdf:lock', pdf: 'AQI=', password: 'RAVI1998' },
+      { type: 'pdf:text', pdf: 'AQI=' },
+      { type: 'pdf:render', width: 2000, pdf: 'AQI=', password: 'RAVI1998' },
+    ]);
   });
 });

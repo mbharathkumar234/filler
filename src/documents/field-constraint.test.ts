@@ -134,6 +134,14 @@ describe('canPassThrough', () => {
     expect(canPassThrough(pdf, { mime: [] })).toBe(true);
   });
 
+  it('never hands a portal a locked PDF as it is, however well it fits', () => {
+    // Whoever opens it on the portal's side has no password. The copy made
+    // from it, with the password the vault keeps, is an ordinary file.
+    const locked = { ...pdf, locked: true as const };
+    expect(canPassThrough(locked, { mime: ['application/pdf'], maxBytes: 2 * MB })).toBe(false);
+    expect(canPassThrough(locked, { mime: [] })).toBe(false);
+  });
+
   it('refuses a format the box does not take', () => {
     expect(canPassThrough(pdf, { mime: ['image/jpeg'] })).toBe(false);
   });

@@ -38,12 +38,13 @@ import { describe, expect, it } from 'vitest';
  *  2. **No dynamic import on the vault path.** `vault/` and `background/` are
  *     the worker's own code and must not depend on the wrapper at all.
  *
- * `documents/` still imports pdf.js and pdf-lib dynamically, deliberately:
- * statically bundling them drags ~1.6 MB *and* two hundred real `document.`
- * references into the worker, which is worse than the problem. With empty
- * dependency arrays those imports no longer touch the DOM — but if one fails,
- * its error is still masked. That is recorded in STATUS.md rather than papered
- * over.
+ * PDFs never touch the worker's own code paths at all now. A service worker
+ * may not call `import()`, so pdf.js — which `documents/pdfjs.ts` still loads
+ * that way, deliberately, rather than drag 2.8 MB and a document-shaped world
+ * into every wake — runs in the offscreen page, and the worker asks it
+ * (`background/ocr-host.ts` → `offscreenPdf`). The one other library that was
+ * loaded the same way, pdf-lib, is gone: a JPEG on a PDF page is written by
+ * `documents/pdf-wrap.ts`.
  */
 
 const ASSETS = 'dist/assets';

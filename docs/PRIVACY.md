@@ -53,6 +53,13 @@ Where a number carries a check digit — Aadhaar does — the extension verifies
 and tells you whether it passed. A number that fails is not offered for saving
 at all; you are told it was probably misread.
 
+**PDFs locked with a password.** An e-Aadhaar or an e-PAN is downloaded locked.
+When you save one, the extension asks you for its password — it never works
+the password out for you — and keeps it with the document, encrypted in your
+vault like the document itself, so you are asked once. It is used only to open
+that document on this device: to read it, and to make the unlocked copy a form
+asks for. It is never sent anywhere, and removing the document removes it.
+
 ## Putting your documents into forms
 
 When a form asks for a document — a photograph, a signature, an Aadhaar card —
@@ -136,7 +143,7 @@ You are also responsible for the terms of the sites you use it on.
 | `scripting` | To inject the form-reading code into that tab on that click. Nothing is injected automatically. |
 | `storage` | The local stores in the table above. |
 | `sidePanel` | The panel is the extension's entire interface. |
-| `offscreen` | To read text out of a document you asked it to read. The reader runs in a worker that a service worker cannot start, so it is started from one of the extension's own hidden pages, which is closed again afterwards. No document leaves the device. |
+| `offscreen` | To read text out of a document you asked it to read, and to open a PDF you saved. The reader runs in a worker that a service worker cannot start, and a PDF needs a library a service worker cannot load, so both happen in one of the extension's own hidden pages, which is closed again afterwards. No document leaves the device. |
 
 **No `host_permissions`.** The extension has no standing access to any site.
 

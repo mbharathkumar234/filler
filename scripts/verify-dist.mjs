@@ -169,6 +169,26 @@ if (existsSync('dist/assets')) {
   }
 }
 
+/*
+ * pdf.js's worker code, which it runs on the calling thread (`documents/pdfjs.ts`).
+ *
+ * Without it every PDF fails to open, with "No GlobalWorkerOptions.workerSrc
+ * specified" — which is what every PDF did, unnoticed, until a test opened one.
+ */
+if (existsSync('dist/assets')) {
+  const pdfWorker = readdirSync('dist/assets').filter(
+    (name) =>
+      name.endsWith('.js') &&
+      readFileSync(`dist/assets/${name}`, 'utf8').includes('globalThis.pdfjsWorker = {'),
+  );
+  if (pdfWorker.length === 0) {
+    problems.push(
+      "No file in dist/assets carries pdf.js's worker code. Every PDF would fail to open: " +
+        'no text layer read, no portal copy made.',
+    );
+  }
+}
+
 if (problems.length > 0) {
   console.error('\nThe build did not produce a loadable extension:\n');
   for (const problem of problems) console.error(`  - ${problem}`);
