@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createOcrHost, createPdfEngine, type PageReading, type Reader, type RenderedPage } from './ocr-host';
+import { MAX_PDF_PAGES } from '@/documents/preprocess';
 import type { OcrItem } from '@/shared/messages';
 
 /**
@@ -167,6 +168,21 @@ describe('what the worker makes of the boxes', () => {
     expect(result.notes).toEqual(['This scan is 600 × 800 pixels.']);
   });
 
+  it('asks the page in the other scripts it was given, and never in English twice', async () => {
+    const asked: Array<readonly string[]> = [];
+    const { reader } = recordingReader(() => reading(CLEAN), 1);
+    const listening: Reader = {
+      ...reader,
+      async recognise(image, mime, scripts) {
+        asked.push(scripts);
+        return reader.recognise(image, mime, scripts);
+      },
+    };
+    await createOcrHost(listening, page).recognise(new Uint8Array(), 'image/png', ['Latin', 'Devanagari', 'Telugu']);
+    await createOcrHost(listening, page).recognise(new Uint8Array(), 'image/png', ['Latin']);
+    expect(asked).toEqual([['Devanagari', 'Telugu'], []]);
+  });
+
   it('does not pretend to read a script it has no model for', async () => {
     const { reader, events } = recordingReader(() => reading(CLEAN), 1);
     const result = await createOcrHost(reader, page).recognise(new Uint8Array(), 'image/png', ['Tamil']);
@@ -199,10 +215,11 @@ describe('a page that was photographed sideways', () => {
    * which is still sideways — and it has to tell the user, who would otherwise
    * wonder why the picture on the screen is not the way they took it.
    */
-  it('passes on how far the page was turned', async () => {
+  it('passes on how far the page was turned, with every line read off it', async () => {
     const { reader } = recordingReader(() => ({ ...reading(CLEAN), turns: 3 }));
     const result = await createOcrHost(reader, page).recognise(new Uint8Array(), 'image/png', ['Latin']);
-    expect(result.turns).toBe(3);
+    expect(result.lines?.length).toBeGreaterThan(0);
+    expect(result.lines?.every((line) => line.turns === 3)).toBe(true);
   });
 
   it('says so', async () => {
@@ -211,11 +228,40 @@ describe('a page that was photographed sideways', () => {
     expect(result.notes?.join(' ')).toMatch(/turned upright/i);
   });
 
+  it('hands back a flattened page with the lines read off it, which are that page’s and not the photo’s', async () => {
+    // A photo of a curled page, flattened before it was read: its lines sit on
+    // the flattened page, so the pictures beside the values are cut from that.
+    const flat = btoa(String.fromCharCode(0xff, 0xd8, 0xff, 0xd9));
+    const { reader } = recordingReader(() => ({ ...reading(CLEAN), turns: 1, flattened: flat }));
+    const result = await createOcrHost(reader, page).recognise(new Uint8Array(), 'image/jpeg', ['Latin']);
+    expect(result.pageImages).toEqual([{ page: 1, image: new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), mime: 'image/jpeg' }]);
+    expect(result.lines?.every((line) => line.turns === undefined)).toBe(true);
+    expect(result.notes?.join(' ')).toMatch(/flattened/i);
+  });
+
+  it('hands back the tables read off each page, in page order', async () => {
+    const grades = { rows: [['Course Title', 'Total', 'Grade'], ['Data Structures', '105', 'A+'], ['Java', '101', 'A+']] };
+    const { reader } = recordingReader(() => ({ ...reading(CLEAN), tables: [grades] }));
+    const result = await createOcrHost(reader, page).recognise(new Uint8Array(), 'image/png', ['Latin']);
+    expect(result.tables).toEqual([grades]);
+  });
+
+  it('makes each seal a line of its own after the page’s, where the seal is', async () => {
+    const seal = { box: { x0: 900, y0: 1400, x1: 1200, y1: 1700 }, text: ['TAHSILDAR', 'SAMPLEPURA TALUK'] };
+    const { reader } = recordingReader(() => ({ ...reading(CLEAN), seals: [seal] }));
+    const result = await createOcrHost(reader, page).recognise(new Uint8Array(), 'image/png', ['Latin']);
+    const last = result.lines!.at(-1)!;
+    expect(last.text).toBe('Seal: TAHSILDAR, SAMPLEPURA TALUK');
+    expect(result.text.split('\n').at(-1)).toBe(last.text);
+    expect(last.box.x0).toBeCloseTo(900 / 1500, 3);
+    expect(last.box.y1).toBeCloseTo(1700 / 2000, 3);
+  });
+
   it('says nothing about a page that was upright all along', async () => {
     for (const upright of [reading(CLEAN), { ...reading(CLEAN), turns: 0 as const }]) {
       const { reader } = recordingReader(() => upright);
       const result = await createOcrHost(reader, page).recognise(new Uint8Array(), 'image/png', ['Latin']);
-      expect(result.turns).toBeUndefined();
+      expect(result.lines?.some((line) => 'turns' in line)).toBe(false);
       expect(result.notes?.join(' ') ?? '').not.toMatch(/turned/i);
     }
   });
@@ -248,7 +294,7 @@ describe('PDFs, opened by the offscreen page', () => {
       asked.push(request);
       if (request.type === 'pdf:lock') return { lock: 'needs-password' };
       if (request.type === 'pdf:text') return { text: 'Name : Ravi Kumar' };
-      return { image: 'iVBORw==', width: 10, height: 20 };
+      return { image: 'iVBORw==', width: 10, height: 20, pages: 3 };
     }) as never;
     const jobs = async <T,>(job: () => Promise<T>) => {
       queued += 1;
@@ -258,13 +304,127 @@ describe('PDFs, opened by the offscreen page', () => {
 
     expect(await engine.lock(new Uint8Array([1, 2]), 'RAVI1998')).toBe('needs-password');
     expect(await engine.text(new Uint8Array([1, 2]))).toBe('Name : Ravi Kumar');
-    expect([...(await engine.render(new Uint8Array([1, 2]), 2000, 'RAVI1998'))]).toEqual([137, 80, 78, 71]);
+    const rendered = await engine.render(new Uint8Array([1, 2]), 2000, 'RAVI1998', 2);
+    expect([...rendered.image]).toEqual([137, 80, 78, 71]);
+    expect(rendered.pages).toBe(3);
 
     expect(queued).toBe(3);
     expect(asked).toEqual([
       { type: 'pdf:lock', pdf: 'AQI=', password: 'RAVI1998' },
       { type: 'pdf:text', pdf: 'AQI=' },
-      { type: 'pdf:render', width: 2000, pdf: 'AQI=', password: 'RAVI1998' },
+      { type: 'pdf:render', width: 2000, page: 2, pdf: 'AQI=', password: 'RAVI1998' },
     ]);
+  });
+});
+
+describe('a scanned PDF of several pages', () => {
+  /*
+   * A scanned PDF has no text layer; every page is a picture, and the details
+   * a marks card prints run onto the second page and the third. Only the first
+   * page was ever read. Each page is rendered and read in turn, its lines say
+   * which page they came from, and each page is turned upright on its own.
+   */
+  const ON_PAGE: Record<number, OcrItem[]> = {
+    1: [item('Name : PRIYA S', 110, 300, 600, 330)],
+    2: [item('PHYSICS 100 81 81', 110, 300, 700, 330)],
+    3: [item('Total Marks : 600 509 509', 110, 300, 800, 330)],
+  };
+
+  /** A document of `pages` pages; each rendered page's image is its page number. */
+  function scanned(pages: number) {
+    const rendered: number[] = [];
+    const render = async (_b: Uint8Array, _m: string, _p?: string, pageNumber = 1): Promise<RenderedPage> => {
+      rendered.push(pageNumber);
+      return { image: new Uint8Array([pageNumber]), mime: 'image/png', notes: [], pages };
+    };
+    return { render, rendered };
+  }
+
+  /** Reads page `n` as ON_PAGE[n]; page 2 was fed in sideways. */
+  function pageReader() {
+    const events: string[] = [];
+    let open = false;
+    const reader: Reader = {
+      async open() {
+        if (!open) events.push('open');
+        open = true;
+      },
+      async close() {
+        events.push('close');
+        open = false;
+      },
+      async recognise(image) {
+        const n = image[0] ?? 1;
+        events.push(`read ${n}`);
+        return { items: ON_PAGE[n] ?? [], width: 1240, height: 1754, ...(n === 2 ? { turns: 3 as const } : {}) };
+      },
+      keepAlive: () => () => {},
+    };
+    return { reader, events };
+  }
+
+  it('reads every page, in order, and puts their lines together', async () => {
+    const { render, rendered } = scanned(3);
+    const { reader } = pageReader();
+    const result = await createOcrHost(reader, render).recognise(new Uint8Array(), 'application/pdf', ['Latin']);
+    expect(rendered).toEqual([1, 2, 3]);
+    expect(result.text.split('\n')).toEqual(['Name : PRIYA S', 'PHYSICS 100 81 81', 'Total Marks : 600 509 509']);
+    expect(result.lines?.map((line) => line.text).join('\n')).toBe(result.text);
+  });
+
+  it('says which page each line came from, and how far that page was turned', async () => {
+    const { render } = scanned(3);
+    const { reader } = pageReader();
+    const result = await createOcrHost(reader, render).recognise(new Uint8Array(), 'application/pdf', ['Latin']);
+    const [first, second, third] = result.lines!;
+    expect(first).not.toHaveProperty('page');
+    expect(first).not.toHaveProperty('turns');
+    expect(second).toMatchObject({ page: 2, turns: 3 });
+    expect(third).toMatchObject({ page: 3 });
+    expect(third).not.toHaveProperty('turns');
+  });
+
+  it('says which page it turned upright', async () => {
+    const { render } = scanned(3);
+    const { reader } = pageReader();
+    const result = await createOcrHost(reader, render).recognise(new Uint8Array(), 'application/pdf', ['Latin']);
+    expect(result.notes?.join(' ')).toMatch(/page 2 was sideways/i);
+  });
+
+  it('keeps the reader open from the first page to the last, and closes it once', async () => {
+    // Closing between pages would start the reader again — models and all —
+    // for every page.
+    const { render } = scanned(3);
+    const { reader, events } = pageReader();
+    await createOcrHost(reader, render).recognise(new Uint8Array(), 'application/pdf', ['Latin']);
+    expect(events).toEqual(['open', 'read 1', 'read 2', 'read 3', 'close']);
+  });
+
+  it(`reads no more than ${MAX_PDF_PAGES} pages, and says how many it left`, async () => {
+    const { render, rendered } = scanned(MAX_PDF_PAGES + 4);
+    const { reader } = pageReader();
+    const result = await createOcrHost(reader, render).recognise(new Uint8Array(), 'application/pdf', ['Latin']);
+    expect(rendered).toEqual(Array.from({ length: MAX_PDF_PAGES }, (_, i) => i + 1));
+    expect(result.notes?.join(' ')).toMatch(new RegExp(`${MAX_PDF_PAGES + 4} pages.*first ${MAX_PDF_PAGES}`, 'i'));
+  });
+
+  it('reads past a blank page', async () => {
+    const { render } = scanned(4);
+    const { reader } = pageReader();
+    const result = await createOcrHost(reader, render).recognise(new Uint8Array(), 'application/pdf', ['Latin']);
+    // Page 4 has nothing on it; the three before it still read.
+    expect(result.text.split('\n')).toHaveLength(3);
+  });
+
+  it('renders a picture once, as the one page it is', async () => {
+    const rendered: number[] = [];
+    const render = async (_b: Uint8Array, _m: string, _p?: string, pageNumber = 1): Promise<RenderedPage> => {
+      rendered.push(pageNumber);
+      return { image: new Uint8Array([1]), mime: 'image/png', notes: [] };
+    };
+    const { reader } = pageReader();
+    const result = await createOcrHost(reader, render).recognise(new Uint8Array(), 'image/jpeg', ['Latin']);
+    expect(rendered).toEqual([1]);
+    expect(result.lines?.every((line) => !('page' in line))).toBe(true);
   });
 });

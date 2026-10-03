@@ -16,7 +16,7 @@
  * probe itself is pdf.js, proved against real locked files in a real browser.
  */
 
-import { loadPdfJs } from './pdfjs';
+import { openPdf } from './pdfjs';
 
 /** How a PDF opened: by itself, not without a password, or not with the one given. */
 export type PdfLock = 'open' | 'needs-password' | 'wrong-password';
@@ -40,9 +40,7 @@ export function lockFromError(error: unknown): Exclude<PdfLock, 'open'> | null {
  * an answer, not an error.
  */
 export async function pdfLock(bytes: Uint8Array, password?: string): Promise<PdfLock> {
-  const { getDocument } = await loadPdfJs();
-  // A copy: pdf.js takes ownership of the buffer it is handed.
-  const task = getDocument({ data: new Uint8Array(bytes), ...(password === undefined ? {} : { password }) });
+  const task = await openPdf(bytes, password);
   try {
     await task.promise;
     return 'open';

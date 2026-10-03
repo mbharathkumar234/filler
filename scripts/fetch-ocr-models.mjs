@@ -41,6 +41,40 @@ export const OCR_MODELS = [
     name: 'PP-LCNet_x1_0_doc_ori',
     sha256: '274fe4b00126b0b47ef38073fc008d7b71dc67fd2fd742d3c37beb909d4f4f83',
   },
+  // The other scripts, each asked only about a box the English model could
+  // only guess at (`paddle-reader.ts` → `chooseReading`).
+  {
+    // Devanagari: Hindi, Marathi, Sanskrit, Nepali, Konkani, Maithili, Bodo, Dogri.
+    name: 'devanagari_PP-OCRv5_mobile_rec',
+    sha256: '21cbdcb0c5656923500359ba053b814fc6089dbffa5e5017125d8654c0551817',
+  },
+  {
+    name: 'te_PP-OCRv5_mobile_rec',
+    sha256: '722e0e614c1dab033fadf598d5c3e32f881b874bef9a20e60b39eab0432eadc5',
+  },
+  {
+    name: 'ta_PP-OCRv5_mobile_rec',
+    sha256: 'e454d8910ba80d05355a9049b3d343f5866246c15ed5c22e0bd96cd1e8032a17',
+  },
+  // A phone photo made a scan (Stage 2).
+  {
+    // Flattens a page photographed curled or at an angle, when there is a
+    // table around it (`scan.ts` → `hasBackground`).
+    name: 'UVDoc',
+    sha256: '8b46701b8c3453c0eb2bbb9ef65c40ac2cbcfa1d3a07a4191a8eb920b297ae82',
+  },
+  {
+    // Says which lines are upside down; those are read both ways.
+    name: 'PP-LCNet_x0_25_textline_ori',
+    sha256: 'e29f1bffb2cec4db1ef8da9b2369d033d0a16d0a1a8f033b518d6063e6b9a1af',
+  },
+  // Tables (Stage 3).
+  {
+    // Reads a table's structure — rows, cells, spans — so a grade card's
+    // courses are read cell by cell (`documents/table.ts`).
+    name: 'SLANet_plus',
+    sha256: '03900f9311911551226a4afca2a60d6d1ead4297aaaf2c0a89e0404c42337b77',
+  },
 ];
 
 export const VENDOR_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'vendor', 'ocr-models');

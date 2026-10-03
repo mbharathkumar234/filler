@@ -82,6 +82,15 @@ const LABELS: Partial<Record<FieldKey, string>> = {
   'eligibility.caste_certificate_number': 'Caste certificate RD number',
   'eligibility.income_certificate_number': 'Income certificate RD number',
   'eligibility.article_371j_number': '371(J) Annexure-A RD number',
+  'eligibility.caste_certificate_date': 'Caste certificate: date of issue',
+  'eligibility.caste_certificate_authority': 'Caste certificate: issuing authority',
+  'eligibility.income_certificate_date': 'Income certificate: date of issue',
+  'eligibility.income_certificate_authority': 'Income certificate: issuing authority',
+  'eligibility.domicile_certificate_number': 'Domicile certificate RD number',
+  'eligibility.domicile_certificate_date': 'Domicile certificate: date of issue',
+  'eligibility.domicile_certificate_authority': 'Domicile certificate: issuing authority',
+  'eligibility.article_371j_date': '371(J) Annexure-A: date of issue',
+  'eligibility.article_371j_authority': '371(J) Annexure-A: issuing authority',
 
   // Documents. The label names the paper the way its issuer does, so the slot
   // is recognisable from the folder it was scanned out of.
@@ -206,6 +215,17 @@ const LABELS: Partial<Record<FieldKey, string>> = {
   'education.class_12.marks_computer_science': 'Computer Science marks',
   'education.class_12.marks_english': 'English marks',
   'education.class_12.marks_language': 'First language marks',
+  'education[].sgpa': 'SGPA (latest semester card)',
+  'education.diploma.sgpa': 'SGPA (latest semester card)',
+  'education.undergraduate.sgpa': 'SGPA (latest semester card)',
+  'education.postgraduate.sgpa': 'SGPA (latest semester card)',
+  'education[].backlogs': 'Backlogs (courses not yet cleared)',
+  'education.diploma.backlogs': 'Backlogs (courses not yet cleared)',
+  'education.undergraduate.backlogs': 'Backlogs (courses not yet cleared)',
+  'education.postgraduate.backlogs': 'Backlogs (courses not yet cleared)',
+  'identity.full_name_local': 'Name in your language (as printed)',
+  'family.father_name_local': 'Father’s name in your language',
+  'family.mother_name_local': 'Mother’s name in your language',
 };
 
 /**

@@ -54,6 +54,39 @@ describe('a line printed in two alphabets', () => {
   it('keeps the digits on a line whose words were all Kannada', () => {
     expect(latinise('ಒಟ್ಟು : 525')).toBe('Total : 525');
   });
+
+  it('translates the labels of a certificate printed in Hindi alone', () => {
+    // The lines the reader gave back from made-up certificates, as it read them.
+    expect(latinise('वार्षिक आय : 48000')).toBe('Annual Income : 48000');
+    expect(latinise('पिता का नाम : राजेश वर्मा')).toBe('Father Name : राजेश वर्मा');
+    expect(latinise('प्रमाण पत्र संख्या : 212340056789')).toBe('Certificate Number : 212340056789');
+    expect(latinise('जारी करने की तिथि : 15/03/2024')).toBe('Date of Issue : 15/03/2024');
+    expect(latinise('जन्म की तारीख : 12/05/2004')).toBe('Date of Birth : 12/05/2004');
+    // "तिथि" with its final vowel sign lost, as the reader gave it back from a
+    // made-up certificate.
+    expect(latinise('जारी करने की तिथ : 15/03/2024')).toBe('Date of Issue : 15/03/2024');
+    expect(latinise('जन्म तिथ : 12/05/2004')).toBe('Date of Birth : 12/05/2004');
+  });
+
+  it('translates Telugu labels, including the one the reader misreads', () => {
+    expect(latinise('పేరు : లక్ష్మి దేవి')).toBe('Name : లక్ష్మి దేవి');
+    expect(latinise('తండ్రి పేరు : వెంకట రావు')).toBe('Father Name : వెంకట రావు');
+    // "తండ్రి" read as "తం(డి": the conjunct is the reader's weak spot.
+    expect(latinise('తం(డి పేరు : వెంకట రావు')).toBe('Father Name : వెంకట రావు');
+    expect(latinise('వార్షిక ఆదాయం : 72000')).toBe('Annual Income : 72000');
+    expect(latinise('పుట్టిన తేదీ : 02/08/2003')).toBe('Date of Birth : 02/08/2003');
+    expect(latinise('చిరునామా : విజయవాడ')).toBe('Address : విజయవాడ');
+    expect(latinise('పేరు / Name : LAKSHMI DEVI')).toBe('Name : LAKSHMI DEVI');
+  });
+
+  it('translates Tamil labels', () => {
+    expect(latinise('பெயர் : கவிதா முருகன்')).toBe('Name : கவிதா முருகன்');
+    expect(latinise('தந்தை பெயர் : முருகன் செல்வம்')).toBe('Father Name : முருகன் செல்வம்');
+    expect(latinise('ஆண்டு வருமானம் : 60000')).toBe('Annual Income : 60000');
+    expect(latinise('பிறந்த தேதி : 21/11/2003')).toBe('Date of Birth : 21/11/2003');
+    expect(latinise('சான்றிதழ் எண் : TN20230045671')).toBe('Certificate Number : TN20230045671');
+    expect(latinise('பெயர் / Name : KAVITHA MURUGAN')).toBe('Name : KAVITHA MURUGAN');
+  });
 });
 
 describe('the fragments a misread leaves behind', () => {

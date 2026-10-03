@@ -15,7 +15,8 @@
  * `submit-guard.ts`, gated on an approval token (CLAUDE.md rule 1).
  */
 
-import { normaliseText, similarity } from '@/matching/normalise';
+import { chooseOption, type Choice } from '@/matching/choose-option';
+import { normaliseText } from '@/matching/normalise';
 
 export type FillStrategy =
   | 'text'
@@ -23,6 +24,14 @@ export type FillStrategy =
   | 'option-exact-text'
   | 'option-normalised-text'
   | 'option-fuzzy'
+  /** The same answer in other words: "M" for Male, "ST" for Scheduled Tribe. */
+  | 'option-meaning'
+  /** The band a number falls in: 30000 → "Below 1 Lakh". */
+  | 'option-range'
+  /** The group a course belongs to: "Information Science" → "Computer Science / IT". */
+  | 'option-family'
+  /** "Other", with the answer written in its box. */
+  | 'option-other'
   | 'radio-label'
   | 'checkbox'
   | 'file'
@@ -39,10 +48,12 @@ export interface FillOutcome {
   /** What the field actually holds after the write. */
   readBack?: string;
   reason?: string;
+  /**
+   * The option chosen is the page's "Other", and this is the answer for the
+   * box that goes with it. `fill-field.ts` finds the box and writes it.
+   */
+  otherText?: string;
 }
-
-/** Below this a fuzzy option match is refused rather than guessed. */
-const FUZZY_FLOOR = 0.72;
 
 // ---------------------------------------------------------------------------
 // The native setter
@@ -140,48 +151,61 @@ interface OptionMatch {
   option: HTMLOptionElement;
   strategy: FillStrategy;
   fuzzy: boolean;
+  /** Set when the option is "Other": the answer for its box. */
+  otherText?: string;
+}
+
+/** How a choice was made, as the review screen names it. */
+export function strategyOf(choice: Exclude<Choice, { kind: 'none' }>): { strategy: FillStrategy; fuzzy: boolean } {
+  if (choice.kind === 'other') return { strategy: 'option-other', fuzzy: false };
+  const strategy: FillStrategy =
+    choice.how === 'exact'
+      ? 'option-normalised-text'
+      : choice.how === 'words'
+        ? 'option-fuzzy'
+        : (`option-${choice.how}` as FillStrategy);
+  return { strategy, fuzzy: !choice.sure };
 }
 
 /**
  * Find the option that means `value`, cheapest and most certain first.
  *
- * The order is the plan's: option value, exact text, normalised text, fuzzy.
- * Which one won is recorded, because a fuzzy hit ("Karnatak" → "Karnataka") is
- * a guess the user should confirm, and §Phase 7 lists fuzzy select matches as
- * something the review screen must surface explicitly.
+ * The order is the plan's — option value, exact text, normalised text — and
+ * then `chooseOption`'s: the same meaning, the band a number falls in, the
+ * family of a course, the words most of an option shares, and "Other". Which
+ * one won is recorded, because an inference ("Information Science" →
+ * "Computer Science / IT", "Karnatak" → "Karnataka") is a guess the user
+ * should confirm, and §Phase 7 lists those as something the review screen must
+ * surface explicitly.
  */
 export function findOption(el: HTMLSelectElement, value: string): OptionMatch | null {
   const options = [...el.options];
   const wanted = normaliseText(value);
 
-  const byValue = options.find((option) => option.value === value);
+  const byValue = options.find((option) => value !== '' && option.value === value);
   if (byValue) return { option: byValue, strategy: 'option-value', fuzzy: false };
 
-  const byExactText = options.find((option) => option.text.trim() === value.trim());
+  const byExactText = options.find((option) => value.trim() !== '' && option.text.trim() === value.trim());
   if (byExactText) return { option: byExactText, strategy: 'option-exact-text', fuzzy: false };
 
   const byNormalised = options.find(
     (option) =>
-      normaliseText(option.text) === wanted || normaliseText(option.value) === wanted,
+      wanted !== '' && (normaliseText(option.text) === wanted || normaliseText(option.value) === wanted),
   );
   if (byNormalised) {
     return { option: byNormalised, strategy: 'option-normalised-text', fuzzy: false };
   }
 
-  let best: { option: HTMLOptionElement; score: number } | null = null;
-  for (const option of options) {
-    // A placeholder row ("-- Select --") must never win a fuzzy match.
-    if (option.value === '' && option.index === 0) continue;
-    const score = Math.max(
-      similarity(wanted, normaliseText(option.text)),
-      similarity(wanted, normaliseText(option.value)),
-    );
-    if (score >= FUZZY_FLOOR && (!best || score > best.score)) {
-      best = { option, score };
-    }
-  }
-
-  return best ? { option: best.option, strategy: 'option-fuzzy', fuzzy: true } : null;
+  const choice = chooseOption(
+    value,
+    options.map((option) => ({ text: option.text, value: option.value })),
+  );
+  if (choice.kind === 'none') return null;
+  return {
+    option: options[choice.index]!,
+    ...strategyOf(choice),
+    ...(choice.kind === 'other' ? { otherText: choice.text } : {}),
+  };
 }
 
 export function fillSelect(el: HTMLSelectElement, value: string): FillOutcome {
@@ -204,6 +228,7 @@ export function fillSelect(el: HTMLSelectElement, value: string): FillOutcome {
     strategy: match.strategy,
     ...(match.fuzzy ? { fuzzy: true } : {}),
     readBack,
+    ...(match.otherText === undefined ? {} : { otherText: match.otherText }),
     ...(readBack === match.option.value
       ? {}
       : { reason: 'the dropdown did not keep the selected option' }),
@@ -240,24 +265,38 @@ export function fillRadioGroup(el: HTMLInputElement, value: string): FillOutcome
 
   const wanted = normaliseText(value);
 
-  const byValue = members.find((member) => member.value === value);
+  const byValue = members.find((member) => value !== '' && member.value === value);
   const byLabel =
     byValue ??
-    members.find((member) => normaliseText(memberLabel(member)) === wanted) ??
-    members.find((member) => normaliseText(member.value) === wanted);
+    members.find((member) => wanted !== '' && normaliseText(memberLabel(member)) === wanted) ??
+    members.find((member) => wanted !== '' && normaliseText(member.value) === wanted);
 
-  if (!byLabel) {
-    return { ok: false, reason: `no option in this group matches "${value}"` };
+  let chosen = byLabel;
+  let how: { strategy: FillStrategy; fuzzy: boolean } = { strategy: 'radio-label', fuzzy: false };
+  let otherText: string | undefined;
+  if (!chosen) {
+    const choice = chooseOption(
+      value,
+      members.map((member) => ({ text: memberLabel(member) || member.value, value: member.value })),
+    );
+    if (choice.kind === 'none') {
+      return { ok: false, reason: `no option in this group matches "${value}"` };
+    }
+    chosen = members[choice.index]!;
+    how = strategyOf(choice);
+    if (choice.kind === 'other') otherText = choice.text;
   }
 
-  byLabel.focus?.();
-  byLabel.checked = true;
-  dispatchEdit(byLabel);
+  chosen.focus?.();
+  chosen.checked = true;
+  dispatchEdit(chosen);
 
   return {
-    ok: byLabel.checked,
-    strategy: 'radio-label',
-    readBack: byLabel.value,
+    ok: chosen.checked,
+    strategy: how.strategy,
+    ...(how.fuzzy ? { fuzzy: true } : {}),
+    readBack: chosen.value,
+    ...(otherText === undefined ? {} : { otherText }),
   };
 }
 

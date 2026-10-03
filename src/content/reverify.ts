@@ -17,6 +17,7 @@
  */
 
 import type { FieldRef } from '@/shared/types';
+import { choiceWidgetOf, readChoice } from './choice-widgets';
 import { isXPath } from './selectors';
 
 export interface PlannedRef {
@@ -193,6 +194,9 @@ export function readValue(el: Element): string {
   }
 
   if (tag === 'textarea') return (el as HTMLTextAreaElement).value ?? '';
+
+  // A Google Forms-style question holds the option chosen in it, not its text.
+  if (choiceWidgetOf(el)) return readChoice(el);
 
   return (el.getAttribute('value') ?? el.textContent ?? '').trim();
 }

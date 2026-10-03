@@ -192,9 +192,11 @@ matter for isolation:
   window reference to a cross-origin page that opened it or that it opened.
   Each thread is the runtime's own file loaded again from this package — never
   a blob, never another origin.
-- Nothing is fetched. ONNX Runtime's wasm and the three models are files in the
-  package; the worker is started from its own URL, never a blob, and fetches its
-  models only from the extension's own `ocr/` folder, so the only
+- Nothing is fetched. ONNX Runtime's wasm and the nine models are files in the
+  package, and so are pdf.js's image decoders (`pdfjs/`, given to pdf.js as its
+  `wasmUrl` by `documents/pdfjs.ts`); the worker is started from its own URL,
+  never a blob, and fetches its models only from the extension's own `ocr/`
+  folder, so the only
   paths it is given are `chrome-extension://` ones. `connect-src` (`'self'` and
   `api.anthropic.com`) would refuse anything else, and an e2e test asserts that a
   real recognition makes **no request outside the extension's own origin**.

@@ -73,10 +73,65 @@ const REQUIRED = [
     why: 'The document reader cannot tell which way up a page is; a sideways photograph reads as nothing.',
     minBytes: 1_000_000,
   },
+  /*
+   * pdf.js's decoders for the images scanners write (`vite.config.ts` →
+   * `pdfjsDecoders`). Without them a black-and-white or JPEG 2000 scan draws
+   * as a blank page — nothing read, and a blank portal copy.
+   */
+  {
+    path: 'dist/pdfjs/jbig2.wasm',
+    why: 'Black-and-white scanned PDFs (CCITT fax, JBIG2) would draw as blank pages.',
+    minBytes: 50_000,
+  },
+  {
+    path: 'dist/pdfjs/openjpeg.wasm',
+    why: 'JPEG 2000 images inside PDFs would draw as nothing.',
+    minBytes: 100_000,
+  },
+  {
+    path: 'dist/pdfjs/qcms_bg.wasm',
+    why: 'Colour profiles in PDF images would be ignored.',
+    minBytes: 50_000,
+  },
   {
     path: 'dist/ocr/PP-LCNet_x1_0_doc_ori.json',
     why: 'The orientation model has no labels, so its answer means nothing.',
   },
+  // The scanner: UVDoc flattens a curled photo; the line classifier turns a line over.
+  {
+    path: 'dist/ocr/UVDoc.onnx',
+    why: 'A curled or tilted photo would be read as photographed, its rows out of line.',
+    minBytes: 10_000_000,
+  },
+  {
+    path: 'dist/ocr/PP-LCNet_x0_25_textline_ori.onnx',
+    why: 'A line printed upside down would be read as nonsense.',
+    minBytes: 100_000,
+  },
+  {
+    path: 'dist/ocr/PP-LCNet_x0_25_textline_ori.json',
+    why: 'The line classifier has no labels, so its answer means nothing.',
+  },
+  // Tables: a grade card's courses, read cell by cell.
+  {
+    path: 'dist/ocr/SLANet_plus.onnx',
+    why: 'A grade card’s courses would be read as lines: no backlogs, and a wrapped title as two courses.',
+    minBytes: 5_000_000,
+  },
+  {
+    path: 'dist/ocr/SLANet_plus.json',
+    why: 'The table model has no tokens, so its answer means nothing.',
+    minBytes: 500,
+  },
+  // The other scripts' recognisers, each with the alphabet it reads.
+  ...[
+    ['devanagari_PP-OCRv5_mobile_rec', 'Hindi, Marathi and every Devanagari document'],
+    ['te_PP-OCRv5_mobile_rec', 'Telugu documents'],
+    ['ta_PP-OCRv5_mobile_rec', 'Tamil documents'],
+  ].flatMap(([name, what]) => [
+    { path: `dist/ocr/${name}.onnx`, why: `${what} would read as nothing.`, minBytes: 1_000_000 },
+    { path: `dist/ocr/${name}.json`, why: `${what} would read as nothing: the recogniser has no alphabet.`, minBytes: 1_000 },
+  ]),
 ];
 
 const problems = [];

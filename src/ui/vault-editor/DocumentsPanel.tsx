@@ -22,7 +22,7 @@ import type { FieldKey } from '@/matching/taxonomy';
 import type { DocumentSummary } from '@/vault/document-store';
 import type { DocumentMeta } from '@/shared/types';
 import { describeConstraint, mimeFromFilename, parseConstraint } from '@/documents/constraints';
-import { assessMaster, roleFor } from '@/documents/intake';
+import { assessMaster, exampleRequirement, roleFor } from '@/documents/intake';
 import { measureShape } from '@/documents/raster';
 import { shapeFromBox, type ShapeReading } from '@/documents/trim';
 import { ExtractedDetails } from './ExtractedDetails';
@@ -41,7 +41,6 @@ interface Props {
 }
 
 /** A constraint most Indian portals use, offered as a one-click preview. */
-const SAMPLE_CONSTRAINT = 'JPEG, 20 KB to 50 KB, 3.5 cm × 4.5 cm';
 
 interface Preview {
   url: string;
@@ -53,6 +52,8 @@ interface Preview {
   fromCache: boolean;
   /** The saved copy already met the requirement, so it would go in unchanged. */
   passedThrough: boolean;
+  /** Pages in the copy, when it is a PDF of more than one. */
+  pages?: number;
 }
 
 /**
@@ -79,7 +80,13 @@ export function DocumentsPanel({ onLocked, path }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<FieldKey | null>(null);
   const [pending, setPending] = useState<Map<FieldKey, Pending>>(new Map());
-  const [constraintText, setConstraintText] = useState(SAMPLE_CONSTRAINT);
+  /**
+   * A portal's requirement, as the user pasted it. Empty until they do: each
+   * document is then previewed against an example for its kind
+   * (`exampleRequirement`), never one example for all of them — that was a
+   * passport photo's, and a bank passbook was cut down the middle to fit it.
+   */
+  const [constraintText, setConstraintText] = useState('');
   const [previews, setPreviews] = useState<Map<FieldKey, Preview | { failed: string }>>(new Map());
   /**
    * Which slot, if any, is being read for details.
@@ -95,6 +102,11 @@ export function DocumentsPanel({ onLocked, path }: Props) {
   /** What the user has typed for those, until it is sent once. Never stored. */
   const [typedPasswords, setTypedPasswords] = useState<Map<FieldKey, string>>(new Map());
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  /**
+   * Clean scans made of stored photos, shown beside the staged scan until the
+   * user saves or discards it (`doc:scan`).
+   */
+  const [scans, setScans] = useState<Map<FieldKey, { url: string; flattened: boolean; turned: boolean }>>(new Map());
 
   // Revoke object URLs on unmount so previews do not leak memory.
   const urls = useRef<string[]>([]);
@@ -208,9 +220,40 @@ export function DocumentsPanel({ onLocked, path }: Props) {
     }
   }
 
+  /**
+   * A stored photo made a clean scan — stood upright, flattened when it was a
+   * page photographed curled or on something (PaddleOCR's UVDoc), its light
+   * evened out — and staged as if the user had chosen it. Nothing is stored:
+   * their own Save replaces the stored photo, and Discard lets the scan go.
+   */
+  async function cleanScan(key: FieldKey, id: string) {
+    setBusyKey(key);
+    setError(null);
+    try {
+      const scanned = await send({ type: 'doc:scan', id });
+      const bytes = Uint8Array.from(scanned.bytes);
+      const url = URL.createObjectURL(new Blob([bytes], { type: scanned.mime }));
+      urls.current.push(url);
+      setScans((prev) => new Map(prev).set(key, { url, flattened: scanned.flattened, turned: scanned.turned }));
+      setBusyKey(null);
+      await stage(key, new File([bytes], 'clean-scan.jpg', { type: scanned.mime }));
+    } catch (err) {
+      if (isLockedError(err)) return onLocked();
+      setError(errorMessage(err));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
   /** Drop a staged pick. The vault is untouched either way. */
   function discard(key: FieldKey) {
     setPending((prev) => {
+      const next = new Map(prev);
+      next.delete(key);
+      return next;
+    });
+    setScans((prev) => {
+      if (!prev.has(key)) return prev;
       const next = new Map(prev);
       next.delete(key);
       return next;
@@ -234,8 +277,16 @@ export function DocumentsPanel({ onLocked, path }: Props) {
   }
 
   /** The intake quality gate. */
+  /** The requirement a document is previewed against, and whether it is only an example. */
+  function requirementFor(key: FieldKey): { text: string; example: boolean } {
+    const pasted = constraintText.trim();
+    return pasted === ''
+      ? { text: exampleRequirement(roleFor(key)), example: true }
+      : { text: pasted, example: false };
+  }
+
   async function checkQuality(key: FieldKey) {
-    const { constraint } = parseConstraint(constraintText);
+    const { constraint } = parseConstraint(requirementFor(key).text);
     try {
       const result = await send({ type: 'doc:preflight', key, constraint });
       if (result.warnings.length > 0) {
@@ -250,7 +301,7 @@ export function DocumentsPanel({ onLocked, path }: Props) {
     setBusyKey(key);
     setError(null);
     try {
-      const { constraint } = parseConstraint(constraintText);
+      const { constraint } = parseConstraint(requirementFor(key).text);
       const result = await send({ type: 'doc:derive', key, constraint });
 
       if ('failed' in result) {
@@ -274,6 +325,7 @@ export function DocumentsPanel({ onLocked, path }: Props) {
           warnings: result.warnings,
           fromCache: result.fromCache,
           passedThrough: result.passedThrough === true,
+          ...(result.pages === undefined ? {} : { pages: result.pages }),
         }),
       );
     } catch (err) {
@@ -297,7 +349,7 @@ export function DocumentsPanel({ onLocked, path }: Props) {
   const byKey = new Map(masters.map((m) => [m.key, m]));
   // A slot holding a document is shown whatever the path says.
   const groups = documentGroupsFor(showAll ? null : path, new Set(byKey.keys()));
-  const { constraint } = parseConstraint(constraintText);
+  const pasted = constraintText.trim() === '' ? null : parseConstraint(constraintText).constraint;
 
   return (
     <section className="border-t border-slate-200 p-4">
@@ -314,10 +366,13 @@ export function DocumentsPanel({ onLocked, path }: Props) {
           value={constraintText}
           onChange={(e) => setConstraintText(e.target.value)}
           rows={2}
+          placeholder="The words beside the portal’s upload box, e.g. “JPEG or PDF, up to 500 KB”"
           className="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-xs focus:border-slate-500 focus:outline-none"
         />
         <span className="mt-0.5 block text-xs text-slate-500">
-          Read as: {describeConstraint(constraint)}
+          {pasted === null
+            ? 'Nothing pasted: each document is previewed against an example for its kind.'
+            : `Read as: ${describeConstraint(pasted)}`}
         </span>
       </label>
 
@@ -488,6 +543,21 @@ export function DocumentsPanel({ onLocked, path }: Props) {
                               Read details from this
                             </button>
                           )}
+                          {/*
+                           * A photographed page — not a face photograph, which
+                           * flattening and relighting would only distort, and
+                           * not a PDF, which is a scan already.
+                           */}
+                          {master.meta.mime.startsWith('image/') && roleFor(key) !== 'photo' && (
+                            <button
+                              type="button"
+                              onClick={() => void cleanScan(key, master.id)}
+                              disabled={busy}
+                              className="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              Make a clean scan
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => void remove(master.id)}
@@ -509,6 +579,23 @@ export function DocumentsPanel({ onLocked, path }: Props) {
                           </span>
                         )}
                       </p>
+                    )}
+
+                    {staged && scans.has(key) && (
+                      <figure className="mt-1.5 rounded border border-emerald-200 bg-emerald-50 p-1.5">
+                        <img
+                          src={scans.get(key)!.url}
+                          alt={`The clean scan of the ${labelFor(key)}`}
+                          className="max-h-56 w-full rounded object-contain"
+                        />
+                        <figcaption className="mt-1 text-[11px] text-emerald-900">
+                          {scans.get(key)!.flattened
+                            ? 'Flattened — the page was curled, or photographed on something — '
+                            : ''}
+                          {scans.get(key)!.turned ? 'stood upright, ' : ''}
+                          evenly lit. Save it to replace the stored photo, or discard it.
+                        </figcaption>
+                      </figure>
                     )}
 
                     {staged && locks.has(key) && (
@@ -578,17 +665,32 @@ export function DocumentsPanel({ onLocked, path }: Props) {
                     )}
 
                     {shown && !('failed' in shown) && (
-                      <div className="mt-1.5 flex items-start gap-2">
+                      <div className="mt-1.5 space-y-1">
+                        {/*
+                         * Large enough to check, which a 64-pixel thumbnail of
+                         * a page never was — and the whole of it a click away.
+                         */}
                         {shown.mime.startsWith('image/') && (
                           <img
                             src={shown.url}
                             alt={`Derived ${labelFor(key)} preview`}
-                            className="h-16 w-auto rounded border border-slate-200"
+                            className={`rounded border border-slate-200 bg-slate-50 object-contain object-left ${
+                              roleFor(key) === 'document' ? 'max-h-56 w-full' : 'h-24 w-auto'
+                            }`}
                           />
                         )}
+                        <a
+                          href={shown.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="inline-block text-[11px] text-blue-700 underline"
+                        >
+                          Open it at full size
+                        </a>
                         <div className="text-[11px] text-slate-600">
                           <p>
                             {Math.round(shown.bytes / 1024)} KB · {shown.width}×{shown.height} px
+                            {shown.pages !== undefined && <> · {shown.pages} pages</>}
                             {shown.fromCache && <span className="text-slate-400"> · cached</span>}
                             {shown.passedThrough && (
                               <span className="text-slate-400">
@@ -598,7 +700,14 @@ export function DocumentsPanel({ onLocked, path }: Props) {
                             )}
                           </p>
                           <p className="text-slate-500">
-                            Required: {describeConstraint(constraint)}
+                            Required: {describeConstraint(parseConstraint(requirementFor(key).text).constraint)}
+                            {requirementFor(key).example && (
+                              <span>
+                                {' '}
+                                — an example for this kind of document. Paste the portal’s own
+                                requirement above to see what that portal would get.
+                              </span>
+                            )}
                           </p>
                           {shown.warnings.map((w) => (
                             <p key={w} className="mt-0.5 text-amber-700">

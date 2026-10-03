@@ -24,7 +24,8 @@
  */
 
 import type { PdfTextReader } from './read-document';
-import { loadPdfJs } from './pdfjs';
+import { openPdf } from './pdfjs';
+import { MAX_PDF_PAGES } from './preprocess';
 
 /**
  * Two fragments within this many units of the same baseline are on one line.
@@ -75,17 +76,13 @@ export function reconstructLines(fragments: readonly Fragment[]): string[] {
   ).filter((line) => line !== '');
 }
 
-/** How many pages to read. An ID document is one or two; a statement is not. */
-const MAX_PAGES = 5;
-
 export const readPdfText: PdfTextReader = async (bytes, password) => {
-  const { getDocument } = await loadPdfJs();
-  const task = getDocument({ data: new Uint8Array(bytes), ...(password === undefined ? {} : { password }) });
+  const task = await openPdf(bytes, password);
   const pdf = await task.promise;
 
   try {
     const pages: string[] = [];
-    const count = Math.min(pdf.numPages, MAX_PAGES);
+    const count = Math.min(pdf.numPages, MAX_PDF_PAGES);
 
     for (let pageNumber = 1; pageNumber <= count; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);

@@ -14,7 +14,7 @@
  */
 
 import type { FieldKey } from '@/matching/taxonomy';
-import { labelledValue, type Ctx } from './extract';
+import { labelledValue, toIsoDate, type Ctx } from './extract';
 import { amountInWords } from './number-words';
 
 type Kind = 'caste' | 'income' | 'domicile' | 'article371j';
@@ -41,14 +41,93 @@ const KIND_IN_TEXT: ReadonlyArray<{ kind: Kind; pattern: RegExp }> = [
 ];
 
 /** The box each kind's number belongs in. */
-const NUMBER_KEY: Readonly<Record<Kind, FieldKey | null>> = {
+const NUMBER_KEY: Readonly<Record<Kind, FieldKey>> = {
   caste: 'eligibility.caste_certificate_number',
   income: 'eligibility.income_certificate_number',
   article371j: 'eligibility.article_371j_number',
-  // A domicile certificate has a number, and the taxonomy has no box for it.
-  // Saying so is better than putting it in somebody else's.
-  domicile: null,
+  domicile: 'eligibility.domicile_certificate_number',
 };
+
+/** When, and by whom, each kind was issued: what a form asks beside its number. */
+const DATE_KEY: Readonly<Record<Kind, FieldKey>> = {
+  caste: 'eligibility.caste_certificate_date',
+  income: 'eligibility.income_certificate_date',
+  domicile: 'eligibility.domicile_certificate_date',
+  article371j: 'eligibility.article_371j_date',
+};
+const AUTHORITY_KEY: Readonly<Record<Kind, FieldKey>> = {
+  caste: 'eligibility.caste_certificate_authority',
+  income: 'eligibility.income_certificate_authority',
+  domicile: 'eligibility.domicile_certificate_authority',
+  article371j: 'eligibility.article_371j_authority',
+};
+
+/*
+ * The officers who issue these certificates, by the titles the states print:
+ * a Tahsildar (Tehsildar, Mamlatdar), their deputies, a Sub-Divisional
+ * Magistrate or Officer, an Assistant or Deputy Commissioner, a District
+ * Magistrate or Collector, a Revenue Divisional or Mandal Revenue Officer.
+ */
+const OFFICER =
+  String.raw`(?:(?:deputy|naib|additional|addl\.?|zonal\s+deputy|special)\s+)?(?:tahsildar|tehsildar|tahasildar|mamlatdar|sub[-\s]?divisional\s+(?:magistrate|officer)|s\.?\s?d\.?\s?m\b|assistant\s+commissioner|deputy\s+commissioner|district\s+(?:magistrate|collector)|sub[-\s]?collector|collector|revenue\s+divisional\s+officer|r\.?\s?d\.?\s?o\b|mandal\s+revenue\s+officer|m\.?\s?r\.?\s?o\b|executive\s+magistrate|circle\s+officer|block\s+development\s+officer)\b`;
+const NAMES_AN_OFFICER = new RegExp(String.raw`\b${OFFICER}`, 'i');
+const STARTS_WITH_AN_OFFICER = new RegExp(String.raw`^${OFFICER}`, 'i');
+
+const AUTHORITY_LABEL =
+  /^(?:issuing\s+authority|issued\s+by|name\s+(?:and|&)\s+designation(?:\s+of\s+(?:the\s+)?(?:issuing\s+)?(?:authority|officer))?|designation(?:\s+of\s+(?:the\s+)?(?:issuing\s+)?(?:authority|officer))?)\s*[:-]?\s*(.*)$/i;
+/** A seal read straightened (`seal.ts`), as the reader writes it: "Seal: TAHSILDAR, SAMPLEPURA TALUK". */
+const SEAL_LINE = /^seal\s*:\s*(.+)$/i;
+
+const ISSUE_DATE_LABEL = /^(?:date\s+of\s+issue|issue\s+date|issued\s+on|date\s+of\s+issuance)\s*[:-]?\s*(.*)$/i;
+// "Date : 12/04/2023" — but never "Date of Birth": the label is followed by
+// its separator or the date itself, and nothing else.
+const PLAIN_DATE_LABEL = /^dated?\s*(?:[:-]\s*|(?=\d))(.*)$/i;
+
+function dateIn(text: string): string | null {
+  const match = /(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})/.exec(text);
+  return match ? toIsoDate(Number(match[1]), Number(match[2]), Number(match[3])) : null;
+}
+
+/** The date a certificate was issued: labelled as such, or a plain "Date" at its foot. */
+function issueDate(ctx: Ctx): { value: string; line: number; evidence: string; confidence: number } | null {
+  for (const [label, confidence] of [
+    [ISSUE_DATE_LABEL, 0.85],
+    [PLAIN_DATE_LABEL, 0.7],
+  ] as const) {
+    const found = labelledValue(ctx, label, (value) => dateIn(value) !== null);
+    if (found !== null) return { ...found, value: dateIn(found.value)!, confidence };
+  }
+  return null;
+}
+
+/**
+ * Who issued it, from the best of three places: a label ("Issuing Authority :
+ * …"), a line of the signature block that starts with an officer's title
+ * ("Tahsildar, Tumkur Taluk"), or the seal, which is often the only place it
+ * is printed. Each must name an officer: a school's seal is not an authority.
+ */
+function issuingAuthority(ctx: Ctx): { value: string; line: number; evidence: string; confidence: number } | null {
+  const tidy = (value: string) => value.replace(/\s+/g, ' ').replace(/[\s.,;:-]+$/, '').trim();
+
+  const labelled = labelledValue(ctx, AUTHORITY_LABEL, (value) => NAMES_AN_OFFICER.test(value));
+  if (labelled !== null) return { ...labelled, value: tidy(labelled.value), confidence: 0.8 };
+
+  // The signature block is at the foot: the last such line.
+  for (let index = ctx.lines.length - 1; index >= 0; index -= 1) {
+    const line = ctx.lines[index]!.trim();
+    if (line.length <= 60 && STARTS_WITH_AN_OFFICER.test(line)) {
+      return { value: tidy(line), line: index, evidence: line, confidence: 0.75 };
+    }
+  }
+
+  for (const [index, raw] of ctx.lines.entries()) {
+    const seal = SEAL_LINE.exec(raw.trim());
+    if (seal !== null && NAMES_AN_OFFICER.test(seal[1]!)) {
+      return { value: tidy(seal[1]!), line: index, evidence: raw.trim(), confidence: 0.7 };
+    }
+  }
+  return null;
+}
 
 const RD_LABEL =
   /^(?:r\.?\s*d\.?\s*(?:no\.?|number)|acknowledgement\s*(?:no\.?|number)|certificate\s*(?:no\.?|number)|application\s*(?:no\.?|number))\s*[:-]?\s*(.*)$/i;
@@ -97,14 +176,32 @@ export function extractClaims(ctx: Ctx): void {
   const labelled = labelledValue(ctx, RD_LABEL, (value) => looksLikeRdNumber(firstOf(value)));
   const rd = labelled === null ? null : { ...labelled, value: firstOf(labelled.value) };
   if (rd !== null && kind !== undefined) {
-    const key = NUMBER_KEY[kind];
-    if (key !== null) {
+    ctx.push({
+      key: NUMBER_KEY[kind],
+      value: rd.value,
+      confidence: 0.85,
+      evidence: rd.evidence,
+      line: rd.line,
+      verified: false,
+    });
+  }
+
+  // ---- when, and by whom ---------------------------------------------------
+  // Filed under the kind it came from, like the number: a caste certificate's
+  // issuer in the income certificate's box is as wrong as its number would be.
+  if (kind !== undefined) {
+    for (const [key, found] of [
+      [DATE_KEY[kind], issueDate(ctx)],
+      [AUTHORITY_KEY[kind], issuingAuthority(ctx)],
+    ] as const) {
+      if (found === null) continue;
       ctx.push({
         key,
-        value: rd.value,
-        confidence: 0.85,
-        evidence: rd.evidence,
-        line: rd.line,
+        value: found.value,
+        confidence: found.confidence,
+        evidence: found.evidence,
+        line: found.line,
+        // Read, never proved: the user checks it against the certificate.
         verified: false,
       });
     }

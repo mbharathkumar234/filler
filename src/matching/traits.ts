@@ -23,6 +23,12 @@ export interface FieldTraits {
   maxLength?: number;
   /** Exact character count, when the key has one (Aadhaar 12, PAN 10, IFSC 11). */
   exactLength?: number;
+  /**
+   * A number forms offer as a list: an income in bands, a year from a list of
+   * years, a percentage band. Such a key may answer a dropdown or radio group —
+   * `choose-option.ts` picks the band or the year. An identifier never is one.
+   */
+  listed?: true;
 }
 
 /** Keys with no entry accept anything — absence of a rule is not a veto. */
@@ -42,9 +48,13 @@ export const TRAITS: Partial<Record<FieldKey, FieldTraits>> = {
 
   'family.father_name': { shape: 'text', minLength: 3, maxLength: 100 },
   'family.mother_name': { shape: 'text', minLength: 3, maxLength: 100 },
+  // A name in an Indian script is shorter in characters than in Latin letters.
+  'identity.full_name_local': { shape: 'text', minLength: 2, maxLength: 100 },
+  'family.father_name_local': { shape: 'text', minLength: 2, maxLength: 100 },
+  'family.mother_name_local': { shape: 'text', minLength: 2, maxLength: 100 },
   'family.guardian_name': { shape: 'text', minLength: 3, maxLength: 100 },
   'family.father_occupation': { shape: 'text', maxLength: 60 },
-  'family.annual_income': { shape: 'numeric', maxLength: 12 },
+  'family.annual_income': { shape: 'numeric', maxLength: 12, listed: true },
   'family.father_mobile': { shape: 'phone', exactLength: 10 },
   'family.mother_mobile': { shape: 'phone', exactLength: 10 },
   'family.guardian_mobile': { shape: 'phone', exactLength: 10 },
@@ -87,11 +97,14 @@ export const TRAITS: Partial<Record<FieldKey, FieldTraits>> = {
   'education[].board_or_university': { shape: 'text', minLength: 2, maxLength: 100 },
   'education[].institution': { shape: 'text', minLength: 2, maxLength: 120 },
   'education[].roll_number': { shape: 'alphanumeric', minLength: 2, maxLength: 25 },
-  'education[].year_of_passing': { shape: 'numeric', exactLength: 4 },
+  'education[].year_of_passing': { shape: 'numeric', exactLength: 4, listed: true },
   'education[].marks_obtained': { shape: 'numeric', maxLength: 6 },
   'education[].max_marks': { shape: 'numeric', maxLength: 6 },
-  'education[].percentage': { shape: 'numeric', maxLength: 6 },
-  'education[].cgpa': { shape: 'numeric', maxLength: 5 },
+  'education[].percentage': { shape: 'numeric', maxLength: 6, listed: true },
+  'education[].cgpa': { shape: 'numeric', maxLength: 5, listed: true },
+  'education[].sgpa': { shape: 'numeric', maxLength: 5, listed: true },
+  // "0", "2" — or a dropdown of 0, 1, 2, 3 and more.
+  'education[].backlogs': { shape: 'numeric', maxLength: 2, listed: true },
 
   'bank.account_holder': { shape: 'text', minLength: 3, maxLength: 100 },
   'bank.account_number': { shape: 'numeric', minLength: 9, maxLength: 18 },
@@ -116,13 +129,22 @@ export const TRAITS: Partial<Record<FieldKey, FieldTraits>> = {
   'entrance.registration_number': { shape: 'alphanumeric', minLength: 4, maxLength: 30 },
   'entrance.roll_number': { shape: 'alphanumeric', minLength: 4, maxLength: 30 },
   'entrance.rank': { shape: 'numeric', maxLength: 8 },
-  'entrance.year': { shape: 'numeric', exactLength: 4 },
+  'entrance.year': { shape: 'numeric', exactLength: 4, listed: true },
 
   // Karnataka's RD numbers: the acknowledgement printed on a Nadakacheri
   // certificate, letters and digits together (e.g. "RD0123456789012").
   'eligibility.caste_certificate_number': { shape: 'alphanumeric', minLength: 6, maxLength: 30 },
   'eligibility.income_certificate_number': { shape: 'alphanumeric', minLength: 6, maxLength: 30 },
   'eligibility.article_371j_number': { shape: 'alphanumeric', minLength: 6, maxLength: 30 },
+  'eligibility.caste_certificate_date': { shape: 'date' },
+  'eligibility.caste_certificate_authority': { shape: 'text', minLength: 3, maxLength: 120 },
+  'eligibility.income_certificate_date': { shape: 'date' },
+  'eligibility.income_certificate_authority': { shape: 'text', minLength: 3, maxLength: 120 },
+  'eligibility.domicile_certificate_number': { shape: 'alphanumeric', minLength: 6, maxLength: 30 },
+  'eligibility.domicile_certificate_date': { shape: 'date' },
+  'eligibility.domicile_certificate_authority': { shape: 'text', minLength: 3, maxLength: 120 },
+  'eligibility.article_371j_date': { shape: 'date' },
+  'eligibility.article_371j_authority': { shape: 'text', minLength: 3, maxLength: 120 },
 };
 
 for (const key of FIELD_KEYS) {
@@ -281,9 +303,10 @@ export function veto(field: FieldDescriptor, key: FieldKey): VetoResult {
     };
   }
 
-  // A select/radio holds one of a fixed set. A free-text key such as a name or
-  // an address line cannot be one of those.
-  if (capability.shape === 'choice' && !['choice', 'text'].includes(traits.shape)) {
+  // A select/radio holds one of a fixed set. An identifier — an Aadhaar
+  // number, a PIN code, an email address — is never one of those; a number a
+  // form offers as a list (an income band, a year) often is.
+  if (capability.shape === 'choice' && !['choice', 'text'].includes(traits.shape) && !traits.listed) {
     return { vetoed: true, reason: 'this is a fixed set of options, not a free-text value' };
   }
 

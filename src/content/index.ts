@@ -673,11 +673,12 @@ if (!window.__autofillContentReady) {
       }
       // A correction from the review screen writes our value into the page.
       engage();
-      const outcome = applyEdit(el, request.value);
-      // A correction is a fill: the run must remember it, or re-verification
-      // would decide the page had reset the field and put our value back.
-      controller?.remember([request.ref]);
-      sendResponse({ ok: true, data: { ok: outcome.ok, value: outcome.value } });
+      void applyEdit(el, request.value).then((outcome) => {
+        // A correction is a fill: the run must remember it, or re-verification
+        // would decide the page had reset the field and put our value back.
+        controller?.remember([request.ref]);
+        sendResponse({ ok: true, data: { ok: outcome.ok, value: outcome.value } });
+      });
       return true;
     }
 

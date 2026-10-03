@@ -10,7 +10,7 @@
 import type { DocumentRequest, Result, ResponseMap } from '@/shared/messages';
 import { derive, type DerivedFile } from '@/documents/derive';
 import { measureShape } from '@/documents/raster';
-import { roleFor, trimsToInk } from '@/documents/intake';
+import { fitFor, roleFor, trimsToInk } from '@/documents/intake';
 import { openVaultDb } from '@/vault/db';
 import {
   deleteMaster,
@@ -20,16 +20,19 @@ import {
   listMasters,
   putMaster,
   putVariant,
+  type LoadedDocument,
 } from '@/vault/document-store';
-import { readAndExtract, type OcrEngine, type TextLine } from '@/documents/read-document';
-import { regionForLine, unturnBox } from '@/documents/evidence-region';
-import { bytesToBase64 } from '@/shared/base64';
+import { readAndExtract, type OcrEngine, type PageImage, type TextLine } from '@/documents/read-document';
+import { planCrops } from '@/documents/evidence-region';
+import { base64ToBytes, bytesToBase64 } from '@/shared/base64';
 import { admitPdf, type PdfAdmission } from '@/documents/pdf-lock';
 // pdf.js cannot load in this worker: PDFs are opened by the offscreen page.
-import { offscreenPdf, workerRasterBackend } from './ocr-host';
+import { offscreenJobs, offscreenPdf, offscreenScan, workerRasterBackend } from './ocr-host';
 import type { Candidate, DocumentType } from '@/documents/extract';
 import type { TextSource } from '@/documents/read-document';
 import { VaultLockedError, isUnlocked, withKey } from '@/vault/session';
+import { getField } from '@/vault/profile-store';
+import { readingScripts, type IndicScript } from '@/documents/indic';
 import { inspectQuality, planTargetBox } from '@/documents/geometry';
 import { canPassThrough } from '@/documents/field-constraint';
 import type { FieldKey } from '@/matching/taxonomy';
@@ -54,6 +57,8 @@ export interface DerivedPayload {
   fromCache: boolean;
   /** The stored master already fit, so it goes in exactly as it was saved. */
   passedThrough?: boolean;
+  /** Pages in the copy, when it is a PDF of more than one. */
+  pages?: number;
 }
 
 /**
@@ -74,6 +79,8 @@ export type VariantOutcome =
       warnings: string[];
       fromCache: boolean;
       passedThrough: boolean;
+      /** Pages in the copy, when it is a PDF of more than one. */
+      pages?: number;
     }
   | { ok: false; code: string; reason: string };
 
@@ -86,9 +93,26 @@ export type VariantOutcome =
  * quoted line, and only the picture shows what is actually printed. It stays
  * inside the extension — the panel is an extension page.
  */
-export type ExtractedCandidate = Candidate & { crop?: string };
+export type ExtractedCandidate = Candidate & {
+  crop?: string;
+  /** The page it was read from, from 1 — present only when more than one page was read. */
+  page?: number;
+};
 
 /** What the panel gets back from `doc:extract`. */
+/** A stored photo made a clean scan, for the panel to show and — if the user keeps it — save. */
+export interface ScannedPage {
+  /** Plain array — structured clone over the bus does not keep Uint8Array. */
+  bytes: number[];
+  mime: 'image/jpeg';
+  width: number;
+  height: number;
+  /** It was a page photographed on something, and was flattened. */
+  flattened: boolean;
+  /** It was sideways or upside down, and was stood upright. */
+  turned: boolean;
+}
+
 export interface DocumentExtraction {
   documentType: DocumentType;
   candidates: ExtractedCandidate[];
@@ -160,75 +184,79 @@ const CROP_MAX_WIDTH = 720;
  * The piece of the document each value was read from, as a small JPEG.
  *
  * Cut from the document as stored — not from whatever was handed to the reader
- * — so the user sees their own scan. Best effort throughout: a value with no
- * picture beside it is still a value, and a reading must never fail because a
- * crop did.
+ * — so the user sees their own scan. Page by page (`planCrops`): each page of a
+ * scanned PDF is drawn once, however many values came off it, and each piece is
+ * carried back onto its own page and stood upright as that page was to be read.
+ * Best effort throughout: a value with no picture beside it is still a value,
+ * and a page that cannot be drawn costs its own pictures, not the others'.
  */
 async function evidenceCrops(
   bytes: Uint8Array,
   mime: string,
   candidates: readonly Candidate[],
   lines: readonly TextLine[] | undefined,
-  turns: 0 | 1 | 2 | 3,
   password: string | undefined,
+  /** Pages read flattened: their lines sit on these, not on the stored page. */
+  pageImages: readonly PageImage[] = [],
 ): Promise<Map<FieldKey, string>> {
   const crops = new Map<FieldKey, string>();
-  if (lines === undefined || candidates.length === 0) return crops;
+  const plan = planCrops(candidates, lines);
+  if (plan.size === 0) return crops;
 
-  try {
-    const backend = workerRasterBackend();
-    if (backend.crop === undefined) return crops;
+  const backend = workerRasterBackend();
+  if (backend.crop === undefined) return crops;
 
-    const page =
-      mime === 'application/pdf'
-        ? await backend.rasterisePdf(bytes, 2000, password)
-        : await backend.decode(bytes, mime);
+  for (const [pageNumber, pieces] of plan) {
+    try {
+      const flat = pageImages.find((image) => image.page === pageNumber);
+      const page =
+        flat !== undefined
+          ? await backend.decode(flat.image, flat.mime)
+          : mime === 'application/pdf'
+            ? await backend.rasterisePdf(bytes, 2000, password, pageNumber)
+            : await backend.decode(bytes, mime);
+      try {
+        // Several values often come from one line; each piece is cut once.
+        const cut = new Map<string, string>();
+        for (const { key, region, turns } of pieces) {
+          const name = `${region.x0},${region.y0},${region.x1},${region.y1}`;
+          let jpeg = cut.get(name);
+          if (jpeg === undefined) {
+            const left = Math.floor(region.x0 * page.width);
+            const top = Math.floor(region.y0 * page.height);
+            const width = Math.max(1, Math.min(page.width - left, Math.ceil((region.x1 - region.x0) * page.width)));
+            const height = Math.max(1, Math.min(page.height - top, Math.ceil((region.y1 - region.y0) * page.height)));
 
-    // Several values often come from one line; each piece is cut once.
-    const cut = new Map<string, string>();
-    for (const candidate of candidates) {
-      // The line's place on the page as it was read — upright — carried back
-      // onto the document as stored, which a sideways photograph still is.
-      const upright = regionForLine(candidate.line, lines);
-      if (upright === null) continue;
-      const region = unturnBox(upright, turns);
-
-      const name = `${region.x0},${region.y0},${region.x1},${region.y1}`;
-      let jpeg = cut.get(name);
-      if (jpeg === undefined) {
-        const left = Math.floor(region.x0 * page.width);
-        const top = Math.floor(region.y0 * page.height);
-        const width = Math.max(1, Math.min(page.width - left, Math.ceil((region.x1 - region.x0) * page.width)));
-        const height = Math.max(1, Math.min(page.height - top, Math.ceil((region.y1 - region.y0) * page.height)));
-
-        const cutOut = await backend.crop(page, { left, top, width, height });
-        // Cut sideways, shown upright: the user compares it with a value they
-        // read the right way up.
-        const piece =
-          turns === 0 || backend.turn === undefined ? cutOut : await backend.turn(cutOut, turns);
-        if (piece !== cutOut) backend.release?.(cutOut);
-        const scale = Math.min(1, CROP_MAX_WIDTH / piece.width);
-        const shown =
-          scale === 1
-            ? piece
-            : await backend.resize(piece, {
-                width: Math.round(piece.width * scale),
-                height: Math.round(piece.height * scale),
-                fit: 'contain',
-                scale,
-                exact: false,
-              });
-        jpeg = bytesToBase64(await backend.encodeJpeg(shown, 0.85));
-        if (shown !== piece) backend.release?.(shown);
-        backend.release?.(piece);
-        cut.set(name, jpeg);
+            const cutOut = await backend.crop(page, { left, top, width, height });
+            // Cut as stored, shown upright: the user compares it with a value
+            // they read the right way up.
+            const piece =
+              turns === 0 || backend.turn === undefined ? cutOut : await backend.turn(cutOut, turns);
+            if (piece !== cutOut) backend.release?.(cutOut);
+            const scale = Math.min(1, CROP_MAX_WIDTH / piece.width);
+            const shown =
+              scale === 1
+                ? piece
+                : await backend.resize(piece, {
+                    width: Math.round(piece.width * scale),
+                    height: Math.round(piece.height * scale),
+                    fit: 'contain',
+                    scale,
+                    exact: false,
+                  });
+            jpeg = bytesToBase64(await backend.encodeJpeg(shown, 0.85));
+            if (shown !== piece) backend.release?.(shown);
+            backend.release?.(piece);
+            cut.set(name, jpeg);
+          }
+          crops.set(key, jpeg);
+        }
+      } finally {
+        backend.release?.(page);
       }
-      crops.set(candidate.key, jpeg);
+    } catch {
+      // No pictures for this page, then — its values stand on their own.
     }
-
-    backend.release?.(page);
-  } catch {
-    // No pictures, then — the values stand on their own.
   }
   return crops;
 }
@@ -237,6 +265,39 @@ async function extractOnce(id: string): Promise<DocumentExtraction> {
   const document = await withKey((db, key) => getMaster(db, key, id));
   if (!document) throw new Error('That document is no longer in your vault.');
 
+  // The offscreen page stays open for the whole reading — text layer, every
+  // page recognised, every page drawn for its pictures — rather than closing
+  // and starting again between them.
+  return offscreenJobs.during(() => readOne(document));
+}
+
+/** Where the vault says its owner lives — and so which scripts their documents are printed in. */
+const STATE_KEYS: readonly FieldKey[] = [
+  'address.permanent.state',
+  'address.correspondence.state',
+  'eligibility.domicile_state',
+];
+
+/**
+ * The scripts to read this person's documents in (`indic.ts` → `readingScripts`).
+ *
+ * Read from the vault here, in the worker, and passed on as script names only —
+ * never the states themselves. Nothing in the vault yet is English and Hindi,
+ * which every Indian has on a PAN card.
+ */
+async function ownersScripts(): Promise<IndicScript[]> {
+  try {
+    const states = await withKey(async (db, key) =>
+      Promise.all(STATE_KEYS.map(async (field) => (await getField(db, key, field))?.value ?? '')),
+    );
+    return readingScripts(states.filter((state) => state.trim() !== ''));
+  } catch {
+    return readingScripts([]);
+  }
+}
+
+async function readOne(document: LoadedDocument): Promise<DocumentExtraction> {
+  const scripts = await ownersScripts();
   const result = await readAndExtract(
     document.bytes,
     // A locked PDF opens with the password kept with it (`pdf-lock.ts`).
@@ -247,6 +308,7 @@ async function extractOnce(id: string): Promise<DocumentExtraction> {
       // The slot the user filed it under: what tells a marks card whose marks
       // it carries. The vault has always known; it was simply never passed on.
       hint: { documentKey: document.key },
+      scripts,
     },
   );
 
@@ -255,15 +317,24 @@ async function extractOnce(id: string): Promise<DocumentExtraction> {
     document.meta.mime,
     result.candidates,
     result.read.lines,
-    result.read.turns ?? 0,
     document.password,
+    result.read.pageImages,
   );
+
+  // Which page a value came from, said only when there was more than one.
+  const lines = result.read.lines;
+  const manyPages = lines?.some((line) => (line.page ?? 1) > 1) === true;
 
   return {
     documentType: result.documentType,
     candidates: result.candidates.map((candidate) => {
       const crop = crops.get(candidate.key);
-      return crop === undefined ? candidate : { ...candidate, crop };
+      const page = manyPages ? (lines?.[candidate.line]?.page ?? 1) : undefined;
+      return {
+        ...candidate,
+        ...(crop === undefined ? {} : { crop }),
+        ...(page === undefined ? {} : { page }),
+      };
     }),
     source: result.read.source,
     scripts: result.read.scripts,
@@ -348,11 +419,37 @@ export async function handleDocumentRequest(
       case 'doc:extract':
         if (!isUnlocked()) throw new VaultLockedError();
         return ok(await extractFrom(request.id));
+
+      case 'doc:scan':
+        if (!isUnlocked()) throw new VaultLockedError();
+        return ok(await scanOf(request.id));
     }
   } catch (error) {
     if (error instanceof VaultLockedError) return err(error.message, 'VAULT_LOCKED');
     return err(error instanceof Error ? error.message : 'Unexpected document error.');
   }
+}
+
+/**
+ * A stored photo made a clean scan, for the panel to show. Nothing is saved
+ * here: the panel stages the scan as if the user had chosen it, and the user's
+ * own Save is what replaces the stored copy.
+ */
+async function scanOf(id: string): Promise<ScannedPage> {
+  const document = await withKey((db, key) => getMaster(db, key, id));
+  if (!document) throw new Error('That document is no longer in your vault.');
+  if (!document.meta.mime.startsWith('image/')) {
+    throw new Error('Only a photo can be made a clean scan; a PDF is one already.');
+  }
+  const scanned = await offscreenScan(document.bytes, document.meta.mime);
+  return {
+    bytes: Array.from(base64ToBytes(scanned.image)),
+    mime: 'image/jpeg',
+    width: scanned.width,
+    height: scanned.height,
+    flattened: scanned.flattened,
+    turned: scanned.turns !== 0,
+  };
 }
 
 /**
@@ -376,6 +473,7 @@ async function deriveFor(
     warnings: outcome.warnings,
     fromCache: outcome.fromCache,
     ...(outcome.passedThrough ? { passedThrough: true } : {}),
+    ...(outcome.pages === undefined ? {} : { pages: outcome.pages }),
   };
 }
 
@@ -421,6 +519,7 @@ export async function variantFor(key: FieldKey, constraint: DocConstraint): Prom
         mime: cached.meta.mime,
         width: cached.meta.width,
         height: cached.meta.height,
+        ...(cached.meta.pages === undefined ? {} : { pages: cached.meta.pages }),
         warnings: [],
         fromCache: true,
         passedThrough: false,
@@ -433,18 +532,19 @@ export async function variantFor(key: FieldKey, constraint: DocConstraint): Prom
      * `content` is where the ink is, measured at upload — it lets the trim
      * remove blank paper before the target box is planned.
      *
-     * `fit: 'pad'` for a signature overrides the centre-crop that a fixed
-     * physical size implies. Centre-cropping a photograph trims the edges of a
-     * face, which is a compromise; centre-cropping a signature removes the
-     * ascender and the underline, which is a mutilation. A signature that does
-     * not match the portal's box is letterboxed onto the page colour instead —
-     * whole, and still recognisably the user's mark.
+     * `fit: 'pad'` for anything but a photograph (`fitFor`) overrides the
+     * centre-crop that a fixed physical size implies. Centre-cropping a
+     * photograph trims the edges of a face, which is a compromise;
+     * centre-cropping a signature removes the ascender and the underline, and a
+     * passbook loses the account number at its edge — a mutilation. Those are
+     * letterboxed onto the page colour instead, whole.
      */
     const role = roleFor(key);
     const result = await derive(workerRasterBackend(), master.bytes, master.meta.mime, constraint, {
       // Never for a photograph (`trimsToInk`): its background is not margin.
       ...(master.meta.content && trimsToInk(role) ? { content: master.meta.content } : {}),
-      ...(role === 'signature' ? { fit: 'pad' as const } : {}),
+      // Padded to a portal's shape, never cut — except a photograph (`fitFor`).
+      ...(fitFor(role) === undefined ? {} : { fit: fitFor(role)! }),
       // A locked PDF is opened with its password; the copy made is unlocked.
       ...(master.password === undefined ? {} : { password: master.password }),
     });
@@ -459,6 +559,7 @@ export async function variantFor(key: FieldKey, constraint: DocConstraint): Prom
       bytes: result.bytes.length,
       width: result.width,
       height: result.height,
+      ...(result.pages === undefined ? {} : { pages: result.pages }),
       capturedAt: new Date().toISOString(),
     });
 
@@ -474,6 +575,7 @@ function fromDerivation(result: DerivedFile): VariantOutcome {
     width: result.width,
     height: result.height,
     ...(result.quality === undefined ? {} : { quality: result.quality }),
+    ...(result.pages === undefined ? {} : { pages: result.pages }),
     warnings: result.warnings.map((w) => w.message),
     fromCache: false,
     passedThrough: false,

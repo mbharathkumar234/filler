@@ -29,14 +29,29 @@ import { validateRequest } from '@/shared/validate';
 import { base64ToBytes, bytesToBase64 } from '@/shared/base64';
 import { lockFromError, pdfLock } from '@/documents/pdf-lock';
 import { readPdfText } from '@/documents/pdf-text';
-import { createRasterBackend } from '@/documents/raster';
+import { createRasterBackend, renderPdfPage } from '@/documents/raster';
+import type { IndicScript } from '@/documents/indic';
+import type { ReadTable } from '@/documents/table';
+import type { ReadSeal } from '@/documents/paddle-reader';
 import type { ReadRequest, ReadResponse } from './reader-worker';
 
-type PageReading = { items: OcrItem[]; width: number; height: number; turns: 0 | 1 | 2 | 3 };
+/** The worker's reading, with a flattened page carried as base64: the bus is JSON. */
+type PageReading = {
+  items: OcrItem[];
+  width: number;
+  height: number;
+  turns: 0 | 1 | 2 | 3;
+  flattened?: string;
+  tables?: ReadTable[];
+  seals?: ReadSeal[];
+};
+
+/** A clean scan, carried as base64. */
+type ScanReading = { image: string; width: number; height: number; flattened: boolean; turns: 0 | 1 | 2 | 3 };
 
 let worker: Worker | null = null;
 let nextId = 1;
-const pending = new Map<number, { resolve: (r: PageReading) => void; reject: (e: Error) => void }>();
+const pending = new Map<number, { resolve: (r: PageReading | ScanReading) => void; reject: (e: Error) => void }>();
 
 /** The reader, started on first use and kept for as long as this page lives. */
 function reader(): Worker {
@@ -48,8 +63,16 @@ function reader(): Worker {
     const waiting = pending.get(answer.id);
     if (waiting === undefined) return;
     pending.delete(answer.id);
-    if (answer.ok) waiting.resolve(answer.result);
-    else waiting.reject(new Error(answer.error));
+    if (!answer.ok) {
+      waiting.reject(new Error(answer.error));
+    } else if ('scan' in answer) {
+      waiting.resolve({ ...answer.scan, image: bytesToBase64(new Uint8Array(answer.scan.image)) });
+    } else {
+      const { flattened, ...reading } = answer.result;
+      waiting.resolve(
+        flattened === undefined ? reading : { ...reading, flattened: bytesToBase64(new Uint8Array(flattened)) },
+      );
+    }
   };
   worker.onerror = (event) => {
     // A reader that fell over takes every reading in hand with it, and the
@@ -63,14 +86,31 @@ function reader(): Worker {
   return worker;
 }
 
-function recognise(image: string, mime: string): Promise<PageReading> {
+/** A stored photo made a clean scan by the reader's worker. */
+function scanPage(image: string, mime: string): Promise<ScanReading> {
+  const buffer = base64ToBytes(image).slice().buffer;
+  return new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve: resolve as (r: PageReading | ScanReading) => void, reject });
+    const request: ReadRequest = { id, image: buffer, mime, base: chrome.runtime.getURL('ocr/'), kind: 'scan' };
+    reader().postMessage(request, [buffer]);
+  });
+}
+
+function recognise(image: string, mime: string, scripts: readonly IndicScript[] = []): Promise<PageReading> {
   const bytes = base64ToBytes(image);
   // A copy the worker can own outright, handed over rather than cloned.
   const buffer = bytes.slice().buffer;
   return new Promise((resolve, reject) => {
     const id = nextId++;
-    pending.set(id, { resolve, reject });
-    const request: ReadRequest = { id, image: buffer, mime, base: chrome.runtime.getURL('ocr/') };
+    pending.set(id, { resolve: resolve as (r: PageReading | ScanReading) => void, reject });
+    const request: ReadRequest = {
+      id,
+      image: buffer,
+      mime,
+      base: chrome.runtime.getURL('ocr/'),
+      scripts: [...scripts],
+    };
     reader().postMessage(request, [buffer]);
   });
 }
@@ -118,10 +158,15 @@ async function openPdf(request: PdfRequest): Promise<ResponseMap[PdfRequest['typ
       return { text: await readPdfText(bytes, request.password) };
     case 'pdf:render': {
       const backend = createRasterBackend();
-      const page = await backend.rasterisePdf(bytes, request.width, request.password);
+      const { source: page, pages } = await renderPdfPage(
+        bytes,
+        request.width,
+        request.password,
+        request.page ?? 1,
+      );
       try {
         const png = await backend.encodePng(page);
-        return { image: bytesToBase64(png), width: page.width, height: page.height };
+        return { image: bytesToBase64(png), width: page.width, height: page.height, pages };
       } finally {
         backend.release?.(page);
       }
@@ -164,8 +209,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   };
 
   if (request.type === 'ocr:recognise') {
-    return answer(inTurn(() => recognise(request.image, request.mime)), (error) =>
+    return answer(inTurn(() => recognise(request.image, request.mime, request.scripts)), (error) =>
       error instanceof Error ? error.message : 'The document could not be read.',
+    );
+  }
+  if (request.type === 'ocr:scan') {
+    return answer(inTurn(() => scanPage(request.image, request.mime)), (error) =>
+      error instanceof Error ? error.message : 'The photo could not be made a scan.',
     );
   }
   if (request.type === 'pdf:lock' || request.type === 'pdf:text' || request.type === 'pdf:render') {

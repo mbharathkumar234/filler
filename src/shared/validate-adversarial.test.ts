@@ -85,11 +85,20 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
   },
   'doc:delete': { payload: { id: 'doc-1' } },
   // A rendered page of a document, on its way to the reader.
-  'ocr:recognise': { payload: { image: 'aGVsbG8=', mime: 'image/jpeg' } },
+  'ocr:recognise': {
+    payload: { image: 'aGVsbG8=', mime: 'image/jpeg', scripts: ['Devanagari', 'Telugu'] },
+    optional: ['scripts'],
+  },
+  // A stored photo, on its way to be made a clean scan.
+  'ocr:scan': { payload: { image: 'aGVsbG8=', mime: 'image/jpeg' } },
+  'doc:scan': { payload: { id: 'doc-1' } },
   // A PDF, on its way to the page that can open one (a service worker cannot load pdf.js).
   'pdf:lock': { payload: { pdf: 'JVBERi0=', password: 'RAVI1998' }, optional: ['password'] },
   'pdf:text': { payload: { pdf: 'JVBERi0=', password: 'RAVI1998' }, optional: ['password'] },
-  'pdf:render': { payload: { pdf: 'JVBERi0=', password: 'RAVI1998', width: 2000 }, optional: ['password'] },
+  'pdf:render': {
+    payload: { pdf: 'JVBERi0=', password: 'RAVI1998', width: 2000, page: 2 },
+    optional: ['password', 'page'],
+  },
   'doc:derive': { payload: { key: 'doc.photo', constraint: {} } },
   'doc:extract': { payload: { id: 'doc-1' } },
   'doc:preflight': { payload: { key: 'doc.photo', constraint: {} } },
@@ -274,6 +283,28 @@ describe('an optional field is optional, but still checked when present', () => 
 // ---------------------------------------------------------------------------
 // The caps
 // ---------------------------------------------------------------------------
+
+describe('the scripts a page is read in', () => {
+  /*
+   * Each names a recogniser the reader may load. A name that is not one of the
+   * scripts is refused, not ignored: the bus is where a malformed request
+   * stops.
+   */
+  const asked = (scripts: unknown) =>
+    validateRequest({ type: 'ocr:recognise', image: 'aGVsbG8=', mime: 'image/png', scripts } as never).ok;
+
+  it('accepts the scripts there are, and none at all', () => {
+    expect(asked(['Devanagari', 'Tamil', 'Telugu'])).toBe(true);
+    expect(asked([])).toBe(true);
+  });
+
+  it('refuses a script that is not one, or a list that is not a list of them', () => {
+    expect(asked(['Klingon'])).toBe(false);
+    expect(asked('Devanagari')).toBe(false);
+    expect(asked([1])).toBe(false);
+    expect(asked(Array.from({ length: 40 }, () => 'Tamil'))).toBe(false);
+  });
+});
 
 describe('the caps hold at the boundary, in both directions', () => {
   /**

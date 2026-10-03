@@ -200,3 +200,92 @@ describe('an income the recogniser read only in words', () => {
     expect(extractFromText(agree, { documentKey: 'doc.income_certificate' }).warnings).toEqual([]);
   });
 });
+
+describe('when, and by whom, a certificate was issued', () => {
+  /*
+   * What the reader gave for a made-up caste certificate
+   * (`fixtures/images/caste-certificate-seal.png`) whose issuing authority is
+   * printed nowhere but in its round seal: the page's lines, then the seal read
+   * straightened (`seal.ts`), as a line of its own. Its serif face prints 0 as a
+   * small o, and the reader says so.
+   */
+  const SEALED = [
+    'GOVERNMENT OF KARNATAKA — SAMPLE',
+    'Revenue Department',
+    'CASTE CERTIFICATE (SAMPLE)',
+    'RD Number : RDo987654321012',
+    'This is to certify that Sri ARJUN MEHTA, son of RAMESH MEHTA, resident of Samplepura village, Samplepura',
+    'Taluk, belongs to the Samplecaste caste, which is recognised as Category-2A.',
+    'Date of Issue : 14/o3/2024',
+    'Place : Samplepura',
+    'GOVT. OF',
+    'KARNATAKA',
+    'Sit E',
+    'Samplegowda',
+    'SAMPLE — made up for software tests. Not a real document.',
+    'Seal: TAHSILDAR, SAMPLEPURA TALUK',
+  ].join('\n');
+
+  const read = (text: string, documentKey: FieldKey = 'doc.caste_certificate') =>
+    extractFromText(text, { documentKey }).candidates;
+  const value = (text: string, key: string, documentKey?: FieldKey) =>
+    read(text, documentKey).find((c) => c.key === key)?.value;
+
+  it('reads the issuing authority off the seal, the only place it is printed — its picture the seal', () => {
+    const authority = read(SEALED).find((c) => c.key === 'eligibility.caste_certificate_authority');
+    expect(authority?.value).toBe('TAHSILDAR, SAMPLEPURA TALUK');
+    expect(authority?.line).toBe(13);
+    expect(authority?.suggestChecked).toBe(false);
+  });
+
+  it('reads the date of issue, and the RD number, whatever the font did to their zeros', () => {
+    expect(value(SEALED, 'eligibility.caste_certificate_date')).toBe('2024-03-14');
+    expect(value(SEALED, 'eligibility.caste_certificate_number')).toBe('RD0987654321012');
+  });
+
+  it('prefers the authority as printed to the seal, and as labelled to both', () => {
+    const printed = `${CASTE}Tahsildar, Tumkur Taluk\nSeal: TAHSILDAR, TUMKUR TALUK\n`;
+    expect(value(printed, 'eligibility.caste_certificate_authority')).toBe('Tahsildar, Tumkur Taluk');
+    const labelled = `${printed}Issuing Authority : Sub-Divisional Magistrate, Tumkur\n`;
+    expect(value(labelled, 'eligibility.caste_certificate_authority')).toBe('Sub-Divisional Magistrate, Tumkur');
+  });
+
+  it('takes no seal, and no line, that names no officer', () => {
+    const school = `${CASTE}Seal: SAMPLE HIGH SCHOOL, SAMPLEPURA\nIssued by : the office\n`;
+    expect(value(school, 'eligibility.caste_certificate_authority')).toBeUndefined();
+  });
+
+  it('reads a plain "Date" as the date of issue, and never a date of birth', () => {
+    expect(value(CASTE, 'eligibility.caste_certificate_date')).toBe('2023-04-12');
+    const born = 'CASTE CERTIFICATE\nRD Number : RD0123456789012\nDate of Birth : 01/01/2005\n';
+    expect(value(born, 'eligibility.caste_certificate_date')).toBeUndefined();
+  });
+
+  it('files the date and the authority under the certificate they came from', () => {
+    const income = `${INCOME}Date of Issue : 02/05/2023\nSeal: DEPUTY TAHSILDAR, SAMPLEPURA\n`;
+    expect(value(income, 'eligibility.income_certificate_date', 'doc.income_certificate')).toBe('2023-05-02');
+    expect(value(income, 'eligibility.income_certificate_authority', 'doc.income_certificate')).toBe(
+      'DEPUTY TAHSILDAR, SAMPLEPURA',
+    );
+    expect(read(income, 'doc.income_certificate').some((c) => c.key.startsWith('eligibility.caste_certificate'))).toBe(
+      false,
+    );
+    const article = `${ARTICLE_371J}Date : 03/06/2022\nSeal: ASSISTANT COMMISSIONER, SAMPLEPURA SUB-DIVISION\n`;
+    expect(value(article, 'eligibility.article_371j_date', 'doc.article_371j_certificate')).toBe('2022-06-03');
+    expect(value(article, 'eligibility.article_371j_authority', 'doc.article_371j_certificate')).toBe(
+      'ASSISTANT COMMISSIONER, SAMPLEPURA SUB-DIVISION',
+    );
+  });
+
+  it('gives a domicile certificate’s number a box of its own at last', () => {
+    expect(value(DOMICILE, 'eligibility.domicile_certificate_number', 'doc.domicile_certificate')).toBe(
+      'RD1111122222333',
+    );
+  });
+
+  it('files nothing when nobody said which certificate it is', () => {
+    const vague = 'GOVERNMENT OF KARNATAKA\nCERTIFICATE\nDate : 12/04/2023\nSeal: TAHSILDAR, TUMKUR TALUK\n';
+    const keys = extractFromText(vague).candidates.map((c) => c.key);
+    expect(keys.filter((key) => /_date$|_authority$/.test(key))).toEqual([]);
+  });
+});

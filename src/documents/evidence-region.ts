@@ -88,3 +88,40 @@ export function regionForLine(
     y1: share(clamp(box.y1 + height * CONTEXT_ABOVE_AND_BELOW)),
   };
 }
+
+/** One piece to cut: for which value, where on its page as stored, and how to stand it up. */
+export interface PlannedPiece<K extends string = string> {
+  key: K;
+  region: PageBox;
+  /** Quarter turns clockwise that stand the cut piece upright, as its page was for reading. */
+  turns: 0 | 1 | 2 | 3;
+}
+
+/**
+ * The pieces to cut, grouped by page number (from 1).
+ *
+ * A scanned PDF is read page by page; each line says which page it sat on
+ * (none: the first) and how far that page was turned to be read. Grouping by
+ * page means each page of the stored document is drawn once, however many
+ * values came off it, and each piece is carried back onto its own page.
+ */
+export function planCrops<K extends string>(
+  values: ReadonlyArray<{ key: K; line: number }>,
+  lines: ReadonlyArray<{ box: PageBox; page?: number; turns?: 0 | 1 | 2 | 3 }> | undefined,
+): Map<number, PlannedPiece<K>[]> {
+  const plan = new Map<number, PlannedPiece<K>[]>();
+  if (lines === undefined) return plan;
+
+  for (const { key, line } of values) {
+    const upright = regionForLine(line, lines);
+    const found = lines[line];
+    if (upright === null || found === undefined) continue;
+
+    const turns = found.turns ?? 0;
+    const page = found.page ?? 1;
+    const pieces = plan.get(page) ?? [];
+    pieces.push({ key, region: unturnBox(upright, turns), turns });
+    plan.set(page, pieces);
+  }
+  return new Map([...plan.entries()].sort(([a], [b]) => a - b));
+}

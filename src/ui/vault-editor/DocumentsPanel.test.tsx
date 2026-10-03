@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { DocumentsPanel } from './DocumentsPanel';
 import { DOCUMENT_GROUPS, DOCUMENT_KEYS, labelFor } from '@/ui/lib/field-groups';
 import type * as Client from '@/ui/lib/client';
+import type { DocConstraint } from '@/shared/types';
 
 /** Derive the row's wording rather than restating it — one source of truth. */
 const PHOTO_INDEX = DOCUMENT_KEYS.indexOf('doc.photo');
@@ -30,8 +31,29 @@ let listing: unknown[] = [];
 /** How long a save takes: at once, unless a test holds it open. */
 let putDone: Promise<unknown> = Promise.resolve(null);
 
+/** A portal copy, as `doc:derive` answers: the stored picture, already fitting. */
+const DERIVED: Record<string, unknown> = {
+  bytes: [0xff, 0xd8, 0xff],
+  mime: 'image/jpeg',
+  width: 1600,
+  height: 1000,
+  warnings: [],
+  fromCache: false,
+  passedThrough: true,
+};
+
 /** What each save answers, in turn, when a test scripts it; then `putDone`. */
 let putAnswers: unknown[] = [];
+
+/** A clean scan, as `doc:scan` answers: flattened, a little smaller than the photo. */
+const SCANNED = {
+  bytes: [0xff, 0xd8, 0xff, 0xd9],
+  mime: 'image/jpeg',
+  width: 1352,
+  height: 862,
+  flattened: true,
+  turned: false,
+};
 
 vi.mock('@/ui/lib/client', async () => {
   const actual = await vi.importActual<typeof Client>('@/ui/lib/client');
@@ -42,6 +64,8 @@ vi.mock('@/ui/lib/client', async () => {
       if (request.type === 'doc:list') return Promise.resolve(listing);
       if (request.type === 'doc:preflight') return Promise.resolve({ warnings: [] });
       if (request.type === 'doc:put') return putAnswers.length > 0 ? Promise.resolve(putAnswers.shift()) : putDone;
+      if (request.type === 'doc:derive') return Promise.resolve(DERIVED);
+      if (request.type === 'doc:scan') return Promise.resolve(SCANNED);
       // A reading that is still going: the panel shows "Reading…" until told.
       if (request.type === 'doc:extract') return new Promise(() => {});
       return Promise.resolve(null);
@@ -324,5 +348,138 @@ describe('a PDF that opens only with a password', () => {
 
     await waitFor(() => expect(screen.queryByLabelText('Password for this PDF')).toBeNull());
     expect(puts()).toHaveLength(1);
+  });
+});
+
+describe('previewing a document for a portal', () => {
+  /*
+   * Found on the user's own bank passbook: the preview turned it into a
+   * passport photo. The panel previewed every document against one example
+   * requirement — a passport photo's, 3.5 x 4.5 cm — so the passbook was cut
+   * down the middle to that shape and shown as a 64-pixel thumbnail. Each kind
+   * of document is now previewed against an example for its kind, until the
+   * portal's own requirement is pasted.
+   */
+  const stored = (key: string) => ({
+    id: key,
+    key,
+    meta: { key, mime: 'image/jpeg', bytes: 88_000, width: 1600, height: 1000 },
+  });
+  const derives = () =>
+    sent.filter((m) => m.type === 'doc:derive') as unknown as Array<{ key: string; constraint: DocConstraint }>;
+
+  beforeEach(() => {
+    // jsdom has no object URLs; the panel only needs one to show.
+    Object.defineProperty(URL, 'createObjectURL', { value: () => 'blob:preview', configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: () => {}, configurable: true });
+  });
+
+  async function preview(key: string) {
+    const user = userEvent.setup();
+    listing = [stored(key)];
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await user.click(await screen.findByRole('button', { name: 'Preview for this portal' }));
+    await waitFor(() => expect(derives()).toHaveLength(1));
+    return user;
+  }
+
+  it('previews a bank passbook as a document, not as a passport photo', async () => {
+    await preview('doc.bank_passbook');
+    const { constraint } = derives()[0]!;
+    expect(constraint.dimensionsMm).toBeUndefined();
+    expect(constraint.mime).toEqual(expect.arrayContaining(['image/jpeg', 'application/pdf']));
+    expect(constraint.maxBytes).toBe(500 * 1024);
+  });
+
+  it('previews a photograph against a passport photo', async () => {
+    await preview('doc.photo');
+    expect(derives()[0]!.constraint.dimensionsMm).toEqual([35, 45]);
+  });
+
+  it('says the requirement it used is an example, until the portal’s own is pasted', async () => {
+    await preview('doc.bank_passbook');
+    expect(await screen.findByText(/an example for this kind of document/i)).toBeTruthy();
+  });
+
+  it('uses the requirement pasted for a portal, for every document', async () => {
+    const user = userEvent.setup();
+    listing = [stored('doc.bank_passbook')];
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await user.type(await screen.findByLabelText(/Portal requirement/), 'PDF only, up to 200 KB');
+    await user.click(await screen.findByRole('button', { name: 'Preview for this portal' }));
+
+    await waitFor(() => expect(derives()).toHaveLength(1));
+    expect(derives()[0]!.constraint).toMatchObject({ mime: ['application/pdf'], maxBytes: 200 * 1024 });
+    expect(screen.queryByText(/an example for this kind of document/i)).toBeNull();
+  });
+
+  it('says how many pages a PDF copy has, so a page left out would show', async () => {
+    Object.assign(DERIVED, { mime: 'application/pdf', pages: 3, passedThrough: false });
+    try {
+      await preview('doc.marksheet_12');
+      expect(await screen.findByText(/3 pages/)).toBeTruthy();
+    } finally {
+      Object.assign(DERIVED, { mime: 'image/jpeg', passedThrough: true });
+      delete DERIVED.pages;
+    }
+  });
+
+  it('offers the preview at full size, since a thumbnail of a page shows nothing', async () => {
+    await preview('doc.bank_passbook');
+    const link = await screen.findByRole('link', { name: /full size/i });
+    expect(link.getAttribute('href')).toBe('blob:preview');
+  });
+});
+
+describe('a photo made a clean scan', () => {
+  /*
+   * PaddleOCR's UVDoc flattens a page photographed curled or on a table; the
+   * light is evened out after. The scan is shown, and staged as if the user
+   * had chosen it — the stored photo is replaced only by their own Save.
+   */
+  const CARD = 'doc.marksheet_10' as const;
+  const card = { id: 'card-1', key: CARD, meta: { key: CARD, mime: 'image/jpeg', bytes: 400_000, width: 1352, height: 922 } };
+
+  it('offers a clean scan of a photographed document — not of a face photo, nor of a PDF', async () => {
+    listing = [
+      card,
+      { id: 'p', key: 'doc.photo', meta: { key: 'doc.photo', mime: 'image/jpeg', bytes: 120_000 } },
+      { id: 'a', key: 'doc.aadhaar_card', meta: { key: 'doc.aadhaar_card', mime: 'application/pdf', bytes: 90_000 } },
+    ];
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await waitFor(() =>
+      expect(screen.getAllByRole('button', { name: 'Preview for this portal' })).toHaveLength(3),
+    );
+    expect(screen.getAllByRole('button', { name: 'Make a clean scan' })).toHaveLength(1);
+  });
+
+  it('makes the scan when asked, shows it, and saves it only when the user does', async () => {
+    const user = userEvent.setup();
+    listing = [card];
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await user.click(await screen.findByRole('button', { name: 'Make a clean scan' }));
+
+    expect(sent.filter((m) => m.type === 'doc:scan')).toEqual([{ type: 'doc:scan', id: 'card-1' }]);
+    expect(await screen.findByRole('img', { name: `The clean scan of the ${labelFor(CARD)}` })).toBeTruthy();
+    expect(screen.getByText(/flattened/i)).toBeTruthy();
+    expect(screen.getByText('clean-scan.jpg')).toBeTruthy();
+    expect(sent.filter((m) => m.type === 'doc:put')).toHaveLength(0);
+
+    await user.click(screen.getByRole('button', { name: `Save ${labelFor(CARD)} to vault` }));
+    await waitFor(() => {
+      const puts = sent.filter((m) => m.type === 'doc:put') as Array<{ key?: string; bytes?: number[]; mime?: string }>;
+      expect(puts).toHaveLength(1);
+      expect(puts[0]).toMatchObject({ key: CARD, mime: 'image/jpeg', bytes: SCANNED.bytes });
+    });
+  });
+
+  it('lets the scan go without touching the stored photo', async () => {
+    const user = userEvent.setup();
+    listing = [card];
+    render(<DocumentsPanel onLocked={() => {}} path={null} />);
+    await user.click(await screen.findByRole('button', { name: 'Make a clean scan' }));
+    await user.click(await screen.findByRole('button', { name: `Discard the ${labelFor(CARD)} you chose` }));
+    await waitFor(() => expect(screen.queryByRole('img', { name: /clean scan/ })).toBeNull());
+    expect(sent.filter((m) => m.type === 'doc:put')).toHaveLength(0);
   });
 });

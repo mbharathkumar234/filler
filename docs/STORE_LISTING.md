@@ -135,12 +135,17 @@ on any other page, on any site, goes through untouched.
 If a reviewer would prefer the feature removed rather than the pattern narrowed,
 it can be: the extension works without it, with that one window left open.
 
-**Remote code:** none. All code is bundled. There are two WebAssembly modules,
-both embedded in the package rather than fetched — the Argon2id
-password-hashing implementation, and ONNX Runtime, which runs the document
-reader. The reader's three models (PaddleOCR's PP-OCRv5 text detector, its
-English recogniser, and its page-orientation classifier, which turns a sideways
-photograph upright before it is read — all Apache-2.0) ship as files in the
+**Remote code:** none. All code is bundled. The WebAssembly modules are all
+embedded in the package rather than fetched — the Argon2id password-hashing
+implementation; ONNX Runtime, which runs the document reader; and three image
+decoders that come with pdf.js (Apache-2.0) for pictures inside scanned PDFs —
+CCITT fax and JBIG2 (PDFium's decoder, BSD), JPEG 2000 (OpenJPEG, BSD) and
+colour profiles (qcms, MIT). The reader's nine models (PaddleOCR's PP-OCRv5 text detector, its
+English recogniser, its recognisers for Devanagari, Telugu and Tamil, its
+page-orientation classifier, which turns a sideways photograph upright before it
+is read, its text-line orientation classifier, UVDoc, which flattens a page
+photographed curled or on a table, and SLANet_plus, which reads a grade card's
+table cell by cell — all Apache-2.0) ship as files in the
 package too; they are
 fetched once when the extension is *built*, checked against pinned SHA-256
 hashes, and never at run time. Nothing is downloaded at any point while the

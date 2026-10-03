@@ -409,7 +409,7 @@ const reviewHarness = {
       fieldHtml: el.outerHTML,
     };
   },
-  edit(ref: string, value: string) {
+  async edit(ref: string, value: string) {
     const el = document.getElementById(ref);
     if (!el) return { ok: false, value: '' };
     return applyEdit(el, value);

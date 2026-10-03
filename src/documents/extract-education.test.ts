@@ -568,3 +568,166 @@ Total Marks : 600 509 509
     expect(result.values.get('education.class_12.marks_language')).toBeUndefined();
   });
 });
+
+describe('a semester grade card', () => {
+  /*
+   * The lines the real reader gave back from a made-up card
+   * (`fixtures/images/grade-card-ruled.png`), and the table SLANet read off it
+   * (`table.ts`). Before the table reader, all this card gave the vault was
+   * its result — and "of the Student ARJUN MEHTA" as a name, and "Seat Number
+   * 1SA21CS042" as a university.
+   */
+  const LINES = [
+    'Name of the Student : ARJUN MEHTA',
+    'University Seat Number : 1SA21CS042',
+    'Semester : III',
+    'Course Title : Credits Internal External',
+    'Result : PASS',
+    'SAMPLE TECHNOLOGICAL UNIVERSITY',
+    'PROVISIONAL GRADE CARD — SAMPLE',
+    'Name of the Student ARJUN MEHTA',
+    'University Seat Number 1SA21CS042',
+    'Semester III',
+    'Course Code Course Title Credits Internal External Total Grade',
+    '21MAT31 Transform Calculus, Fourier Series and 3 45 52 97 A',
+    'Numerical Techniques',
+    '21CS32 Data Structures and Applications 4 47 58 105 A+',
+    '21CS33 Analog and Digital Electronics 4 42 49 91 A',
+    '21CS34 Computer Organization and Architecture 3 40 45 85 B+',
+    '21CS35 Object Oriented Programming with Java 3 46 55 101 A+',
+    '21CSL36 Data Structures Laboratory 1 48 47 95 A',
+    '21KSK37 Samskrutika Kannada 1 44 41 85 B+',
+    'SGPA 8.45',
+    'CGPA 8.21',
+    'Result PASS',
+    'SAMPLE — made up for software tests. Not a real document.',
+  ].join('\n');
+
+  const HEADER = ['Course Code', 'Course Title', 'Credits', 'Internal', 'External', 'Total', 'Grade'];
+  const COURSES = [
+    ['21MAT31', 'Transform Calculus, Fourier Series and Numerical Techniques', '3', '45', '52', '97', 'A'],
+    ['21CS32', 'Data Structures and Applications', '4', '47', '58', '105', 'A+'],
+    ['21CS33', 'Analog and Digital Electronics', '4', '42', '49', '91', 'A'],
+    ['21CS34', 'Computer Organization and Architecture', '3', '40', '45', '85', 'B+'],
+    ['21CS35', 'Object Oriented Programming with Java', '3', '46', '55', '101', 'A+'],
+    ['21CSL36', 'Data Structures Laboratory', '1', '48', '47', '95', 'A'],
+    ['21KSK37', 'Samskrutika Kannada', '1', '44', '41', '85', 'B+'],
+  ];
+  const TABLE = { rows: [HEADER, ...COURSES] };
+
+  const read = (key: string, tables = [TABLE]) =>
+    extractFromText(LINES, { documentKey: 'doc.semester_marksheet' }, { tables }).candidates.find((c) => c.key === key)
+      ?.value;
+
+  it('reads the student’s name, and not the label around it', () => {
+    expect(read('identity.full_name')).toBe('ARJUN MEHTA');
+  });
+
+  it('reads the university from its heading, never from "University Seat Number"', () => {
+    expect(read('education.undergraduate.board_or_university')).toBe('SAMPLE TECHNOLOGICAL UNIVERSITY');
+  });
+
+  it('reads the USN as the registration number', () => {
+    expect(read('education.undergraduate.registration_number')).toBe('1SA21CS042');
+  });
+
+  it('reads the SGPA and the CGPA', () => {
+    expect(read('education.undergraduate.sgpa')).toBe('8.45');
+    expect(read('education.undergraduate.cgpa')).toBe('8.21');
+  });
+
+  it('lists the courses off the table, a title that wrapped onto two lines whole', () => {
+    // A title with a comma in it: the list is joined with semicolons, so that
+    // it still reads as one course.
+    expect(read('education.undergraduate.subjects')).toBe(COURSES.map((course) => course[1]).join('; '));
+  });
+
+  it('adds up the marks from the Total column', () => {
+    expect(read('education.undergraduate.marks_obtained')).toBe('659');
+  });
+
+  it('counts no backlogs when every course is cleared, and one for each failed or absent course', () => {
+    expect(read('education.undergraduate.backlogs')).toBe('0');
+    const failed = { rows: [HEADER, ...COURSES.map((c, i) => (i === 1 ? [...c.slice(0, 6), 'F'] : i === 4 ? [...c.slice(0, 6), 'AB'] : c))] };
+    expect(read('education.undergraduate.backlogs', [failed])).toBe('2');
+  });
+
+  it('leaves the semester alone: the card’s semester is not the one the student is in now', () => {
+    expect(read('education.undergraduate.semester')).toBeUndefined();
+  });
+
+  it('reads the labels without a table, and nothing of the courses', () => {
+    expect(read('education.undergraduate.sgpa', [])).toBe('8.45');
+    expect(read('education.undergraduate.subjects', [])).toBeUndefined();
+    expect(read('education.undergraduate.backlogs', [])).toBeUndefined();
+  });
+
+  it('takes no table that is not a table of courses', () => {
+    const other = { rows: [['Name', 'Relation'], ['SURESH', 'Father'], ['GEETHA', 'Mother']] };
+    expect(read('education.undergraduate.subjects', [other])).toBeUndefined();
+  });
+
+  it('joins a title wrapped onto a row of its own to the course above it', () => {
+    // An open table, with no lines between the rows, can come back with the
+    // second line of a title as a row of its own.
+    const [first, ...rest] = COURSES;
+    const wrapped = {
+      rows: [
+        HEADER,
+        ['21MAT31', 'Transform Calculus, Fourier Series and', '3', '45', '52', '97', 'A'],
+        ['', 'Numerical Techniques', '', '', '', '', ''],
+        ...rest,
+      ],
+    };
+    expect(read('education.undergraduate.subjects', [wrapped])).toBe(
+      [first![1], ...rest.map((course) => course[1])].join('; '),
+    );
+    expect(read('education.undergraduate.marks_obtained', [wrapped])).toBe('659');
+  });
+
+  it('refuses a table that lost a course’s title, rather than count it short', () => {
+    const lost = { rows: [HEADER, ...COURSES.map((c, i) => (i === 2 ? [c[0]!, '', ...c.slice(2)] : c))] };
+    expect(read('education.undergraduate.subjects', [lost])).toBeUndefined();
+    expect(read('education.undergraduate.backlogs', [lost])).toBeUndefined();
+  });
+
+  it('counts no backlogs when one grade could not be read', () => {
+    const smudged = { rows: [HEADER, ...COURSES.map((c, i) => (i === 3 ? [...c.slice(0, 6), ''] : c))] };
+    expect(read('education.undergraduate.backlogs', [smudged])).toBeUndefined();
+    // The rest of the table is still good.
+    expect(read('education.undergraduate.marks_obtained', [smudged])).toBe('659');
+  });
+
+  it('reads Absent from a Result column, where an "A" is not a grade', () => {
+    const header = ['Subject', 'Marks', 'Result'];
+    const table = { rows: [header, ['Physics', '61', 'P'], ['Chemistry', '', 'A'], ['Mathematics', '74', 'P']] };
+    expect(read('education.undergraduate.backlogs', [table])).toBe('1');
+  });
+});
+
+describe('a school marks card read as a table', () => {
+  it('gives each subject its own marks, from the columns the card heads them with', () => {
+    const table = {
+      rows: [
+        ['Subject', 'Max. Marks', 'Marks Obtained'],
+        ['KANNADA', '125', '110'],
+        ['ENGLISH', '100', '91'],
+        ['MATHEMATICS', '100', '95'],
+        ['SCIENCE', '100', '88'],
+        ['SOCIAL SCIENCE', '100', '93'],
+        ['TOTAL', '525', '477'],
+      ],
+    };
+    const result = extractFromText('S.S.L.C. MARKS CARD', { documentKey: 'doc.marksheet_10' }, { tables: [table] });
+    const value = (key: string) => result.candidates.find((c) => c.key === key)?.value;
+    expect(value('education.class_10.marks_mathematics')).toBe('95');
+    expect(value('education.class_10.marks_social_science')).toBe('93');
+    expect(value('education.class_10.marks_language')).toBe('110');
+    expect(value('education.class_10.subjects')).toBe('KANNADA, ENGLISH, MATHEMATICS, SCIENCE, SOCIAL SCIENCE');
+    // The TOTAL row is not a subject, and the sum is the five subjects'.
+    expect(value('education.class_10.marks_obtained')).toBe('477');
+    expect(value('education.class_10.max_marks')).toBe('525');
+    // A school card has no backlogs box.
+    expect(result.candidates.some((c) => c.key.endsWith('.backlogs'))).toBe(false);
+  });
+});

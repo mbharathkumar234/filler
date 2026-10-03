@@ -4,6 +4,7 @@ import { parse } from 'yaml';
 
 import {
   cropForRecognition,
+  cropForTextline,
   decodeCtc,
   detectionSize,
   findTextBoxes,
@@ -138,6 +139,22 @@ describe('finding the text boxes in the detector’s output', () => {
     expect(boxes).toEqual([]);
   });
 
+  it('keeps an arched line, scored by its own pixels when its rectangle is mostly paper', () => {
+    // A card's title still a little arched after a curled photo was flattened:
+    // the detector was sure of every pixel of it, but the rectangle around the
+    // arch is mostly paper, and PaddleOCR's "fast" score — the mean inside that
+    // rectangle — dropped it. Its "slow" score — the region's own mean — keeps it.
+    const width = 200;
+    const height = 80;
+    const data = new Float32Array(width * height);
+    for (let x = 20; x < 180; x += 1) {
+      const centre = Math.round(14 + 30 * ((x - 100) / 80) ** 2);
+      for (let y = centre; y < centre + 6; y += 1) data[y * width + x] = 0.9;
+    }
+    const boxes = findTextBoxes({ data, width, height }, { width, height }, params);
+    expect(boxes).toHaveLength(1);
+  });
+
   it('grows each box by PaddleOCR’s unclip distance, since the map is drawn tight', () => {
     // A 30 x 10 region: area 300, perimeter 80, distance 300 * 1.5 / 80 = 5.625.
     const [box] = findTextBoxes(map(100, 50, [[10, 10, 40, 20, 0.9]]), { width: 100, height: 50 }, params);
@@ -224,14 +241,25 @@ describe('cropping a box for the recogniser', () => {
     expect(crop.contentWidth).toBe(240);
   });
 
-  it('pads a short crop out to the 320 the recogniser was trained on', () => {
-    // PaddleOCR pads with zeros up to its base width rather than stretching,
-    // and feeds the model exactly that shape.
+  it('pads a short crop out to 160 with zeros, half the width the recogniser was trained on', () => {
+    // PaddleOCR pads every crop to 320, its training width, rather than
+    // stretching it. Measured through the real reader on every made-up fixture
+    // (Stage 5): the same words, figures and junk at 160 as at 320 — and a
+    // grade card, whose cells are a "3" or a "45", read in four fifths of the
+    // time. Recognition is most of a page's time; padding was most of a cell's.
+    const image = page(400, 100, [[20, 30, 80, 70]]);
+    const crop = cropForRecognition(image, { x0: 20, y0: 30, x1: 80, y1: 70 }, 48);
+    // 60 x 40 is 3:2, so at 48 tall it is 72 wide …
+    expect(crop.contentWidth).toBe(72);
+    // … and padded to 160, never stretched to it: past the content, zero.
+    expect(crop.width).toBe(160);
+    expect(crop.tensor[100]).toBe(0);
+  });
+
+  it('pads nothing onto a crop already wider than that', () => {
     const image = page(400, 100, [[20, 30, 220, 70]]);
     const crop = cropForRecognition(image, { x0: 20, y0: 30, x1: 220, y1: 70 }, 48);
-    expect(crop.width).toBe(320);
-    // Past the content, the padding is zero in normalised space.
-    expect(crop.tensor[300]).toBe(0);
+    expect(crop.width).toBe(240);
   });
 
   it('never pads a long line down: its width is its own', () => {
@@ -329,7 +357,25 @@ describe('turning the recogniser’s output into text (CTC)', () => {
 
   it('reads nothing as nothing, with a score of zero', () => {
     const out = steps([[0, 0.99], [0, 0.99]]);
-    expect(decodeCtc(out.data, out.timeSteps, out.classes, DICT)).toEqual({ text: '', score: 0 });
+    expect(decodeCtc(out.data, out.timeSteps, out.classes, DICT)).toEqual({ text: '', score: 0, weakest: 0, gap: 2 });
+  });
+
+  it('measures the longest stretch it read nothing in, within the crop and not its padding', () => {
+    // Steps 1–5 blank between two characters, then padding the crop never had.
+    const out = steps([[1, 0.9], [0, 0.9], [0, 0.9], [0, 0.9], [0, 0.9], [0, 0.9], [2, 0.9], [0, 0.9], [0, 0.9], [0, 0.9], [0, 0.9], [0, 0.9], [0, 0.9], [0, 0.9]]);
+    expect(decodeCtc(out.data, out.timeSteps, out.classes, DICT, 0, 8).gap).toBe(5);
+    // A blank start counts: text the model left unread before the first character.
+    const late = steps([[0, 0.9], [0, 0.9], [0, 0.9], [0, 0.9], [1, 0.9], [2, 0.9]]);
+    expect(decodeCtc(late.data, late.timeSteps, late.classes, DICT).gap).toBe(4);
+  });
+
+  it('says how sure it was of its least sure character', () => {
+    // A word in another script, read by the English model beside five digits it
+    // reads well: the mean says 0.9, the guess at the word says 0.4.
+    const out = steps([[1, 0.4], [0, 0.99], [2, 0.98], [0, 0.99], [3, 0.98], [0, 0.99], [2, 0.99], [0, 0.99], [3, 0.97], [0, 0.99], [1, 0.98]]);
+    const read = decodeCtc(out.data, out.timeSteps, out.classes, DICT);
+    expect(read.score).toBeGreaterThan(0.85);
+    expect(read.weakest).toBeCloseTo(0.4, 5);
   });
 });
 
@@ -499,5 +545,76 @@ PostProcess:
     expect(turnsFrom([0.1, 0.8, 0.05, 0.05], ORIENTATION.labels)).toEqual({ turns: 3, confidence: 0.8 });
     expect(turnsFrom([0.1, 0.1, 0.7, 0.1], ORIENTATION.labels)).toEqual({ turns: 2, confidence: 0.7 });
     expect(turnsFrom([0.1, 0.1, 0.2, 0.6], ORIENTATION.labels)).toEqual({ turns: 1, confidence: 0.6 });
+  });
+});
+
+describe('which way up a line of text is', () => {
+  /*
+   * PaddleOCR's text-line orientation classifier (PP-LCNet_x0_25_textline_ori,
+   * under a megabyte): each line, stretched to 160 x 80, said to be upright or
+   * upside down — a stamp turned over, a caption printed the other way.
+   */
+  const TEXTLINE = modelConfigFrom(
+    parse(`
+Global:
+  model_name: PP-LCNet_x0_25_textline_ori
+PreProcess:
+  transform_ops:
+  - ResizeImage:
+      size: [160, 80]
+  - NormalizeImage:
+      channel_num: 3
+      mean: [0.485, 0.456, 0.406]
+      order: ''
+      scale: 0.00392156862745098
+      std: [0.229, 0.224, 0.225]
+  - ToCHWImage: null
+PostProcess:
+  Topk:
+    topk: 1
+    label_list: ['0_degree', '180_degree']
+`),
+  ).textline!;
+
+  it('reads the classifier’s settings from its own file', () => {
+    expect(TEXTLINE).toEqual({
+      width: 160,
+      height: 80,
+      mean: [0.485, 0.456, 0.406],
+      std: [0.229, 0.224, 0.225],
+      scale: 0.00392156862745098,
+      labels: [0, 180],
+    });
+  });
+
+  it('shows the classifier the box stretched to 160 x 80, red first', () => {
+    // A red page: the box is cut out and stretched, whatever its proportions.
+    const width = 300;
+    const height = 100;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let i = 0; i < width * height; i += 1) data.set([255, 0, 0, 255], i * 4);
+    const tensor = cropForTextline({ data, width, height }, { x0: 10, y0: 10, x1: 290, y1: 40 }, TEXTLINE);
+    const plane = 80 * 160;
+    expect(tensor.length).toBe(3 * plane);
+    expect(tensor[0]).toBeCloseTo((1 - 0.485) / 0.229, 4);
+    expect(tensor[plane]).toBeCloseTo((0 - 0.456) / 0.224, 4);
+  });
+
+  it('cuts the box, not the page', () => {
+    // Black on the left of the box, white on its right.
+    const width = 200;
+    const height = 60;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const v = x < 100 ? 0 : 255;
+        data.set([v, v, v, 255], (y * width + x) * 4);
+      }
+    }
+    const tensor = cropForTextline({ data, width, height }, { x0: 50, y0: 10, x1: 150, y1: 50 }, TEXTLINE);
+    const black = (0 - 0.485) / 0.229;
+    const white = (1 - 0.485) / 0.229;
+    expect(tensor[40 * 160 + 10]).toBeCloseTo(black, 3);
+    expect(tensor[40 * 160 + 150]).toBeCloseTo(white, 3);
   });
 });

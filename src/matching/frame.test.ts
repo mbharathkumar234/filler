@@ -165,3 +165,50 @@ describe('never handing someone else the applicant’s own value', () => {
     expect(unhousedReason('identity.dob', frame({ subject: 'father' }))).toMatch(/your father/);
   });
 });
+
+describe('which certificate a box asks about', () => {
+  /*
+   * "Date of Issue" and "Issuing Authority" name no certificate; a form names
+   * it once, in the heading over them. Read from the box's own words first,
+   * then the nearest heading — and with neither, the box is about a
+   * certificate the vault cannot know, and nothing is composed.
+   */
+  it.each([
+    ['Date of Issue', 'OBC (Non-Creamy Layer) Certificate Details', 'caste'],
+    ['Issuing Authority', 'Caste Certificate', 'caste'],
+    ['Date of Issue', 'EWS Certificate Details', 'income'],
+    ['Issued by', 'Income Certificate', 'income'],
+    ['Certificate Number', 'Domicile / Residence Certificate', 'domicile'],
+    ['Date of Issue', 'Article 371(J) Annexure-A', 'article371j'],
+    // The box's own words outrank the heading.
+    ['Income Certificate Issuing Authority', 'Caste Certificate Details', 'income'],
+  ] as const)('reads "%s" under "%s" as the %s certificate', (label, heading, certificate) => {
+    expect(readFrame(field(label, { nearbyText: heading })).certificate).toBe(certificate);
+  });
+
+  it.each([
+    ['Date of Issue', 'Passport Details'],
+    ['Date of Issue', ''],
+    // A heading that is a question about income, not a certificate's section.
+    ['Issued by', 'Annual Family Income'],
+  ])('reads no certificate in "%s" under "%s"', (label, heading) => {
+    expect(readFrame(field(label, { nearbyText: heading })).certificate).toBeUndefined();
+  });
+
+  it('moves a certificate’s number, date and issuer to the certificate named', () => {
+    const income = frame({ certificate: 'income' });
+    expect(compose('eligibility.caste_certificate_date', income)).toBe('eligibility.income_certificate_date');
+    expect(compose('eligibility.caste_certificate_authority', income)).toBe('eligibility.income_certificate_authority');
+    expect(compose('eligibility.caste_certificate_number', frame({ certificate: 'domicile' }))).toBe(
+      'eligibility.domicile_certificate_number',
+    );
+    expect(compose('eligibility.caste_certificate_date', frame({ certificate: 'article371j' }))).toBe(
+      'eligibility.article_371j_date',
+    );
+  });
+
+  it('composes nothing when no certificate is named: a passport’s date is not a caste certificate’s', () => {
+    expect(compose('eligibility.caste_certificate_date', frame())).toBeNull();
+    expect(compose('eligibility.income_certificate_authority', frame())).toBeNull();
+  });
+});

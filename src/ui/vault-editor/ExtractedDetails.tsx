@@ -434,7 +434,9 @@ function Row({
               Check digit verified — this number is not a misreading.
             </span>
           ) : (
-            <>Read from: “{candidate.evidence}”</>
+            <>
+              Read from{candidate.page === undefined ? '' : ` page ${candidate.page}`}: “{candidate.evidence}”
+            </>
           )}
         </p>
       </div>

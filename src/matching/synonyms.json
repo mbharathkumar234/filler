@@ -18,6 +18,9 @@
   "identity.full_name": [
     "full name",
     "name",
+    "name in english",
+    "full name in english",
+    "candidate name in english",
     "candidate name",
     "applicant name",
     "name of applicant",
@@ -404,8 +407,7 @@
   "education[].cgpa": [
     "cgpa",
     "gpa",
-    "grade point average",
-    "sgpa"
+    "grade point average"
   ],
   "bank.account_holder": [
     "account holder name",
@@ -558,7 +560,10 @@
     "branch",
     "discipline",
     "stream",
-    "branch of study"
+    "branch of study",
+    "field of study",
+    "area of study",
+    "major subject"
   ],
   "education[].specialization": [
     "specialization",
@@ -577,7 +582,11 @@
     "reg no",
     "enrolment number",
     "enrollment number",
-    "university registration number"
+    "university registration number",
+    "register number",
+    "register no",
+    "usn",
+    "university seat number"
   ],
   "education[].subjects": [
     "subjects",
@@ -831,13 +840,20 @@
     "caste certificate rd number",
     "caste certificate number",
     "caste rd number",
-    "rd number of caste certificate"
+    "rd number of caste certificate",
+    "caste certificate no",
+    "obc certificate number",
+    "sc st certificate number",
+    "certificate number",
+    "certificate no",
+    "rd number"
   ],
   "eligibility.income_certificate_number": [
     "income certificate rd number",
     "income certificate number",
     "income rd number",
-    "rd number of income certificate"
+    "rd number of income certificate",
+    "ews certificate number"
   ],
   "eligibility.article_371j_number": [
     "371j rd number",
@@ -845,6 +861,71 @@
     "371(j) certificate number",
     "annexure-a number",
     "371j certificate rd number"
+  ],
+  "eligibility.caste_certificate_date": [
+    "caste certificate issue date",
+    "caste certificate date of issue",
+    "date of issue of caste certificate",
+    "caste certificate issued on",
+    "caste certificate date",
+    "obc certificate date of issue",
+    "date of issue",
+    "issue date",
+    "certificate issue date",
+    "date of issue of certificate",
+    "issued on"
+  ],
+  "eligibility.caste_certificate_authority": [
+    "caste certificate issuing authority",
+    "issuing authority of caste certificate",
+    "caste certificate issued by",
+    "obc certificate issuing authority",
+    "issuing authority",
+    "issued by",
+    "certificate issuing authority",
+    "certificate issued by",
+    "name of issuing authority",
+    "designation of issuing authority"
+  ],
+  "eligibility.income_certificate_date": [
+    "income certificate issue date",
+    "income certificate date of issue",
+    "date of issue of income certificate",
+    "ews certificate date of issue",
+    "ews certificate issue date"
+  ],
+  "eligibility.income_certificate_authority": [
+    "income certificate issuing authority",
+    "issuing authority of income certificate",
+    "income certificate issued by",
+    "ews certificate issuing authority"
+  ],
+  "eligibility.domicile_certificate_number": [
+    "domicile certificate number",
+    "domicile certificate rd number",
+    "domicile certificate no",
+    "residence certificate number",
+    "nativity certificate number"
+  ],
+  "eligibility.domicile_certificate_date": [
+    "domicile certificate issue date",
+    "domicile certificate date of issue",
+    "residence certificate date of issue"
+  ],
+  "eligibility.domicile_certificate_authority": [
+    "domicile certificate issuing authority",
+    "domicile certificate issued by",
+    "residence certificate issuing authority"
+  ],
+  "eligibility.article_371j_date": [
+    "371j certificate date of issue",
+    "371(j) certificate issue date",
+    "annexure a date of issue"
+  ],
+  "eligibility.article_371j_authority": [
+    "371j certificate issuing authority",
+    "371(j) certificate issued by",
+    "annexure a issuing authority"
   ],
   "doc.semester_marksheet": [
     "semester marks card",
@@ -1139,5 +1220,57 @@
     "social studies marks obtained",
     "marks obtained in social studies",
     "marks secured in social studies"
+  ],
+  "identity.full_name_local": [
+    "name in hindi",
+    "candidate name in hindi",
+    "applicant name in hindi",
+    "name in devanagari",
+    "name in devanagari script",
+    "name in regional language",
+    "name in local language",
+    "name in vernacular",
+    "name in mother tongue",
+    "name in marathi",
+    "name in telugu",
+    "name in tamil",
+    "name in kannada",
+    "नाम हिंदी में",
+    "हिंदी में नाम"
+  ],
+  "family.father_name_local": [
+    "fathers name in hindi",
+    "fathers name in regional language",
+    "father name in hindi",
+    "father name in regional language",
+    "father name in local language",
+    "पिता का नाम हिंदी में"
+  ],
+  "education[].sgpa": [
+    "sgpa",
+    "semester grade point average",
+    "last semester sgpa",
+    "previous semester sgpa",
+    "sgpa of previous semester",
+    "sgpa of last semester",
+    "semester gpa"
+  ],
+  "education[].backlogs": [
+    "backlogs",
+    "number of backlogs",
+    "no of backlogs",
+    "active backlogs",
+    "current backlogs",
+    "standing arrears",
+    "current arrears",
+    "arrears"
+  ],
+  "family.mother_name_local": [
+    "mothers name in hindi",
+    "mothers name in regional language",
+    "mother name in hindi",
+    "mother name in regional language",
+    "mother name in local language",
+    "माता का नाम हिंदी में"
   ]
 }

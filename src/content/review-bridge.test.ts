@@ -116,43 +116,43 @@ describe('pointing at a field', () => {
 });
 
 describe('applying a correction', () => {
-  it('writes the value and reads back what actually landed', () => {
-    const outcome = applyEdit(byId('e')!, 'ravi@example.com');
+  it('writes the value and reads back what actually landed', async () => {
+    const outcome = await applyEdit(byId('e')!, 'ravi@example.com');
 
     expect(outcome).toMatchObject({ ok: true, value: 'ravi@example.com' });
     expect((byId('e') as HTMLInputElement).value).toBe('ravi@example.com');
   });
 
-  it('reports what the field kept, not what we sent', () => {
+  it('reports what the field kept, not what we sent', async () => {
     // A maxLength keeps a prefix. The review must show the prefix, because
     // that is what the portal will receive.
     page('<input id="p" maxlength="6" />');
-    const outcome = applyEdit(byId('p')!, '5600011234');
+    const outcome = await applyEdit(byId('p')!, '5600011234');
 
     expect(outcome.value).toBe('560001');
   });
 
-  it('selects a dropdown option by its visible text', () => {
-    const outcome = applyEdit(byId('s')!, 'Tamil Nadu');
+  it('selects a dropdown option by its visible text', async () => {
+    const outcome = await applyEdit(byId('s')!, 'Tamil Nadu');
 
     expect(outcome.ok).toBe(true);
     expect((byId('s') as HTMLSelectElement).value).toBe('TN');
   });
 
-  it('fires the events a framework needs to notice the change', () => {
+  it('fires the events a framework needs to notice the change', async () => {
     const seen: string[] = [];
     const input = byId('e')!;
     for (const type of ['input', 'change']) {
       input.addEventListener(type, () => seen.push(type));
     }
 
-    applyEdit(input, 'ravi@example.com');
+    await applyEdit(input, 'ravi@example.com');
 
     expect(seen).toEqual(expect.arrayContaining(['input', 'change']));
   });
 
-  it('says so when the value will not go in', () => {
-    const outcome = applyEdit(byId('s')!, 'Atlantis');
+  it('says so when the value will not go in', async () => {
+    const outcome = await applyEdit(byId('s')!, 'Atlantis');
     expect(outcome.ok).toBe(false);
     expect(outcome.reason).toBeTruthy();
   });

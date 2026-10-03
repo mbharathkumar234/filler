@@ -13,6 +13,7 @@ import {
   listMasters,
   putMaster,
   putVariant,
+  VARIANT_RECIPE,
   variantId,
 } from './document-store';
 import { parseConstraint } from '@/documents/constraints';
@@ -237,6 +238,25 @@ describe('variant cache', () => {
 
   it('does not share a cache entry across different masters', async () => {
     expect(await variantId('m1', constraint)).not.toBe(await variantId('m2', constraint));
+  });
+
+  it('never serves a copy made the way copies used to be made', async () => {
+    // Until documents were padded to a portal's shape, a bank passbook asked for
+    // at 3.5 x 4.5 cm was cut down the middle to it — and that copy was cached
+    // under the same key a new one would use. Copies are keyed by how they were
+    // made as well, so one made the old way is never handed out again.
+    expect(VARIANT_RECIPE).toBeGreaterThanOrEqual(2);
+    const master = await putMaster(db, key, { key: 'doc.bank_passbook', label: 'Passbook', bytes: PHOTO, meta: META });
+    await db.put('variants', {
+      id: await variantId(master.id, constraint, 1),
+      masterId: master.id,
+      key: 'doc.bank_passbook',
+      constraint: 'old',
+      meta: { ...VARIANT_META, key: 'doc.bank_passbook' },
+      sealed: (await db.getAll('documents'))[0]!.sealed,
+      createdAt: '2026-08-25T00:00:00Z',
+    });
+    await expect(getCachedVariant(db, key, master.id, constraint)).resolves.toBeUndefined();
   });
 
   it('stores no plaintext variant bytes at rest', async () => {

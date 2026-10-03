@@ -3,12 +3,15 @@ import { describe, expect, it } from 'vitest';
 import {
   assessMaster,
   blockersIn,
+  exampleRequirement,
+  fitFor,
   isUsable,
   roleFor,
   ROLE_TARGETS,
   trimsToInk,
   type IntakeRole,
 } from './intake';
+import { parseConstraint } from './constraints';
 import type { DocumentMeta } from '@/shared/types';
 
 function meta(overrides: Partial<DocumentMeta> = {}): DocumentMeta {
@@ -410,5 +413,44 @@ describe('what a derivation may trim (§ test portal)', () => {
     expect(trimsToInk('signature')).toBe(true);
     expect(trimsToInk('thumb')).toBe(true);
     expect(trimsToInk('document')).toBe(true);
+  });
+});
+
+describe('fitting a document to a portal’s shape', () => {
+  /*
+   * A portal that names a physical size for a photograph wants the face
+   * centred in it, and trimming the edges of a photo is the lesser harm. A
+   * passbook, a certificate, a signature asked for at a size must keep every
+   * edge: the account number is at the edge of the passbook, the underline at
+   * the edge of the signature. Those are padded to the shape, never cut.
+   */
+  it('lets a photograph be cropped to the shape asked for', () => {
+    expect(fitFor('photo')).toBeUndefined();
+  });
+
+  it('pads everything written on paper, so no edge is cut away', () => {
+    expect(fitFor('document')).toBe('pad');
+    expect(fitFor('signature')).toBe('pad');
+    expect(fitFor('thumb')).toBe('pad');
+  });
+});
+
+describe('the example requirement a document is previewed against', () => {
+  /*
+   * Before a portal's own requirement is pasted, each document is previewed
+   * against an example for its kind. There used to be one example for all of
+   * them — a passport photo's — and a bank passbook was cut down the middle to
+   * 3.5 × 4.5 cm to fit it.
+   */
+  it('asks a photograph for a passport photo, and a signature for a signature strip', () => {
+    expect(parseConstraint(exampleRequirement('photo')).constraint.dimensionsMm).toEqual([35, 45]);
+    expect(parseConstraint(exampleRequirement('signature')).constraint.dimensionsMm).toEqual([35, 15]);
+  });
+
+  it('asks a document for what a document upload asks: a PDF or a JPEG, under a size, any shape', () => {
+    const { constraint } = parseConstraint(exampleRequirement('document'));
+    expect(constraint.mime).toEqual(expect.arrayContaining(['image/jpeg', 'application/pdf']));
+    expect(constraint.maxBytes).toBe(500 * 1024);
+    expect(constraint.dimensionsMm).toBeUndefined();
   });
 });

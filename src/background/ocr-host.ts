@@ -29,11 +29,12 @@ import { createRasterBackend } from '@/documents/raster';
 import type { RasterBackend } from '@/documents/derive';
 import type { PdfLock } from '@/documents/pdf-lock';
 import { readableWithBundled } from '@/documents/ocr';
-import { readingScale, tooSmallToRead } from '@/documents/preprocess';
+import { MAX_PDF_PAGES, readingScale, tooSmallToRead } from '@/documents/preprocess';
 import { layoutLines, SCRIPT_MISREAD_BELOW } from '@/documents/layout';
 import { toFractions } from '@/documents/evidence-region';
-import type { OcrEngine } from '@/documents/read-document';
+import type { OcrEngine, PageImage, TextLine } from '@/documents/read-document';
 import type { IndicScript } from '@/documents/indic';
+import type { ReadTable } from '@/documents/table';
 import { base64ToBytes, bytesToBase64 } from '@/shared/base64';
 import {
   envelope,
@@ -127,11 +128,17 @@ function keepAlive(): () => void {
 /** What the offscreen reader hands back for one page. */
 export interface PageReading {
   items: OcrItem[];
-  /** The size of the page as it was read: upright. */
+  /** The size of the page as it was read: upright, and flattened when it was a photo. */
   width: number;
   height: number;
   /** Quarter turns clockwise that stood the page upright. Absent or 0: it already was. */
   turns?: 0 | 1 | 2 | 3;
+  /** The flattened page, base64 JPEG, when the photo was flattened before it was read. */
+  flattened?: string;
+  /** The tables on the page, cell by cell, when it has any. */
+  tables?: ReadTable[];
+  /** The round seals on the page, read straightened: where, and the words over the top and under the bottom. */
+  seals?: Array<{ box: OcrItem['box']; text: string[] }>;
 }
 
 /**
@@ -154,15 +161,36 @@ export interface PageReading {
 export interface Reader {
   open(): Promise<void>;
   close(): Promise<void>;
-  recognise(image: Uint8Array, mime: string): Promise<PageReading>;
+  /** `scripts`: the other scripts the page may be in, besides English. */
+  recognise(image: Uint8Array, mime: string, scripts: readonly IndicScript[]): Promise<PageReading>;
   keepAlive(): () => void;
 }
 
-export function serialiseReads(reader: Reader) {
+/** One job at a time on the offscreen page, which the last one out closes. */
+export interface QueuedJobs {
+  <T>(job: () => Promise<T>): Promise<T>;
+  /**
+   * Keep the page open for the whole of `work`, however many jobs it queues.
+   *
+   * A scanned PDF is rendered and read page by page, each step its own job.
+   * Without this the page was closed after every one and opened again for the
+   * next — the reader started afresh, models and all, twice a page.
+   */
+  during<T>(work: () => Promise<T>): Promise<T>;
+}
+
+export function serialiseReads(reader: Reader): QueuedJobs {
   let queue: Promise<void> = Promise.resolve();
   let inFlight = 0;
 
-  return async function read<T>(job: () => Promise<T>): Promise<T> {
+  const release = async () => {
+    inFlight -= 1;
+    // Last one out closes the page, so nothing of this document stays
+    // resident — and nobody closes it under a reader still using it.
+    if (inFlight === 0) await reader.close();
+  };
+
+  const read = async function read<T>(job: () => Promise<T>): Promise<T> {
     inFlight += 1;
 
     const mine = queue.then(async () => {
@@ -183,12 +211,20 @@ export function serialiseReads(reader: Reader) {
     try {
       return await mine;
     } finally {
-      inFlight -= 1;
-      // Last one out closes the page, so nothing of this document stays
-      // resident — and nobody closes it under a reader still using it.
-      if (inFlight === 0) await reader.close();
+      await release();
     }
   };
+
+  const during = async <T,>(work: () => Promise<T>): Promise<T> => {
+    inFlight += 1;
+    try {
+      return await work();
+    } finally {
+      await release();
+    }
+  };
+
+  return Object.assign(read, { during });
 }
 
 /** A prepared page, and anything about it the user deserves to be told. */
@@ -196,6 +232,8 @@ export interface RenderedPage {
   image: Uint8Array;
   mime: string;
   notes: string[];
+  /** How many pages the document has. Absent: one, as a picture is. */
+  pages?: number;
 }
 
 /**
@@ -211,6 +249,7 @@ async function renderForReading(
   bytes: Uint8Array,
   mime: string,
   password?: string,
+  page = 1,
 ): Promise<RenderedPage> {
   const backend = createRasterBackend();
   const notes: string[] = [];
@@ -218,8 +257,8 @@ async function renderForReading(
   if (mime === 'application/pdf') {
     // Rendered by the offscreen page — this worker cannot load pdf.js — and
     // opened with the password the vault keeps for a locked PDF.
-    const png = await offscreenPdf.render(bytes, PDF_RENDER_WIDTH, password);
-    return { image: png, mime: 'image/png', notes };
+    const rendered = await offscreenPdf.render(bytes, PDF_RENDER_WIDTH, password, page);
+    return { image: rendered.image, mime: 'image/png', notes, pages: rendered.pages };
   }
 
   const source = await backend.decode(bytes, mime);
@@ -247,9 +286,22 @@ async function renderForReading(
   return { image: jpeg, mime: 'image/jpeg', notes };
 }
 
+/**
+ * A stored photo made a clean scan, in the offscreen page's one queue: stood
+ * upright, flattened when it was photographed on something, evenly lit.
+ */
+export function offscreenScan(image: Uint8Array, mime: string): Promise<ResponseMap['ocr:scan']> {
+  return offscreenJobs(() => askOffscreen({ type: 'ocr:scan', image: bytesToBase64(image), mime }));
+}
+
 /** Ask the offscreen page to read a page, with an end to the waiting. */
-async function recogniseIn(image: Uint8Array, mime: string): Promise<PageReading> {
-  return askOffscreen({ type: 'ocr:recognise', image: bytesToBase64(image), mime });
+async function recogniseIn(image: Uint8Array, mime: string, scripts: readonly IndicScript[]): Promise<PageReading> {
+  return askOffscreen({
+    type: 'ocr:recognise',
+    image: bytesToBase64(image),
+    mime,
+    ...(scripts.length === 0 ? {} : { scripts: [...scripts] }),
+  });
 }
 
 /**
@@ -259,7 +311,7 @@ async function recogniseIn(image: Uint8Array, mime: string): Promise<PageReading
  * them to it (`OFFSCREEN_TYPES`). Called inside a job of `offscreenJobs`, which
  * is what makes sure the page is open, and stays open, while it answers.
  */
-async function askOffscreen<T extends 'ocr:recognise' | PdfRequest['type']>(
+async function askOffscreen<T extends 'ocr:recognise' | 'ocr:scan' | PdfRequest['type']>(
   request: Extract<ExtensionRequest, { type: T }>,
 ): Promise<ResponseMap[T]> {
   const ask = chrome.runtime.sendMessage(envelope(request)) as Promise<
@@ -323,8 +375,13 @@ export interface PdfEngine {
   lock(bytes: Uint8Array, password?: string): Promise<PdfLock>;
   /** The text layer, as lines. */
   text(bytes: Uint8Array, password?: string): Promise<string>;
-  /** The first page, as a PNG `width` pixels wide. */
-  render(bytes: Uint8Array, width: number, password?: string): Promise<Uint8Array>;
+  /** Page `page` (from 1; the first by default) as a PNG `width` pixels wide, and how many pages there are. */
+  render(
+    bytes: Uint8Array,
+    width: number,
+    password?: string,
+    page?: number,
+  ): Promise<{ image: Uint8Array; pages: number }>;
 }
 
 type Jobs = <T>(job: () => Promise<T>) => Promise<T>;
@@ -346,11 +403,11 @@ export function createPdfEngine(ask: AskPdf, jobs: Jobs): PdfEngine {
       const { text } = await jobs(() => ask({ type: 'pdf:text', ...opening(bytes, password) }));
       return text;
     },
-    async render(bytes, width, password) {
-      const { image } = await jobs(() =>
-        ask({ type: 'pdf:render', width, ...opening(bytes, password) }),
+    async render(bytes, width, password, page) {
+      const { image, pages } = await jobs(() =>
+        ask({ type: 'pdf:render', width, ...(page === undefined ? {} : { page }), ...opening(bytes, password) }),
       );
-      return base64ToBytes(image);
+      return { image: base64ToBytes(image), pages };
     },
   };
 }
@@ -364,7 +421,7 @@ export const offscreenPdf: PdfEngine = createPdfEngine((request) => askOffscreen
  */
 export function workerRasterBackend(): RasterBackend {
   return createRasterBackend({
-    renderPdf: (bytes, width, password) => offscreenPdf.render(bytes, width, password),
+    renderPdf: (bytes, width, password, page) => offscreenPdf.render(bytes, width, password, page),
   });
 }
 
@@ -377,7 +434,12 @@ export function workerRasterBackend(): RasterBackend {
  */
 export function createOcrHost(
   reader: Reader = offscreenReader,
-  render: (bytes: Uint8Array, mime: string, password?: string) => Promise<RenderedPage> = renderForReading,
+  render: (
+    bytes: Uint8Array,
+    mime: string,
+    password?: string,
+    page?: number,
+  ) => Promise<RenderedPage> = renderForReading,
 ): OcrEngine {
   // The real page shares its one queue with the PDF engine; a test's reader
   // gets a queue of its own.
@@ -387,43 +449,89 @@ export function createOcrHost(
     availableScripts: async (): Promise<IndicScript[]> => readableWithBundled(),
 
     async recognise(bytes, mime, scripts, password) {
-      // Nothing here reads anything but Latin; say so rather than guess.
+      // The English model reads every box first; without it there is no reading.
       if (!scripts.includes('Latin')) return { text: '' };
+      // The others, asked only about a box the English model could only guess at.
+      const others = scripts.filter((script) => script !== 'Latin');
 
-      // Preparing the page is this worker's own work and needs no reader; only
-      // the recognising is queued.
-      const page = await render(bytes, mime, password);
-      const reading = await read(() => reader.recognise(page.image, page.mime));
+      // The reader stays open from the first page to the last; each page is
+      // rendered, then read, in turn.
+      return read.during(async () => {
+        const first = await render(bytes, mime, password, 1);
+        const total = first.pages ?? 1;
+        const count = Math.min(total, MAX_PDF_PAGES);
 
-      const kept = reading.items.filter((item) => item.score >= SCRIPT_MISREAD_BELOW);
-      const confidence =
-        kept.length === 0 ? undefined : kept.reduce((sum, item) => sum + item.score, 0) / kept.length;
+        const lines: TextLine[] = [];
+        const scores: number[] = [];
+        const notes = [...first.notes];
+        const pageImages: PageImage[] = [];
+        const tables: ReadTable[] = [];
 
-      // Lines, each with where it sat — as a share of the page, since the page
-      // the reader saw may not be the size the document was stored at.
-      const lines = layoutLines(reading.items).map((line) => ({
-        text: line.text,
-        box: toFractions(line.box, reading),
-      }));
+        for (let pageNumber = 1; pageNumber <= count; pageNumber += 1) {
+          const page = pageNumber === 1 ? first : await render(bytes, mime, password, pageNumber);
+          if (pageNumber > 1) notes.push(...page.notes);
+          const reading = await read(() => reader.recognise(page.image, page.mime, others));
 
-      const turns = reading.turns ?? 0;
-      const notes =
-        turns === 0
-          ? page.notes
-          : [
-              ...page.notes,
-              turns === 2
-                ? 'This picture was upside down, so it was turned upright before it was read.'
-                : 'This picture was sideways, so it was turned upright before it was read.',
-            ];
+          for (const item of reading.items) {
+            if (item.score >= SCRIPT_MISREAD_BELOW) scores.push(item.score);
+          }
+          tables.push(...(reading.tables ?? []));
 
-      return {
-        text: lines.map((line) => line.text).join('\n'),
-        lines,
-        ...(turns === 0 ? {} : { turns }),
-        ...(confidence === undefined ? {} : { confidence }),
-        ...(notes.length > 0 ? { notes } : {}),
-      };
+          // Lines, each with where it sat — as a share of its page, since the
+          // page the reader saw may not be the size the document was stored
+          // at — on which page, and turned how far to be read. A flattened
+          // photo's lines sit on the flattened page, which is upright: no turns,
+          // and that page goes back with them.
+          const turns = reading.turns ?? 0;
+          if (reading.flattened !== undefined) {
+            pageImages.push({ page: pageNumber, image: base64ToBytes(reading.flattened), mime: 'image/jpeg' });
+            notes.push(flattenedNote(count > 1 ? pageNumber : null));
+          }
+          const turnsOnLines = reading.flattened === undefined ? turns : 0;
+          // Each seal a line of its own, after the page's, where the seal is:
+          // "Seal: TAHSILDAR, SAMPLEPURA TALUK", and its picture is the seal.
+          const sealLines = (reading.seals ?? []).map((seal) => ({ text: `Seal: ${seal.text.join(', ')}`, box: seal.box }));
+          for (const line of [...layoutLines(reading.items), ...sealLines]) {
+            lines.push({
+              text: line.text,
+              box: toFractions(line.box, reading),
+              ...(pageNumber > 1 ? { page: pageNumber } : {}),
+              ...(turnsOnLines === 0 ? {} : { turns: turnsOnLines }),
+            });
+          }
+          if (turns !== 0) notes.push(turnedNote(turns, count > 1 ? pageNumber : null));
+        }
+
+        if (total > count) {
+          notes.push(`This PDF has ${total} pages. The first ${count} were read; the rest were not.`);
+        }
+
+        const confidence =
+          scores.length === 0 ? undefined : scores.reduce((sum, score) => sum + score, 0) / scores.length;
+
+        return {
+          text: lines.map((line) => line.text).join('\n'),
+          lines,
+          ...(confidence === undefined ? {} : { confidence }),
+          ...(notes.length > 0 ? { notes } : {}),
+          ...(pageImages.length > 0 ? { pageImages } : {}),
+          ...(tables.length > 0 ? { tables } : {}),
+        };
+      });
     },
   };
+}
+
+/** What the user is told about a photo flattened before it was read. */
+function flattenedNote(page: number | null): string {
+  const what = page === null ? 'The photo' : `Page ${page}`;
+  return `${what} was flattened before it was read: the page was curled, or photographed at an angle, on something.`;
+}
+
+/** What the user is told about a page that was turned upright to be read. */
+function turnedNote(turns: 1 | 2 | 3, page: number | null): string {
+  const how = turns === 2 ? 'upside down' : 'sideways';
+  return page === null
+    ? `This picture was ${how}, so it was turned upright before it was read.`
+    : `Page ${page} was ${how}, so it was turned upright before it was read.`;
 }

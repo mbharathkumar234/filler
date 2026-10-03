@@ -142,6 +142,37 @@ describe('language packs it does not have', () => {
   });
 });
 
+describe('a table the reader found', () => {
+  const GRADES = {
+    rows: [
+      ['Course Code', 'Course Title', 'Total', 'Grade'],
+      ['21CS32', 'Data Structures and Applications', '105', 'A+'],
+      ['21CS33', 'Analog and Digital Electronics', '91', 'F'],
+      ['21CS35', 'Object Oriented Programming with Java', '101', 'A+'],
+    ],
+  };
+
+  it('reaches the rules that read it, which learn from it what the lines alone cannot say', async () => {
+    const result = await readAndExtract(new Uint8Array([1]), { mime: 'image/png' }, {
+      ocr: engine('SAMPLE TECHNOLOGICAL UNIVERSITY\nSGPA 6.10', {
+        recognise: async () => ({ text: 'SAMPLE TECHNOLOGICAL UNIVERSITY\nSGPA 6.10', tables: [GRADES] }),
+      }),
+      hint: { documentKey: 'doc.semester_marksheet' },
+    });
+    expect(result.read.tables).toEqual([GRADES]);
+    const value = (key: string) => result.candidates.find((c) => c.key === key)?.value;
+    expect(value('education.undergraduate.backlogs')).toBe('1');
+    expect(value('education.undergraduate.marks_obtained')).toBe('297');
+  });
+
+  it('is not kept for a page that read as nothing', async () => {
+    const result = await readDocumentText(new Uint8Array([1]), { mime: 'image/png' }, {
+      ocr: engine('', { recognise: async () => ({ text: '', tables: [GRADES] }) }),
+    });
+    expect(result.tables).toBeUndefined();
+  });
+});
+
 describe('the guess is discounted, and the certainty is not', () => {
   const CARD = `Government of India\nRavi Kumar\nDOB: 14/03/1998\n${AADHAAR}`;
 
@@ -224,23 +255,32 @@ describe('where on the page the text was', () => {
     expect(read.lines).toBeUndefined();
   });
 
-  it('passes on how far the page was turned, since the boxes are places on the upright page', async () => {
-    const read = await readDocumentText(new Uint8Array(), { mime: 'image/jpeg' }, {
+  it('passes on each line’s page, and how far that page was turned to be read', async () => {
+    // A scanned PDF is read page by page, and each page may have been turned
+    // upright on its own. The boxes are places on the upright page, so the
+    // piece cut from the stored document needs both.
+    const pages = [
+      { text: 'Name : PRIYA S', box },
+      { text: 'PHYSICS 100 81 81', box, page: 2, turns: 3 as const },
+    ];
+    const read = await readDocumentText(new Uint8Array(), { mime: 'application/pdf' }, {
       ocr: engine('', {
-        recognise: async () => ({ text: two.map((l) => l.text).join('\n'), lines: two, turns: 3 }),
+        recognise: async () => ({ text: pages.map((l) => l.text).join('\n'), lines: pages }),
       }),
     });
-    expect(read.turns).toBe(3);
+    expect(read.lines?.[0]).toEqual({ text: 'Name : PRIYA S', box });
+    expect(read.lines?.[1]).toMatchObject({ page: 2, turns: 3 });
   });
 
-  it('forgets the turn along with the boxes it belongs to', async () => {
+  it('forgets the pages and the turns along with the boxes they belong to', async () => {
+    const turned = two.map((line) => ({ ...line, page: 2, turns: 3 as const }));
     const read = await readDocumentText(new Uint8Array(), { mime: 'image/jpeg' }, {
       ocr: engine('', {
-        recognise: async () => ({ text: 'Roll No. : 18315726', lines: two, turns: 3 }),
+        recognise: async () => ({ text: 'Roll No. : 18315726', lines: turned }),
       }),
     });
     expect(read.lines).toBeUndefined();
-    expect(read.turns).toBeUndefined();
+    expect(JSON.stringify(read)).not.toMatch(/turns|"page"/);
   });
 
   it('has no boxes for text taken from a PDF’s own text layer', async () => {

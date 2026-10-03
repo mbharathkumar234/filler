@@ -920,3 +920,201 @@ describe('partial matches that are one observation', () => {
     expect(bandOf(match)).toBe('auto-fill');
   });
 });
+
+describe('a Karnataka register number', () => {
+  /*
+   * Karnataka's SSLC and PUC cards print "Register Number" — "Register No." on
+   * the PUC card — and an entrance form asks for it in the same words: "2nd PUC
+   * Register Number". The dictionary knew only "registration number", and the
+   * box was left empty on a form the vault could answer.
+   */
+  const matchOf = (labelText: string, nearbyText = '') => matchField(field({ labelText, nearbyText }));
+
+  it('reads "Register Number" as the registration number the card prints', () => {
+    expect(matchOf('Register Number').key).toBe('education[].registration_number');
+    expect(matchOf('Register No.').key).toBe('education[].registration_number');
+  });
+
+  it('takes the qualification the label or its heading names', () => {
+    expect(matchOf('2nd PUC Register Number', '2nd PUC / Class 12 Details').key).toBe(
+      'education.class_12.registration_number',
+    );
+    expect(matchOf('SSLC Register Number', 'SSLC / Class 10 Details').key).toBe(
+      'education.class_10.registration_number',
+    );
+  });
+
+  it('leaves a registered mobile number, and an entrance registration, where they were', () => {
+    expect(matchOf('Registered Mobile Number').key).toBe('contact.mobile');
+    expect(matchOf('CET Registration Number').key).toBe('entrance.registration_number');
+  });
+});
+
+describe('a field of study, asked the way a survey asks it', () => {
+  /*
+   * Google Forms questions are sentences: "What is your current field of study
+   * or major?" It is the branch the vault already holds — and a dropdown of
+   * families ("Computer Science / IT") that the option chooser then picks from.
+   */
+  const matchOf = (labelText: string) => matchField(field({ labelText, tag: 'select' }));
+
+  it('reads "field of study" and "major subject" as the branch', () => {
+    expect(matchOf('What is your current field of study or major?').key).toBe('education[].branch');
+    expect(matchOf('Field of Study').key).toBe('education[].branch');
+    expect(matchOf('Major Subject').key).toBe('education[].branch');
+    expect(matchOf('Area of study').key).toBe('education[].branch');
+  });
+
+  it('never fills an age question with a branch — so bare "major" is not a synonym', () => {
+    expect(bandOf(matchOf('Are you a major (18 years or above)?'))).toBe('unmapped');
+  });
+});
+
+describe('a number a form offers as a list', () => {
+  /*
+   * Income is asked in bands ("Below 1 Lakh", "1 – 2.5 Lakh"), and the year of
+   * passing from a list of years — both as dropdowns, everywhere. The veto that
+   * keeps an Aadhaar number off a dropdown kept these off too, so the question
+   * was left blank on every form that asked it that way.
+   */
+  const asked = (labelText: string, texts: string[], tag: 'select' | 'radio-group' = 'select') =>
+    matchField(field({ labelText, tag, options: texts.map((text) => ({ value: text, text })) }));
+
+  it('matches an income asked in bands', () => {
+    expect(asked('Annual Family Income', ['Select', 'Up to 1 Lakh', '1 Lakh to 2.5 Lakh', 'Above 2.5 Lakh']).key).toBe(
+      'family.annual_income',
+    );
+  });
+
+  it('matches a year of passing chosen from a list', () => {
+    expect(asked('Year of Passing', ['Select', '2022', '2023', '2024']).key).toBe('education[].year_of_passing');
+  });
+
+  it('still keeps an identifier off a dropdown', () => {
+    expect(asked('Aadhaar Number', ['Select', 'Yes', 'No']).key).not.toBe('id.aadhaar');
+    expect(asked('PIN Code', ['Select', 'Urban', 'Rural']).key).not.toBe('address.permanent.pincode');
+  });
+});
+
+describe('the box for a question’s "Other"', () => {
+  /*
+   * "Religion: Hindu / Muslim / Christian / Others", then a box "Religion, if
+   * others". The box matched religion too — so a Hindu applicant had "Hindu"
+   * typed into the box for other religions. It is the question's own "Other"
+   * box: written when the answer is "Other", by the choice itself.
+   */
+  const religion = field({
+    ref: 'g',
+    tag: 'radio-group',
+    labelText: 'Religion',
+    options: ['Hindu', 'Muslim', 'Christian', 'Others'].map((text) => ({ value: text, text })),
+  });
+
+  it('is left to the question before it, not matched as the key', () => {
+    const box = field({ ref: 'b', labelText: 'Religion, if others' });
+    const [group, other] = matchForm([religion, box]);
+    expect(group!.key).toBe('identity.religion');
+    expect(other!.key).toBe('unknown');
+    expect(other!.rationale).toMatch(/Other/);
+  });
+
+  it('is still matched when the question before it offers no "Other"', () => {
+    const closed = { ...religion, options: religion.options!.slice(0, 3) };
+    const box = field({ ref: 'b', labelText: 'Religion, if others' });
+    expect(matchForm([closed, box])[1]!.key).toBe('identity.religion');
+  });
+
+  it('leaves a box that only follows a choice question alone', () => {
+    const box = field({ ref: 'b', labelText: 'Father’s Name' });
+    expect(matchForm([religion, box])[1]!.key).toBe('family.father_name');
+  });
+});
+
+describe('a name asked for in the applicant’s own language', () => {
+  /*
+   * Central and state forms ask for the name twice: in English, and in Hindi
+   * or the state's language — "Name in Hindi", "Candidate's Name in Regional
+   * Language". The reader now reads the second from a Hindi, Telugu or Tamil
+   * document; these questions have to find it, and the English ones must not.
+   */
+  const matchOf = (labelText: string) => matchField(field({ labelText }));
+
+  it('reads "Name in Hindi" and its kin as the name in the applicant’s language', () => {
+    for (const label of [
+      'Name in Hindi',
+      'Candidate Name in Hindi',
+      'Name in Regional Language',
+      'Applicant’s Name in Local Language',
+      'Name in Devanagari script',
+      'नाम (हिंदी में)',
+    ]) {
+      expect(matchOf(label).key, label).toBe('identity.full_name_local');
+    }
+  });
+
+  it('reads the parents’ names asked in Hindi the same way', () => {
+    expect(matchOf("Father's Name in Hindi").key).toBe('family.father_name_local');
+    expect(matchOf("Mother's Name in Regional Language").key).toBe('family.mother_name_local');
+  });
+
+  it('leaves the English questions with the English name', () => {
+    expect(matchOf('Name in English').key).toBe('identity.full_name');
+    expect(matchOf('Full Name (as per Class 10 certificate)').key).toBe('identity.full_name');
+    expect(matchOf("Father's Name").key).toBe('family.father_name');
+  });
+});
+
+describe('a form that asks for the name in two languages', () => {
+  /*
+   * "Name in Hindi" and "Name in Kannada" on one form both ask for the name in
+   * the applicant's own language. The second used to be re-matched as a
+   * duplicate — to its next best key, the English name — and the English
+   * spelling was typed into the box for Kannada. Each keeps its key; which of
+   * them the vault's spelling answers is the fill's decision, by script
+   * (`fill-service.ts` → `buildWrites`).
+   */
+  it('keeps every language’s name question on the name in the applicant’s language', () => {
+    const fields = [
+      field({ ref: 'en', labelText: 'Name (in English)' }),
+      field({ ref: 'hi', labelText: 'Name in Hindi' }),
+      field({ ref: 'kn', labelText: 'Name in Kannada' }),
+    ];
+    expect(matchForm(fields).map((match) => match.key)).toEqual([
+      'identity.full_name',
+      'identity.full_name_local',
+      'identity.full_name_local',
+    ]);
+  });
+});
+
+describe('what a grade card answers on a form', () => {
+  /*
+   * Placement and scholarship forms ask a degree student for the SGPA of the
+   * last semester, the number of backlogs, and the USN — the University Seat
+   * Number a Karnataka university registers its students by. The table reader
+   * now reads all three off a semester grade card.
+   */
+  const matchOf = (labelText: string) => matchField(field({ labelText }));
+
+  it('reads SGPA questions as the SGPA', () => {
+    for (const label of ['SGPA', 'Last Semester SGPA', 'Semester Grade Point Average', 'SGPA of previous semester']) {
+      expect(matchOf(label).key, label).toBe('education[].sgpa');
+    }
+  });
+
+  it('keeps CGPA the CGPA', () => {
+    expect(matchOf('CGPA').key).toBe('education[].cgpa');
+  });
+
+  it('reads backlog questions as the backlogs', () => {
+    for (const label of ['Number of Backlogs', 'Active Backlogs', 'Current Backlogs', 'Standing Arrears']) {
+      expect(matchOf(label).key, label).toBe('education[].backlogs');
+    }
+  });
+
+  it('reads the USN as the registration number', () => {
+    for (const label of ['USN', 'University Seat Number']) {
+      expect(matchOf(label).key, label).toBe('education[].registration_number');
+    }
+  });
+});

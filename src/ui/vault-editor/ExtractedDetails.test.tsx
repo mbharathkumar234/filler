@@ -58,7 +58,10 @@ vi.mock('@/ui/lib/client', async () => {
           candidates: extraction.candidates.map((candidate) =>
             candidate.key === 'education.class_10.registration_number'
               ? { ...candidate, crop: 'AAAA' }
-              : candidate,
+              : // As a scanned PDF of several pages reports one off its second page.
+                candidate.key === 'education.class_10.result_status'
+                ? { ...candidate, page: 2 }
+                : candidate,
           ),
           source: 'ocr',
           scripts: extraction.scripts,
@@ -242,6 +245,13 @@ describe('the piece of the card a value was read from', () => {
     expect(picture.closest('li')).toBe(
       document.getElementById('extract-education.class_10.registration_number')!.closest('li'),
     );
+  });
+
+  it('says which page a value came from, when the document had more than one', async () => {
+    await open();
+    expect(screen.getAllByText(/^Read from page 2:/)).toHaveLength(1);
+    // The rest say nothing about pages: the reading had only the one page for them.
+    expect(screen.getAllByText(/^Read from:/).length).toBeGreaterThan(5);
   });
 
   it('shows no picture for a value that has none, and still quotes its line', async () => {

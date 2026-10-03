@@ -105,10 +105,11 @@ export default defineManifest({
      * because the plan asks for both "no eval" and "Argon2id (WASM)" and those
      * pull against each other. It permits **WebAssembly compilation only** —
      * not `eval`, not `new Function`, not remote script. Chrome requires it for
-     * any WASM in an extension page, and there are two, both inside the
+     * any WASM in an extension page, and every module is inside the
      * package: the Argon2id implementation, bundled as base64 inside our own
-     * JavaScript, and ONNX Runtime, which runs the document reader's models and
-     * is a build asset. So: no remote code, no JS eval, and a memory-hard KDF.
+     * JavaScript; ONNX Runtime, which runs the document reader's models and
+     * is a build asset; and pdf.js's decoders for the images scanned PDFs
+     * carry (`pdfjs/`). So: no remote code, no JS eval, and a memory-hard KDF.
      * The alternative was PBKDF2 forever, which is the weaker trade.
      *
      * Its absence of `unsafe-eval` is also why PaddleOCR's own browser SDK is

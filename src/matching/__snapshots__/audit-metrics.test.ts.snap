@@ -20,6 +20,14 @@ exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > reports per-f
     "mappable": 6,
   },
   {
+    "autoFilledCorrectly": 13,
+    "correctAtAnyConfidence": 13,
+    "fields": 13,
+    "fixture": "entrance-portal",
+    "highConfidenceMisMatches": 0,
+    "mappable": 13,
+  },
+  {
     "autoFilledCorrectly": 6,
     "correctAtAnyConfidence": 17,
     "fields": 30,
@@ -48,11 +56,11 @@ exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > reports per-f
 
 exports[`A.2.1 — mismatch rate (deterministic matcher, no LLM) > reports the totals, for the record 1`] = `
 {
-  "autoFilledCorrectly": 61,
-  "correctAtAnyConfidence": 75,
-  "fields": 97,
+  "autoFilledCorrectly": 74,
+  "correctAtAnyConfidence": 88,
+  "fields": 110,
   "highConfidenceMisMatches": 0,
-  "mappable": 85,
+  "mappable": 98,
 }
 `;
 

@@ -48,11 +48,25 @@ describe('the blocks one person is offered', () => {
   it('narrows reservation to the three questions this person is actually asked', () => {
     const eligibility = fieldGroupsFor(STUDENT, NOTHING).find((g) => g.id === 'eligibility');
 
-    expect(eligibility?.keys).toContain('eligibility.caste');
-    expect(eligibility?.keys).toContain('eligibility.article_371j_number');
-    expect(eligibility?.keys).not.toContain('eligibility.ncc');
-    // Twenty-one questions in the catalogue; a handful for this person.
-    expect(eligibility!.keys.length).toBeLessThan(8);
+    // Thirty-one questions in the catalogue. This person — ST, claiming 371(J) and
+    // an income certificate — is asked about those three certificates: each
+    // one's number, date of issue and issuing authority, and nothing else.
+    expect([...eligibility!.keys].sort()).toEqual(
+      [
+        'eligibility.caste',
+        'eligibility.subcategory',
+        'eligibility.caste_certificate_number',
+        'eligibility.caste_certificate_date',
+        'eligibility.caste_certificate_authority',
+        'eligibility.article_371j',
+        'eligibility.article_371j_number',
+        'eligibility.article_371j_date',
+        'eligibility.article_371j_authority',
+        'eligibility.income_certificate_number',
+        'eligibility.income_certificate_date',
+        'eligibility.income_certificate_authority',
+      ].sort(),
+    );
   });
 
   it('names a block the way this person’s own board does', () => {

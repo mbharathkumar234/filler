@@ -129,7 +129,7 @@ export interface ReviewHarness {
     focused: boolean;
     fieldHtml: string;
   } | null;
-  edit(ref: string, value: string): { ok: boolean; value: string; reason?: string };
+  edit(ref: string, value: string): Promise<{ ok: boolean; value: string; reason?: string }>;
 }
 
 /** § Phase 9: drift detection and repair, driven from a spec. */

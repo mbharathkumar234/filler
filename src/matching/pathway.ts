@@ -390,9 +390,25 @@ const ALWAYS_FIELD_PREFIXES: readonly string[] = [
 
 /** The questions each claim brings with it. */
 const CLAIM_FIELDS: Readonly<Record<Claim, readonly string[]>> = {
-  '371j': ['eligibility.article_371j', 'eligibility.article_371j_number'],
-  income: ['eligibility.income_certificate_number', 'family.annual_income'],
-  domicile: ['eligibility.domicile_state', 'eligibility.local_status'],
+  '371j': [
+    'eligibility.article_371j',
+    'eligibility.article_371j_number',
+    'eligibility.article_371j_date',
+    'eligibility.article_371j_authority',
+  ],
+  income: [
+    'eligibility.income_certificate_number',
+    'eligibility.income_certificate_date',
+    'eligibility.income_certificate_authority',
+    'family.annual_income',
+  ],
+  domicile: [
+    'eligibility.domicile_state',
+    'eligibility.local_status',
+    'eligibility.domicile_certificate_number',
+    'eligibility.domicile_certificate_date',
+    'eligibility.domicile_certificate_authority',
+  ],
   pwbd: [
     'eligibility.pwbd',
     'eligibility.disability_type',
@@ -405,17 +421,26 @@ const CLAIM_FIELDS: Readonly<Record<Claim, readonly string[]>> = {
   nss: ['eligibility.nss'],
 };
 
+/** A caste claim's questions: the caste, and its certificate's number, date and issuer. */
+const CASTE_CERTIFICATE = [
+  'eligibility.caste',
+  'eligibility.subcategory',
+  'eligibility.caste_certificate_number',
+  'eligibility.caste_certificate_date',
+  'eligibility.caste_certificate_authority',
+];
+
 const CATEGORY_FIELDS: Readonly<Record<Category, readonly string[]>> = {
   gm: [],
-  sc: ['eligibility.caste', 'eligibility.subcategory', 'eligibility.caste_certificate_number'],
-  st: ['eligibility.caste', 'eligibility.subcategory', 'eligibility.caste_certificate_number'],
-  obc: [
-    'eligibility.caste',
-    'eligibility.subcategory',
-    'eligibility.obc_ncl',
-    'eligibility.caste_certificate_number',
+  sc: CASTE_CERTIFICATE,
+  st: CASTE_CERTIFICATE,
+  obc: [...CASTE_CERTIFICATE, 'eligibility.obc_ncl'],
+  ews: [
+    'eligibility.ews',
+    'eligibility.income_certificate_number',
+    'eligibility.income_certificate_date',
+    'eligibility.income_certificate_authority',
   ],
-  ews: ['eligibility.ews', 'eligibility.income_certificate_number'],
 };
 
 /**

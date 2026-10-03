@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseOutputMime, derive, describeDerivation, type RasterBackend, type RasterSource } from './derive';
+import { chooseOutputMime, derive, describeDerivation, MAX_COPY_PAGES, type RasterBackend, type RasterSource } from './derive';
 import { parseConstraint } from './constraints';
 import { mmToPx } from './geometry';
 import type { DocConstraint } from '@/shared/types';
@@ -425,5 +425,86 @@ describe('fit override', () => {
     boxes.length = 0;
     await derive(backend, new Uint8Array(10), 'image/jpeg', fixed);
     expect(boxes).toEqual(['cover']);
+  });
+});
+
+describe('a PDF of several pages', () => {
+  /*
+   * A scanned marks card of three pages, remade for a portal because it is
+   * locked or too big for the box, went in as its first page alone — the copy
+   * was made from page 1, and nothing said so. Every page now goes in, fitted
+   * together inside the portal's limit; where the box wants a picture, which
+   * holds one page, the copy says so.
+   */
+  function pagedBackend(pages: number) {
+    const drawn: number[] = [];
+    const wrapped: number[] = [];
+    const backend = fakeBackend({
+      async rasterisePdf(_bytes, targetWidth, _password, page = 1) {
+        drawn.push(page);
+        return { width: targetWidth, height: Math.round(targetWidth * 1.414), handle: `page-${page}`, pages };
+      },
+      async wrapJpegPagesInPdf(list) {
+        wrapped.push(list.length);
+        return new Uint8Array(list.reduce((sum, page) => sum + page.jpeg.length, 0) + 700 + 400 * (list.length - 1));
+      },
+    });
+    return { backend, drawn, wrapped };
+  }
+
+  it('keeps every page, in order, when it is remade as a PDF', async () => {
+    const { backend, drawn, wrapped } = pagedBackend(3);
+    const { constraint } = parseConstraint('PDF only, maximum 1 MB');
+    const result = await derive(backend, SOURCE, 'application/pdf', constraint);
+
+    expect(result.ok, result.ok ? '' : result.reason).toBe(true);
+    if (!result.ok) return;
+    expect(drawn).toEqual([1, 2, 3]);
+    expect(wrapped).toEqual([3]);
+    expect(result.pages).toBe(3);
+    expect(result.mime).toBe('application/pdf');
+  });
+
+  it('fits the whole document inside the limit, not each page', async () => {
+    const { backend } = pagedBackend(3);
+    const { constraint } = parseConstraint('PDF only, maximum 400 KB');
+    const result = await derive(backend, SOURCE, 'application/pdf', constraint);
+
+    expect(result.ok, result.ok ? '' : result.reason).toBe(true);
+    if (!result.ok) return;
+    expect(result.bytes.length).toBeLessThanOrEqual(400 * KB);
+  });
+
+  it('says so when the box wants a picture, which holds only the first page', async () => {
+    const { backend, drawn } = pagedBackend(3);
+    const { constraint } = parseConstraint('JPEG only, up to 500 KB');
+    const result = await derive(backend, SOURCE, 'application/pdf', constraint);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(drawn).toEqual([1]);
+    const warning = result.warnings.find((w) => w.code === 'first-page-only');
+    expect(warning?.message).toMatch(/3 pages/);
+  });
+
+  it('refuses a PDF too long to remake whole, rather than send part of it', async () => {
+    const { backend } = pagedBackend(MAX_COPY_PAGES + 1);
+    const { constraint } = parseConstraint('PDF only, maximum 1 MB');
+    const result = await derive(backend, SOURCE, 'application/pdf', constraint);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.code).toBe('too-many-pages');
+    expect(result.reason).toMatch(new RegExp(`${MAX_COPY_PAGES + 1} pages`));
+  });
+
+  it('makes a PDF of one page as it always did', async () => {
+    const { backend, wrapped } = pagedBackend(1);
+    const { constraint } = parseConstraint('PDF only, maximum 1 MB');
+    const result = await derive(backend, SOURCE, 'application/pdf', constraint);
+
+    expect(result.ok).toBe(true);
+    expect(wrapped).toEqual([]);
+    expect(backend.calls.wrapJpegInPdf).toBe(1);
   });
 });

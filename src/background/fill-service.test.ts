@@ -165,6 +165,45 @@ describe('buildWrites — what leaves the worker', () => {
     expect(skipped).toEqual([{ key: 'identity.full_name', confidence: 0.4 }]);
   });
 
+  it('fills a name asked in a named language only with a spelling in that language’s script', () => {
+    // "Name in Hindi" and "Name in Kannada" both match the name in the
+    // applicant's own language. The Hindi spelling answers one of them.
+    const values = new Map([['identity.full_name_local', 'सीमा वर्मा']]);
+    const questions = new Map([
+      ['f1', 'Name in Hindi'],
+      ['f2', 'Name in Kannada'],
+      ['f3', 'Name in Regional Language'],
+    ]);
+    const { writes, otherScript } = buildWrites(
+      [match('f1', 'identity.full_name_local'), match('f2', 'identity.full_name_local'), match('f3', 'identity.full_name_local')],
+      values,
+      new Set(),
+      new Map(),
+      questions,
+    );
+    expect(writes.map((write) => write.ref)).toEqual(['f1', 'f3']);
+    expect(otherScript).toEqual([{ key: 'identity.full_name_local' }]);
+  });
+
+  it('writes a date as its box asks for it, and as kept into a date picker', () => {
+    // The vault keeps 2024-03-14. "Date of Issue" with "DD/MM/YYYY" as its
+    // placeholder refuses that; a native date picker wants nothing else.
+    const values = new Map([['eligibility.caste_certificate_date', '2024-03-14']]);
+    const formats = new Map([
+      ['f1', 'DD/MM/YYYY Date of Issue'],
+      ['f2', ''],
+    ]);
+    const { writes } = buildWrites(
+      [match('f1', 'eligibility.caste_certificate_date'), match('f2', 'eligibility.caste_certificate_date')],
+      values,
+      new Set(),
+      new Map(),
+      new Map(),
+      formats,
+    );
+    expect(writes.map((write) => write.value)).toEqual(['14/03/2024', '2024-03-14']);
+  });
+
   it('skips a field the matcher could not identify', () => {
     const { writes } = buildWrites([match('f1', 'unknown')], vaultValues, new Set(), selectors);
     expect(writes).toEqual([]);

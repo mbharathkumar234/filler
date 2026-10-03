@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Entrance Portal — Application Form (synthetic fixture)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 46rem; color: #0f172a; }
+      .banner { background: #e2e8f0; padding: .75rem; font-size: .8rem; margin-bottom: 1.5rem; }
+      h2 { font-size: 1rem; margin-top: 1.5rem; border-bottom: 1px solid #cbd5e1; }
+      .row { display: grid; grid-template-columns: 16rem 1fr; gap: .5rem; margin: .4rem 0; align-items: center; }
+      small { color: #475569; }
+    </style>
+  </head>
+  <body>
+    <p class="banner">
+      <strong>Synthetic fixture.</strong> An entrance-examination application of the kind a
+      Karnataka student fills after 2nd PUC: each subject's marks asked for by name, and the
+      Aadhaar card and marks card as uploads. Not a copy of any real portal; contains no personal
+      data. Submitting goes nowhere — and no test may press it.
+    </p>
+    <h1>Common Entrance Test — Application</h1>
+    <form id="application" action="#submitted" method="get">
+      <h2>Candidate Details</h2>
+      <div class="row">
+        <label for="candName">Candidate's Name *</label>
+        <input id="candName" name="candName" maxlength="60" data-expect="identity.full_name" />
+      </div>
+
+      <h2>2nd PUC / Class 12 Details</h2>
+      <div class="row">
+        <label for="pucReg">2nd PUC Register Number *</label>
+        <input id="pucReg" name="pucReg" maxlength="12" data-expect="education.class_12.registration_number" />
+      </div>
+      <div class="row">
+        <label for="pucCollege">Name of the College *</label>
+        <input id="pucCollege" name="pucCollege" maxlength="80" data-expect="education.class_12.institution" />
+      </div>
+      <div class="row">
+        <label for="pucYear">Year of Passing *</label>
+        <input id="pucYear" name="pucYear" maxlength="4" data-expect="education.class_12.year_of_passing" />
+      </div>
+      <div class="row">
+        <label for="phy">Physics Marks *</label>
+        <input id="phy" name="phy" maxlength="3" data-expect="education.class_12.marks_physics" />
+      </div>
+      <div class="row">
+        <label for="che">Chemistry Marks *</label>
+        <input id="che" name="che" maxlength="3" data-expect="education.class_12.marks_chemistry" />
+      </div>
+      <div class="row">
+        <label for="mat">Mathematics Marks *</label>
+        <input id="mat" name="mat" maxlength="3" data-expect="education.class_12.marks_mathematics" />
+      </div>
+      <div class="row">
+        <label for="bio">Biology Marks</label>
+        <input id="bio" name="bio" maxlength="3" data-expect="education.class_12.marks_biology" />
+      </div>
+      <div class="row">
+        <label for="eng">English Marks *</label>
+        <input id="eng" name="eng" maxlength="3" data-expect="education.class_12.marks_english" />
+      </div>
+      <div class="row">
+        <label for="tot">Total Marks Obtained *</label>
+        <input id="tot" name="tot" maxlength="4" data-expect="education.class_12.marks_obtained" />
+      </div>
+      <div class="row">
+        <label for="max">Maximum Marks *</label>
+        <input id="max" name="max" maxlength="4" data-expect="education.class_12.max_marks" />
+      </div>
+
+      <h2>Documents</h2>
+      <div class="row">
+        <label for="aadhaarFile">Upload Aadhaar card *</label>
+        <span>
+          <input type="file" id="aadhaarFile" name="aadhaarFile" accept=".pdf" data-expect="doc.aadhaar_card" />
+          <small>PDF only, up to 500 KB</small>
+        </span>
+      </div>
+      <div class="row">
+        <label for="marksFile">Upload 2nd PUC marks card *</label>
+        <span>
+          <input type="file" id="marksFile" name="marksFile" accept=".pdf" data-expect="doc.marksheet_12" />
+          <small>PDF only, up to 2 MB</small>
+        </span>
+      </div>
+
+      <p><button type="submit" id="submitApplication">Submit Application</button></p>
+    </form>
+  </body>
+</html>

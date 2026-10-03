@@ -16,6 +16,8 @@
  * Phase 10 adds full schema validation on top of both.
  */
 
+import type { IndicScript } from '@/documents/indic';
+import type { ReadTable } from '@/documents/table';
 import type { AcademicPath } from '@/matching/pathway';
 import type { FieldKey } from '@/matching/taxonomy';
 import type { FillPlan, RunState } from './types';
@@ -26,7 +28,7 @@ import type { VaultStatus } from '@/vault/session';
 import type { ImportResult } from '@/vault/backup-format';
 import type { DocConstraint } from './types';
 import type { DocumentSummary } from '@/vault/document-store';
-import type { DerivedPayload, DocumentExtraction } from '@/background/document-service';
+import type { DerivedPayload, DocumentExtraction, ScannedPage } from '@/background/document-service';
 import type { BatchItem, WindowPlacement } from '@/background/upload-window-service';
 import type { TabHarvest } from '@/background/harvest-service';
 import type { FillReport, WriteInstruction } from '@/background/fill-service';
@@ -94,11 +96,26 @@ export type VaultRequest =
  * base64 because the bus is JSON; it is one page of a document the user asked
  * to have read, and it goes no further.
  */
+/**
+ * A stored photo made a clean scan: stood upright, flattened when it is a page
+ * photographed on something, its light evened out. Worker to offscreen page,
+ * like a reading; the result goes back to the panel, which saves it only when
+ * the user says so.
+ */
+export type ScanRequest = { type: 'ocr:scan'; image: string; mime: string };
+
 export type OcrRequest = {
   type: 'ocr:recognise';
   /** One page: the stored image as it was, or a PDF page rasterised by the worker. */
   image: string;
   mime: string;
+  /**
+   * The scripts besides English this page may be in — the ones whose
+   * recognisers the reader asks about a box the English model could only guess
+   * at. Chosen from where the document's owner lives (`indic.ts` →
+   * `readingScripts`); absent, English alone.
+   */
+  scripts?: IndicScript[];
 };
 
 /**
@@ -116,8 +133,8 @@ export type PdfRequest =
   | { type: 'pdf:lock'; pdf: string; password?: string }
   /** Its text layer, as lines. */
   | { type: 'pdf:text'; pdf: string; password?: string }
-  /** Its first page as a PNG this many pixels wide. */
-  | { type: 'pdf:render'; pdf: string; password?: string; width: number };
+  /** One page (from 1; the first unless said) as a PNG this many pixels wide. */
+  | { type: 'pdf:render'; pdf: string; password?: string; width: number; page?: number };
 
 /** One piece of text on the page, and where it sits (page pixels). */
 export interface OcrItem {
@@ -148,7 +165,9 @@ export type DocumentRequest =
   | { type: 'doc:delete'; id: string }
   | { type: 'doc:derive'; key: FieldKey; constraint: DocConstraint }
   | { type: 'doc:preflight'; key: FieldKey; constraint: DocConstraint }
-  | { type: 'doc:extract'; id: string };
+  | { type: 'doc:extract'; id: string }
+  /** A stored photo made a clean scan, for the panel to show — and save only if the user keeps it. */
+  | { type: 'doc:scan'; id: string };
 
 /**
  * Put one upload question's document into the site's own upload window, which
@@ -368,6 +387,7 @@ export type ExtensionRequest =
   | TeachRequest
   | GuardRequest
   | OcrRequest
+  | ScanRequest
   | PdfRequest
   | RuntimeRequest;
 export type RequestType = ExtensionRequest['type'];
@@ -381,6 +401,7 @@ export type RequestType = ExtensionRequest['type'];
  */
 export const OFFSCREEN_TYPES: ReadonlySet<string> = new Set([
   'ocr:recognise',
+  'ocr:scan',
   'pdf:lock',
   'pdf:text',
   'pdf:render',
@@ -410,8 +431,10 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'doc:derive',
   'doc:preflight',
   'doc:extract',
+  'doc:scan',
   // Carries a rendered page of somebody's document: extension contexts only.
   'ocr:recognise',
+  'ocr:scan',
   // Carry somebody's PDF, and the password it opens with: extension contexts only.
   'pdf:lock',
   'pdf:text',
@@ -495,16 +518,33 @@ export interface ResponseMap {
   'doc:derive': DerivedPayload | { failed: true; reason: string; code: string };
   'doc:preflight': { ok: boolean; warnings: string[]; reason?: string };
   'doc:extract': DocumentExtraction;
+  'doc:scan': ScannedPage;
+  'ocr:scan': { image: string; width: number; height: number; flattened: boolean; turns: 0 | 1 | 2 | 3 };
   /**
    * Every piece of text the page recognised, where it sits, and the page's
    * size — of the page stood upright, with the quarter turns clockwise that
    * stood it there.
    */
-  'ocr:recognise': { items: OcrItem[]; width: number; height: number; turns?: 0 | 1 | 2 | 3 };
+  'ocr:recognise': {
+    items: OcrItem[];
+    width: number;
+    height: number;
+    turns?: 0 | 1 | 2 | 3;
+    /**
+     * The page as it was read, as base64 JPEG, when it was a photo flattened
+     * first: the boxes are this page's, not the photo's, and the pictures shown
+     * beside each value are cut from it.
+     */
+    flattened?: string;
+    /** The tables on the page, cell by cell (`documents/table.ts`), when it has any. */
+    tables?: ReadTable[];
+    /** The round seals on the page, read straightened (`documents/seal.ts`): where, and the words on each arc. */
+    seals?: Array<{ box: { x0: number; y0: number; x1: number; y1: number }; text: string[] }>;
+  };
   'pdf:lock': { lock: 'open' | 'needs-password' | 'wrong-password' };
   'pdf:text': { text: string };
-  /** A PNG, base64, and its size. */
-  'pdf:render': { image: string; width: number; height: number };
+  /** A PNG, base64, its size, and how many pages the PDF has. */
+  'pdf:render': { image: string; width: number; height: number; pages: number };
   'doc:to-window': WindowPlacement;
   'harvest:tab': TabHarvest;
   'fill:tab': FillReport;

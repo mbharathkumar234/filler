@@ -79,6 +79,16 @@ export function tooSmallToRead(width: number, height: number): string | null {
   );
 }
 
+/**
+ * The most pages of a PDF that are read.
+ *
+ * An ID card is one page and a marks card two or three; a bank statement is
+ * fifty, and reading fifty pages of recognition is minutes of a person waiting
+ * for details that are on the first page anyway. Text layers and scanned
+ * pages both stop here, and a PDF that goes on is said to.
+ */
+export const MAX_PDF_PAGES = 5;
+
 /** Past this many threads, the reader's models gain little and the machine loses a lot. */
 const MAX_READER_THREADS = 4;
 

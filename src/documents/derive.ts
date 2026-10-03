@@ -28,7 +28,7 @@ import {
   type QualityAttempt,
   type SearchOptions,
 } from './quality-search';
-import { PDF_WRAPPER_BYTES } from './pdf-wrap';
+import { pdfWrapperBytes } from './pdf-wrap';
 
 // ---------------------------------------------------------------------------
 // The backend seam
@@ -39,6 +39,8 @@ export interface RasterSource {
   height: number;
   /** Opaque handle the backend understands (ImageBitmap, test double, …). */
   handle: unknown;
+  /** For a page drawn from a PDF: how many pages that PDF has. */
+  pages?: number;
 }
 
 export interface RasterBackend {
@@ -54,9 +56,22 @@ export interface RasterBackend {
    * Render the first page(s) of a PDF to a raster source — opened with
    * `password` when the PDF is locked (`documents/pdf-lock.ts`).
    */
-  rasterisePdf(bytes: Uint8Array, targetWidth: number, password?: string): Promise<RasterSource>;
+  rasterisePdf(
+    bytes: Uint8Array,
+    targetWidth: number,
+    password?: string,
+    /** Which page, from 1. The first, unless said. */
+    page?: number,
+  ): Promise<RasterSource>;
   /** Wrap already-encoded JPEG bytes in a single-page PDF. */
   wrapJpegInPdf(jpeg: Uint8Array, width: number, height: number): Promise<Uint8Array>;
+  /**
+   * Wrap one JPEG per page, in order, in a PDF of that many pages.
+   *
+   * Optional, like `crop`: without it a PDF of several pages is copied from
+   * its first page, and the copy says so.
+   */
+  wrapJpegPagesInPdf?(pages: ReadonlyArray<{ jpeg: Uint8Array; width: number; height: number }>): Promise<Uint8Array>;
   /**
    * Crop `source` to a rectangle in its own pixels.
    *
@@ -91,6 +106,8 @@ export interface DerivedFile {
   warnings: QualityWarning[];
   /** Every encode attempted, for the audit log and the "explain this" UI. */
   attempts: QualityAttempt[];
+  /** How many pages the copy has, when it is a PDF of more than one. */
+  pages?: number;
 }
 
 export interface DerivationFailure {
@@ -100,7 +117,9 @@ export interface DerivationFailure {
     | 'unsupported-source'
     | 'unsatisfiable-size'
     | 'no-acceptable-format'
-    | 'decode-failed';
+    | 'decode-failed'
+    /** A PDF longer than `MAX_COPY_PAGES`: refused rather than sent in part. */
+    | 'too-many-pages';
   /** Present when we got far enough to measure something. */
   attempts?: QualityAttempt[];
   /** What actually went wrong, for the log. Never shown: `reason` is the user's. */
@@ -257,6 +276,17 @@ export async function derive(
     };
   }
 
+  // ---- every page of a PDF ---------------------------------------------
+  /*
+   * A copy of a PDF of several pages, remade as a PDF, keeps every page. It
+   * used to be made from the first page alone — a scanned marks card's
+   * subjects and total, on pages 2 and 3, simply did not reach the portal.
+   */
+  const pageCount = sourceMime === 'application/pdf' ? (source.pages ?? 1) : 1;
+  if (pageCount > 1 && outputMime === 'application/pdf' && backend.wrapJpegPagesInPdf !== undefined) {
+    return deriveEveryPage(backend, bytes, source, pageCount, constraint, options);
+  }
+
   // ---- trim ---------------------------------------------------------------
   /*
    * Remove the blank margin before measuring anything, so the target box is
@@ -272,6 +302,17 @@ export async function derive(
   const planned = planTargetBox(original, constraint);
   const box = options.fit ? { ...planned, fit: options.fit } : planned;
   const warnings = inspectQuality(original, box);
+  if (pageCount > 1) {
+    // A picture holds one page. Said, not hidden: the portal gets less than the
+    // document, and the person deciding what to upload should know it.
+    warnings.push({
+      code: 'first-page-only',
+      message:
+        `This PDF has ${pageCount} pages, and ` +
+        (outputMime === 'application/pdf' ? 'only its first could be remade here' : `a ${shortMime(outputMime)} holds one`) +
+        ': only the first page is in this copy. If the portal needs every page, give it the document where a PDF is accepted.',
+    });
+  }
 
   const resized =
     box.width === source.width && box.height === source.height && box.fit !== 'pad'
@@ -374,6 +415,122 @@ export async function derive(
   }
 }
 
+/**
+ * The most pages a PDF copy is remade with.
+ *
+ * Every page is drawn and held while one quality is searched for the whole
+ * document, so the cost grows with the pages; a portal's upload is a card, a
+ * certificate, a few pages of a transcript. A longer PDF is refused — never
+ * sent in part.
+ */
+export const MAX_COPY_PAGES = 10;
+
+/**
+ * Remake a PDF of several pages as a PDF of the same pages.
+ *
+ * Each page is planned against the requirement on its own — pages may differ
+ * in size and turn — and one JPEG quality is searched for all of them
+ * together, so the whole document, not each page, lands inside the portal's
+ * limit.
+ */
+async function deriveEveryPage(
+  backend: RasterBackend,
+  bytes: Uint8Array,
+  first: RasterSource,
+  count: number,
+  constraint: DocConstraint,
+  options: DeriveOptions,
+): Promise<DerivationResult> {
+  if (count > MAX_COPY_PAGES) {
+    backend.release?.(first);
+    return {
+      ok: false,
+      code: 'too-many-pages',
+      reason:
+        `This PDF has ${count} pages — more than are remade here in one go (${MAX_COPY_PAGES}). ` +
+        "Upload a version that is already under the portal's limit, or split it.",
+    };
+  }
+
+  const sources: RasterSource[] = [first];
+  const resized: RasterSource[] = [];
+  try {
+    for (let page = 2; page <= count; page += 1) {
+      sources.push(await backend.rasterisePdf(bytes, pdfRasterWidth(constraint), options.password, page));
+    }
+
+    const warnings: QualityWarning[] = [];
+    const boxes: TargetBox[] = [];
+    for (const source of sources) {
+      const planned = planTargetBox({ width: source.width, height: source.height }, constraint);
+      const box = options.fit ? { ...planned, fit: options.fit } : planned;
+      boxes.push(box);
+      for (const warning of inspectQuality(source, box)) {
+        if (!warnings.some((w) => w.code === warning.code)) warnings.push(warning);
+      }
+      resized.push(
+        box.width === source.width && box.height === source.height && box.fit !== 'pad'
+          ? source
+          : await backend.resize(source, box),
+      );
+    }
+
+    const window = pick(constraint);
+    const searchWindow = shrinkForPdfOverhead(window, count);
+    const encoded = new Map<number, Uint8Array[]>();
+    const search = await searchQuality(
+      async (quality) => {
+        const jpegs: Uint8Array[] = [];
+        for (const page of resized) jpegs.push(await backend.encodeJpeg(page, quality));
+        encoded.set(quality, jpegs);
+        return { bytes: jpegs.reduce((sum, jpeg) => sum + jpeg.length, 0), data: jpegs[0]! };
+      },
+      searchWindow,
+      options,
+    );
+
+    if (!search.ok) {
+      return {
+        ok: false,
+        code: 'unsatisfiable-size',
+        reason: `Across its ${count} pages: ${explainFailure(search.reason, searchWindow, boxes[0]!, search.best)}`,
+        attempts: search.attempts,
+      };
+    }
+
+    const jpegs = encoded.get(search.quality)!;
+    const pdf = await backend.wrapJpegPagesInPdf!(
+      jpegs.map((jpeg, index) => ({ jpeg, width: resized[index]!.width, height: resized[index]!.height })),
+    );
+    if (window.maxBytes !== undefined && pdf.length > window.maxBytes) {
+      return {
+        ok: false,
+        code: 'unsatisfiable-size',
+        reason:
+          `The finished PDF of ${count} pages is ${Math.round(pdf.length / 1024)} KB, over the portal's ` +
+          `${Math.round(window.maxBytes / 1024)} KB limit.`,
+        attempts: search.attempts,
+      };
+    }
+
+    return {
+      ok: true,
+      bytes: pdf,
+      mime: 'application/pdf',
+      width: resized[0]!.width,
+      height: resized[0]!.height,
+      pages: count,
+      quality: search.quality,
+      fit: boxes[0]!.fit,
+      warnings,
+      attempts: search.attempts,
+    };
+  } finally {
+    for (const page of resized) backend.release?.(page);
+    for (const source of sources) if (!resized.includes(source)) backend.release?.(source);
+  }
+}
+
 function pick(constraint: DocConstraint): { minBytes?: number; maxBytes?: number } {
   const window: { minBytes?: number; maxBytes?: number } = {};
   if (constraint.minBytes !== undefined) window.minBytes = constraint.minBytes;
@@ -382,12 +539,13 @@ function pick(constraint: DocConstraint): { minBytes?: number; maxBytes?: number
 }
 
 /** Reserve room for the PDF container so the wrapped result still fits. */
-function shrinkForPdfOverhead(window: { minBytes?: number; maxBytes?: number }) {
+function shrinkForPdfOverhead(window: { minBytes?: number; maxBytes?: number }, pages = 1) {
   // The most the wrapper can add comes off the cap, the least off the floor:
-  // the finished PDF is then inside the window, whatever the JPEG's size.
+  // the finished PDF is then inside the window, whatever the JPEGs' sizes.
+  const overhead = pdfWrapperBytes(pages);
   const out = { ...window };
-  if (out.maxBytes !== undefined) out.maxBytes = Math.max(1024, out.maxBytes - PDF_WRAPPER_BYTES.most);
-  if (out.minBytes !== undefined) out.minBytes = Math.max(0, out.minBytes - PDF_WRAPPER_BYTES.least);
+  if (out.maxBytes !== undefined) out.maxBytes = Math.max(1024, out.maxBytes - overhead.most);
+  if (out.minBytes !== undefined) out.minBytes = Math.max(0, out.minBytes - overhead.least);
   return out;
 }
 

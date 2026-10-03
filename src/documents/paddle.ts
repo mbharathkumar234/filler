@@ -89,12 +89,38 @@ export interface OrientationConfig {
   labels: number[];
 }
 
+/** The text-line orientation classifier: each line stretched to `width` x `height`. */
+export interface TextlineConfig {
+  width: number;
+  height: number;
+  mean: number[];
+  std: number[];
+  scale: number;
+  /** What each class means, in class order: degrees the line is turned (0, 180). */
+  labels: number[];
+}
+
+/** The table-structure model (`table.ts`): its tokens, and the picture it wants. */
+export interface TableConfig {
+  /** Tokens in class order: "sos", the model's own, "eos" — as PaddleOCR's `TableLabelDecode` has them. */
+  classes: string[];
+  /** The picture's longer side is brought to this, and it is padded to a square of it. */
+  size: number;
+  mean: number[];
+  std: number[];
+  scale: number;
+  /** Numbers given for each cell: a quadrilateral's corners, x and y in turn. */
+  locCount: number;
+}
+
 export interface ModelConfig {
   modelName: string;
   /** The recogniser's alphabet, in class order, with PaddleOCR's trailing space. */
   characters?: string[];
   detection?: DetectionParams;
   orientation?: OrientationConfig;
+  textline?: TextlineConfig;
+  table?: TableConfig;
 }
 
 /** Quarter turns clockwise. */
@@ -153,8 +179,17 @@ const RECOGNITION_NORMALISE = {
 /** PaddleOCR's minimum box side, before and after growing it. */
 const MIN_BOX_SIDE = 3;
 
-/** The recogniser's training width at 48 pixels tall: 320, a ratio of 20 : 3. */
-const RECOGNITION_BASE_WIDTH = 320;
+/**
+ * The narrowest crop the recogniser is given, at 48 pixels tall: 160.
+ *
+ * PaddleOCR pads every crop to 320, the width its recogniser was trained at.
+ * Recognition costs in proportion to width and is most of a page's time, so a
+ * table of one-figure cells paid for 320 pixels of nothing each. Measured on
+ * every made-up fixture through the real reader (Stage 5): the same words,
+ * figures and junk at 160 as at 320, and a grade card in four fifths of the
+ * time. Short crops are still padded with zeros, never stretched.
+ */
+const RECOGNITION_BASE_WIDTH = 160;
 const RECOGNITION_MAX_WIDTH = 3200;
 
 // ---------------------------------------------------------------------------
@@ -519,11 +554,16 @@ export function findTextBoxes(
     stack[top++] = start;
     seen[start] = 1;
     rows.length = 0;
+    // The region's own mean probability: PaddleOCR's "slow" score.
+    let ownSum = 0;
+    let ownCount = 0;
 
     while (top > 0) {
       const at = stack[--top]!;
       const x = at % w;
       const y = (at - x) / w;
+      ownSum += data[at]!;
+      ownCount += 1;
       if (rowMin[y] === -1) {
         rowMin[y] = x;
         rowMax[y] = x;
@@ -560,7 +600,12 @@ export function findTextBoxes(
     const short = rect.maxB - rect.minB;
     if (Math.min(long, short) < MIN_BOX_SIDE) continue;
 
-    const score = scoreInside(data, w, h, rect);
+    // PaddleOCR's "fast" score first: the mean inside the rectangle. A line
+    // still arched — a curled photo's title after flattening — has a rectangle
+    // that is mostly paper, and fails it while every pixel of it is sure; its
+    // "slow" score, the region's own mean, keeps it.
+    const fast = scoreInside(data, w, h, rect);
+    const score = fast >= params.boxThresh ? fast : ownCount === 0 ? 0 : ownSum / ownCount;
     if (score < params.boxThresh) continue;
 
     // Unclip: grow every side by area x ratio / perimeter. For a rectangle,
@@ -651,6 +696,53 @@ function sample(image: RgbaImage, x: number, y: number, out: Float32Array): void
 
 const distance = (p: Point, q: Point) => Math.hypot(q[0] - p[0], q[1] - p[1]);
 
+/** The box's corners, turned a quarter when it stands taller than wide — as PaddleOCR reads vertical text. */
+function boxCorners(region: Region): { corners: Quad; width: number; height: number } {
+  let [tl, tr, br, bl]: Quad = region.quad ?? [
+    [region.x0, region.y0],
+    [region.x1, region.y0],
+    [region.x1, region.y1],
+    [region.x0, region.y1],
+  ];
+  let cw = Math.max(distance(tl, tr), distance(bl, br));
+  let ch = Math.max(distance(tl, bl), distance(tr, br));
+  if (ch >= cw * 1.5) {
+    [tl, tr, br, bl] = [tr, br, bl, tl];
+    [cw, ch] = [ch, cw];
+  }
+  return { corners: [tl, tr, br, bl], width: Math.max(1, cw), height: Math.max(1, ch) };
+}
+
+/**
+ * One box, ready for the text-line orientation classifier.
+ *
+ * The same box the recogniser reads, warped upright the same way, but
+ * stretched to the classifier's fixed size — PaddleX's `ResizeImage(size)` —
+ * and normalised as it was trained: red first, ImageNet mean and deviation.
+ */
+export function cropForTextline(image: RgbaImage, region: Region, config: TextlineConfig): Float32Array {
+  const { corners } = boxCorners(region);
+  const [tl, tr, br, bl] = corners;
+  const { width, height, mean, std, scale } = config;
+  const plane = width * height;
+  const tensor = new Float32Array(3 * plane);
+  const pixel = new Float32Array(3);
+  for (let v = 0; v < height; v += 1) {
+    const t = (v + 0.5) / height;
+    for (let u = 0; u < width; u += 1) {
+      const s = (u + 0.5) / width;
+      const x = tl[0] * (1 - s) * (1 - t) + tr[0] * s * (1 - t) + br[0] * s * t + bl[0] * (1 - s) * t;
+      const y = tl[1] * (1 - s) * (1 - t) + tr[1] * s * (1 - t) + br[1] * s * t + bl[1] * (1 - s) * t;
+      sample(image, x, y, pixel);
+      const i = v * width + u;
+      tensor[i] = (pixel[0]! * scale - mean[0]!) / std[0]!;
+      tensor[i + plane] = (pixel[1]! * scale - mean[1]!) / std[1]!;
+      tensor[i + 2 * plane] = (pixel[2]! * scale - mean[2]!) / std[2]!;
+    }
+  }
+  return tensor;
+}
+
 /**
  * One box, ready for the recogniser.
  *
@@ -662,22 +754,9 @@ const distance = (p: Point, q: Point) => Math.hypot(q[0] - p[0], q[1] - p[1]);
  * vertical text.
  */
 export function cropForRecognition(image: RgbaImage, region: Region, targetHeight: number): RecognitionInput {
-  let [tl, tr, br, bl]: Quad = region.quad ?? [
-    [region.x0, region.y0],
-    [region.x1, region.y0],
-    [region.x1, region.y1],
-    [region.x0, region.y1],
-  ];
-
-  let cw = Math.max(distance(tl, tr), distance(bl, br));
-  let ch = Math.max(distance(tl, bl), distance(tr, br));
-  if (ch >= cw * 1.5) {
-    // Rotate a quarter turn anticlockwise, as `np.rot90` does to the crop.
-    [tl, tr, br, bl] = [tr, br, bl, tl];
-    [cw, ch] = [ch, cw];
-  }
-  cw = Math.max(1, cw);
-  ch = Math.max(1, ch);
+  // A tall box is turned a quarter anticlockwise, as `np.rot90` does to the crop.
+  const { corners, width: cw, height: ch } = boxCorners(region);
+  const [tl, tr, br, bl] = corners;
 
   const ratio = cw / ch;
   const contentWidth = Math.max(1, Math.min(RECOGNITION_MAX_WIDTH, Math.ceil(targetHeight * ratio)));
@@ -716,7 +795,11 @@ export function cropForRecognition(image: RgbaImage, region: Region, targetHeigh
  * CTC greedy decoding, exactly as PaddleOCR's `CTCLabelDecode`: the most likely
  * class at each step, class 0 is "no character", a class repeated across steps
  * is one character unless a blank separates the repeats. The score is the mean
- * probability of the characters kept.
+ * probability of the characters kept; `weakest` is the least of them — a word
+ * in another script, guessed at beside digits read well, hides in the mean and
+ * shows here. `gap` is the longest run of steps that read as nothing, within
+ * the first `contentSteps` (the crop, not the padding a batch gave it): a label
+ * in another script beside digits can simply vanish, and leaves this behind.
  */
 export function decodeCtc(
   data: Float32Array,
@@ -724,11 +807,16 @@ export function decodeCtc(
   classes: number,
   characters: readonly string[],
   offset = 0,
-): { text: string; score: number } {
+  contentSteps = timeSteps,
+): { text: string; score: number; weakest: number; gap: number } {
   let text = '';
   let previous = -1;
   let total = 0;
   let kept = 0;
+  let weakest = 1;
+  let run = 0;
+  let gap = 0;
+  const within = Math.min(timeSteps, contentSteps);
 
   for (let step = 0; step < timeSteps; step += 1) {
     const base = offset + step * classes;
@@ -742,18 +830,24 @@ export function decodeCtc(
       }
     }
 
+    if (step < within) {
+      run = best === 0 ? run + 1 : 0;
+      gap = Math.max(gap, run);
+    }
+
     if (best > 0 && best !== previous) {
       const character = characters[best - 1];
       if (character !== undefined) {
         text += character;
         total += bestValue;
         kept += 1;
+        weakest = Math.min(weakest, bestValue);
       }
     }
     previous = best;
   }
 
-  return { text, score: kept === 0 ? 0 : total / kept };
+  return kept === 0 ? { text, score: 0, weakest: 0, gap } : { text, score: total / kept, weakest, gap };
 }
 
 // ---------------------------------------------------------------------------
@@ -789,6 +883,40 @@ export function modelConfigFrom(parsed: unknown): ModelConfig {
 
   const config: ModelConfig = { modelName };
   const post = isObject(parsed.PostProcess) ? parsed.PostProcess : {};
+
+  /*
+   * A table model's list is of structure tokens, not characters: no space is
+   * added, and "<td>" gives way to "<td></td>" where the model was trained
+   * with empty and filled cells as one token (`merge_no_span_structure`).
+   */
+  if (post.name === 'TableLabelDecode') {
+    if (!Array.isArray(post.character_dict)) throw new Error('A table model must list its tokens.');
+    let tokens = post.character_dict.map((entry: unknown) => String(entry));
+    if (post.merge_no_span_structure === true) {
+      tokens = tokens.filter((token) => token !== '<td>');
+      if (!tokens.includes('<td></td>')) tokens.push('<td></td>');
+    }
+    const pre = isObject(parsed.PreProcess) ? parsed.PreProcess : {};
+    const ops = Array.isArray(pre.transform_ops) ? pre.transform_ops : [];
+    const argsOf = (name: string): Loose => {
+      const op = ops.find((entry): entry is Loose => isObject(entry) && name in entry);
+      return op !== undefined && isObject(op[name]) ? op[name] : {};
+    };
+    const normalise = argsOf('NormalizeImage');
+    const triple = (value: unknown, fallback: readonly number[]): number[] =>
+      Array.isArray(value) && value.length === 3 && value.every((n) => typeof n === 'number')
+        ? [...(value as number[])]
+        : [...fallback];
+    config.table = {
+      classes: ['sos', ...tokens, 'eos'],
+      size: numberOr(argsOf('ResizeTableImage').max_len, 488),
+      mean: triple(normalise.mean, DETECTION_NORMALISE.mean),
+      std: triple(normalise.std, DETECTION_NORMALISE.std),
+      scale: numberOr(normalise.scale, 1 / 255),
+      locCount: numberOr(argsOf('TableLabelEncode').loc_reg_num, 8),
+    };
+    return config;
+  }
 
   if (Array.isArray(post.character_dict)) {
     const characters = post.character_dict.map((entry: unknown) => {
@@ -829,19 +957,36 @@ export function modelConfigFrom(parsed: unknown): ModelConfig {
         ? [...(value as number[])]
         : [...fallback];
 
-    const labels = post.Topk.label_list.map((label: unknown) => Number(label));
+    // "90" for a page; "180_degree" for a line.
+    const labels = post.Topk.label_list.map((label: unknown) => Number(String(label).replace(/_degree$/, '')));
     if (labels.some((label) => !Number.isFinite(label) || label % 90 !== 0)) {
       throw new Error('An orientation model must label its classes in quarter turns.');
     }
 
-    config.orientation = {
-      resizeShort: numberOr(argsOf('ResizeImage').resize_short, 256),
-      cropSize: numberOr(argsOf('CropImage').size, 224),
-      mean: triple(normalise.mean, DETECTION_NORMALISE.mean),
-      std: triple(normalise.std, DETECTION_NORMALISE.std),
-      scale: numberOr(normalise.scale, 1 / 255),
-      labels,
-    };
+    const resize = argsOf('ResizeImage');
+    const mean = triple(normalise.mean, DETECTION_NORMALISE.mean);
+    const std = triple(normalise.std, DETECTION_NORMALISE.std);
+    const scale = numberOr(normalise.scale, 1 / 255);
+    if (Array.isArray(resize.size) && resize.size.length === 2) {
+      // A line, stretched to a fixed size: [width, height].
+      config.textline = {
+        width: numberOr(resize.size[0], 160),
+        height: numberOr(resize.size[1], 80),
+        mean,
+        std,
+        scale,
+        labels,
+      };
+    } else {
+      config.orientation = {
+        resizeShort: numberOr(resize.resize_short, 256),
+        cropSize: numberOr(argsOf('CropImage').size, 224),
+        mean,
+        std,
+        scale,
+        labels,
+      };
+    }
   }
 
   return config;

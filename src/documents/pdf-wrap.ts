@@ -58,6 +58,18 @@ export function jpegSize(jpeg: Uint8Array): JpegSize | null {
  */
 export const PDF_WRAPPER_BYTES = { least: 600, most: 800 } as const;
 
+/** What each page after the first adds, at least and at most (measured; held by the tests). */
+const PER_PAGE_BYTES = { least: 300, most: 450 } as const;
+
+/** What the wrapper adds around `pages` JPEGs, at least and at most. */
+export function pdfWrapperBytes(pages: number): { least: number; most: number } {
+  const more = Math.max(0, pages - 1);
+  return {
+    least: PDF_WRAPPER_BYTES.least + more * PER_PAGE_BYTES.least,
+    most: PDF_WRAPPER_BYTES.most + more * PER_PAGE_BYTES.most,
+  };
+}
+
 const COLOUR_SPACE: Readonly<Record<number, string>> = {
   1: '/DeviceGray',
   3: '/DeviceRGB',
@@ -76,9 +88,32 @@ function num(value: number): string {
  * Callers pass the image's pixel size, so a pixel is a point, as before.
  */
 export function jpegInPdf(jpeg: Uint8Array, width: number, height: number): Uint8Array {
-  const size = jpegSize(jpeg);
-  const colour = size === null ? undefined : COLOUR_SPACE[size.components];
-  if (size === null || colour === undefined) throw new Error('That is not a JPEG this can put in a PDF.');
+  return jpegPagesInPdf([{ jpeg, width, height }]);
+}
+
+/** One page of a PDF being written: its picture, and the page's size in points. */
+export interface PdfPage {
+  jpeg: Uint8Array;
+  width: number;
+  height: number;
+}
+
+/**
+ * A PDF with one picture per page, in order, each page its own size.
+ *
+ * A scanned marks card of three pages, remade for a portal — locked, or too
+ * big for the box — went in as one: the copy was made from the first page
+ * alone. Objects are numbered as for one page, three more for each page after:
+ * a page, its picture, the stream that draws it.
+ */
+export function jpegPagesInPdf(pages: readonly PdfPage[]): Uint8Array {
+  if (pages.length === 0) throw new Error('A PDF of no pages cannot be written.');
+  const described = pages.map((page) => {
+    const size = jpegSize(page.jpeg);
+    const colour = size === null ? undefined : COLOUR_SPACE[size.components];
+    if (size === null || colour === undefined) throw new Error('That is not a JPEG this can put in a PDF.');
+    return { ...page, size, colour };
+  });
 
   const chunks: Uint8Array[] = [];
   const offsets: number[] = [];
@@ -96,38 +131,46 @@ export function jpegInPdf(jpeg: Uint8Array, width: number, height: number): Uint
     offsets[n] = written;
     ascii(`${n} 0 obj\n${body}\nendobj\n`);
   };
-
-  const content = `q ${num(width)} 0 0 ${num(height)} 0 0 cm /Im0 Do Q`;
+  const pageObject = (index: number) => 3 + index * 3;
 
   // The second line's high bytes mark the file as binary, as the spec advises.
   ascii('%PDF-1.4\n');
   raw(new Uint8Array([0x25, 0xe2, 0xe3, 0xcf, 0xd3, 0x0a]));
   object(1, '<< /Type /Catalog /Pages 2 0 R >>');
-  object(2, '<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
   object(
-    3,
-    `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(width)} ${num(height)}] ` +
-      '/Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>',
+    2,
+    `<< /Type /Pages /Kids [${described.map((_, i) => `${pageObject(i)} 0 R`).join(' ')}] /Count ${described.length} >>`,
   );
-  offsets[4] = written;
-  ascii(
-    '4 0 obj\n' +
-      `<< /Type /XObject /Subtype /Image /Width ${size.width} /Height ${size.height} ` +
-      `/ColorSpace ${colour} /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
-  );
-  raw(jpeg);
-  ascii('\nendstream\nendobj\n');
-  offsets[5] = written;
-  ascii(`5 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
 
+  described.forEach(({ jpeg, width, height, size, colour }, index) => {
+    const page = pageObject(index);
+    const content = `q ${num(width)} 0 0 ${num(height)} 0 0 cm /Im0 Do Q`;
+    object(
+      page,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(width)} ${num(height)}] ` +
+        `/Resources << /XObject << /Im0 ${page + 1} 0 R >> >> /Contents ${page + 2} 0 R >>`,
+    );
+    offsets[page + 1] = written;
+    ascii(
+      `${page + 1} 0 obj\n` +
+        `<< /Type /XObject /Subtype /Image /Width ${size.width} /Height ${size.height} ` +
+        `/ColorSpace ${colour} /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>\nstream\n`,
+    );
+    raw(jpeg);
+    ascii('\nendstream\nendobj\n');
+    offsets[page + 2] = written;
+    ascii(`${page + 2} 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+  });
+
+  const count = offsets.length; // objects 1 .. n, plus the free entry 0
   const xref = written;
   ascii(
-    'xref\n0 6\n0000000000 65535 f \n' +
+    `xref\n0 ${count}\n0000000000 65535 f \n` +
       offsets
         .slice(1)
         .map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`)
         .join('') +
-      `trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`,
+      `trailer\n<< /Size ${count} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`,
   );
 
   const pdf = new Uint8Array(written);

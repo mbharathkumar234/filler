@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Campus Placement Registration (made up)</title>
+<!--
+  What a campus placement or internship form asks of an engineering student:
+  the USN, the last semester's SGPA, the CGPA so far, and the number of
+  backlogs — each of which a semester grade card answers (Stage 3, the table
+  reader). `data-expect` is ground truth for tests; the matcher never reads it.
+-->
+<style>
+  body { font-family: sans-serif; margin: 24px; max-width: 720px; }
+  .row { margin: 14px 0; }
+  label { display: block; margin-bottom: 4px; }
+  input { width: 360px; padding: 6px; }
+</style>
+</head>
+<body>
+<h1>Campus Placement Registration</h1>
+<form id="reg" action="#" method="post">
+  <div class="row">
+    <label for="fullName">Full Name</label>
+    <input id="fullName" name="fullName" type="text" data-expect="identity.full_name" />
+  </div>
+  <div class="row">
+    <label for="usn">USN</label>
+    <input id="usn" name="usn" type="text" data-expect="education[].registration_number" />
+  </div>
+  <div class="row">
+    <label for="sgpa">SGPA of previous semester</label>
+    <input id="sgpa" name="sgpa" type="text" data-expect="education[].sgpa" />
+  </div>
+  <div class="row">
+    <label for="cgpa">CGPA (till date)</label>
+    <input id="cgpa" name="cgpa" type="text" data-expect="education[].cgpa" />
+  </div>
+  <div class="row">
+    <label for="backlogs">Number of active backlogs</label>
+    <input id="backlogs" name="backlogs" type="text" data-expect="education[].backlogs" />
+  </div>
+  <button type="submit">Submit</button>
+</form>
+<script>
+  document.getElementById('reg').addEventListener('submit', function (event) {
+    event.preventDefault();
+    document.body.setAttribute('data-submitted', 'yes');
+  });
+</script>
+</body>
+</html>

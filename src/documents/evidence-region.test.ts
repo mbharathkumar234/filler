@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { regionForLine, toFractions, unturnBox } from './evidence-region';
+import { planCrops, regionForLine, toFractions, unturnBox } from './evidence-region';
 
 /**
  * The piece of the card a value was read from (§ reading a document).
@@ -92,5 +92,48 @@ describe('a box on a page that was turned before it was read', () => {
     for (const turns of [0, 1, 2, 3] as const) {
       expect(area(unturnBox(box, turns))).toBeCloseTo(area(box), 6);
     }
+  });
+});
+
+describe('which piece of which page each value is cut from', () => {
+  /*
+   * A scanned PDF is read page by page, and its lines say which page they sat
+   * on and how far that page was turned to read it. The pieces shown beside
+   * the values are cut from the document as stored, so each page is drawn
+   * once, and each piece is carried back onto its own page before it is cut.
+   */
+  const lines = [
+    { box: { x0: 0.1, y0: 0.2, x1: 0.6, y1: 0.22 } },
+    { box: { x0: 0.1, y0: 0.3, x1: 0.9, y1: 0.32 }, page: 2, turns: 3 as const },
+    { box: { x0: 0.2, y0: 0.5, x1: 0.7, y1: 0.53 }, page: 3 },
+  ];
+  const values = [
+    { key: 'name', line: 0 },
+    { key: 'physics', line: 1 },
+    { key: 'chemistry', line: 1 },
+    { key: 'total', line: 2 },
+  ];
+
+  it('groups the pieces by page, so each page is drawn once', () => {
+    const plan = planCrops(values, lines);
+    expect([...plan.keys()]).toEqual([1, 2, 3]);
+    expect(plan.get(2)?.map((piece) => piece.key)).toEqual(['physics', 'chemistry']);
+  });
+
+  it('treats a line that names no page as the first page', () => {
+    expect(planCrops(values, lines).get(1)?.map((piece) => piece.key)).toEqual(['name']);
+  });
+
+  it('carries each piece back onto its own page as stored, and says how to stand it up', () => {
+    const [physics] = planCrops(values, lines).get(2)!;
+    expect(physics!.region).toEqual(unturnBox(regionForLine(1, lines)!, 3));
+    expect(physics!.turns).toBe(3);
+    const [total] = planCrops(values, lines).get(3)!;
+    expect(total!.turns).toBe(0);
+  });
+
+  it('cuts nothing for a value whose line it cannot find, or when there are no lines', () => {
+    expect(planCrops([{ key: 'lost', line: 9 }], lines).size).toBe(0);
+    expect(planCrops(values, undefined).size).toBe(0);
   });
 });

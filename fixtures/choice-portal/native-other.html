@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Hostel Admission — choice questions (made up)</title>
+<!--
+  Native dropdowns and radio buttons whose options never say the value the way
+  the vault does: "M" for Male, Karnataka's category codes, rupee bands for an
+  income, "B Positive" for B+, and an "Others (please specify)" whose box is
+  shown only once it is chosen. Every value here is made up. `data-expect` is
+  ground truth for tests; the matcher never reads it.
+-->
+<style>
+  body { font-family: sans-serif; margin: 24px; }
+  .row { margin: 12px 0; }
+  label { margin-right: 12px; }
+  #uniOtherRow { display: none; }
+  #uniOtherRow.shown { display: block; }
+</style>
+</head>
+<body>
+<h1>Hostel Admission Form</h1>
+<form id="hostel" action="#" method="post">
+  <div class="row">
+    <label for="university">University</label>
+    <select id="university" name="university" data-expect="education[].board_or_university">
+      <option value="">-- Select --</option>
+      <option value="VTU">VTU</option>
+      <option value="BU">Bangalore University</option>
+      <option value="MU">Mysore University</option>
+      <option value="OTH">Others (please specify)</option>
+    </select>
+  </div>
+  <div class="row" id="uniOtherRow">
+    <label for="uniOther">If others, please specify</label>
+    <input type="text" id="uniOther" name="uniOther" data-expect="unknown" />
+  </div>
+
+  <fieldset class="row">
+    <legend>Gender</legend>
+    <label><input type="radio" name="gender" value="1" data-expect="identity.gender" /> M</label>
+    <label><input type="radio" name="gender" value="2" /> F</label>
+    <label><input type="radio" name="gender" value="3" /> TG</label>
+  </fieldset>
+
+  <fieldset class="row">
+    <legend>Category</legend>
+    <label><input type="radio" name="category" value="GM" data-expect="identity.category" /> General Merit</label>
+    <label><input type="radio" name="category" value="C1" /> Cat-1</label>
+    <label><input type="radio" name="category" value="2A" /> 2A</label>
+    <label><input type="radio" name="category" value="2B" /> 2B</label>
+    <label><input type="radio" name="category" value="3A" /> 3A</label>
+    <label><input type="radio" name="category" value="3B" /> 3B</label>
+    <label><input type="radio" name="category" value="SC" /> Scheduled Caste</label>
+    <label><input type="radio" name="category" value="ST" /> Scheduled Tribe</label>
+  </fieldset>
+
+  <div class="row">
+    <label for="income">Annual Family Income</label>
+    <select id="income" name="income" data-expect="family.annual_income">
+      <option value="">Select</option>
+      <option value="1">Up to 1 Lakh</option>
+      <option value="2">1 Lakh to 2.5 Lakh</option>
+      <option value="3">2.5 Lakh to 8 Lakh</option>
+      <option value="4">Above 8 Lakh</option>
+    </select>
+  </div>
+
+  <div class="row">
+    <label for="blood">Blood Group</label>
+    <select id="blood" name="blood" data-expect="identity.blood_group">
+      <option value="">Select</option>
+      <option>A Positive</option><option>A Negative</option>
+      <option>B Positive</option><option>B Negative</option>
+      <option>O Positive</option><option>O Negative</option>
+      <option>AB Positive</option><option>AB Negative</option>
+    </select>
+  </div>
+
+  <fieldset class="row">
+    <legend>Religion</legend>
+    <label><input type="radio" name="religion" value="Hindu" data-expect="identity.religion" /> Hindu</label>
+    <label><input type="radio" name="religion" value="Muslim" /> Muslim</label>
+    <label><input type="radio" name="religion" value="Christian" /> Christian</label>
+    <label><input type="radio" name="religion" value="Others" /> Others</label>
+    <input type="text" name="religion_other" aria-label="Religion, if others" data-expect="unknown" />
+  </fieldset>
+
+  <button type="submit">Submit Application</button>
+</form>
+<script>
+  document.getElementById('university').addEventListener('change', function (event) {
+    document.getElementById('uniOtherRow').className = event.target.value === 'OTH' ? 'row shown' : 'row';
+  });
+  document.getElementById('hostel').addEventListener('submit', function (event) {
+    event.preventDefault();
+    document.body.setAttribute('data-submitted', 'yes');
+  });
+</script>
+</body>
+</html>

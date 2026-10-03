@@ -29,9 +29,13 @@
  * mean one thing; values are not.
  */
 
-/** The Kannada block, and the Devanagari block an Aadhaar card uses. */
-const INDIC = /[ऀ-ॿಀ-೿]/;
-const INDIC_RUN = /[ऀ-ॿಀ-೿]+(?:\s+[ऀ-ॿಀ-೿]+)*/g;
+/**
+ * The scripts documents here are printed in besides English: Devanagari
+ * (Hindi, Marathi, every PAN card), Kannada, and the Telugu and Tamil the reader
+ * now reads — each script's letters and the signs written on them.
+ */
+const INDIC = /[\p{sc=Devanagari}\p{sc=Kannada}\p{sc=Telugu}\p{sc=Tamil}]/u;
+const INDIC_RUN = /[\p{sc=Devanagari}\p{sc=Kannada}\p{sc=Telugu}\p{sc=Tamil}]+(?:\s+[\p{sc=Devanagari}\p{sc=Kannada}\p{sc=Telugu}\p{sc=Tamil}]+)*/gu;
 
 /**
  * Label words, in the two scripts these documents are printed in.
@@ -68,15 +72,47 @@ const LABELS: ReadonlyArray<readonly [RegExp, string]> = [
   [/ಶಾಖೆ/g, 'Branch'],
 
   // Devanagari
-  [/जन्म\s*तिथि/g, 'Date of Birth'],
+  // "तिथि" loses its final vowel sign to the reader now and then: "तिथ".
+  [/जारी\s*करने\s*की\s*(?:तिथि?|तारीख)/g, 'Date of Issue'],
+  [/प्रमाण\s*-?\s*पत्र\s*(?:संख्या|क्रमांक)/g, 'Certificate Number'],
+  [/जन्म\s*(?:की\s*)?(?:तिथि?|तारीख)/g, 'Date of Birth'],
   [/पिता\s*का\s*नाम/g, 'Father Name'],
   [/माता\s*का\s*नाम/g, 'Mother Name'],
+  [/वार्षिक\s*आय/g, 'Annual Income'],
   [/नाम/g, 'Name'],
   [/पता/g, 'Address'],
   [/पिता/g, 'Father'],
   [/माता/g, 'Mother'],
   [/लिंग/g, 'Gender'],
+  [/जाति/g, 'Caste'],
+  [/आय/g, 'Income'],
   [/वर्ष/g, 'Year'],
+
+  // Telugu. "తండ్రి" is matched loosely: its conjunct is the reader's weak spot,
+  // and it comes back as "తం(డి" as often as not.
+  [/తం\S{0,3}?డ\S{0,2}?ి\s*పేరు/g, 'Father Name'],
+  [/తల్లి\s*పేరు/g, 'Mother Name'],
+  [/పుట్టిన\s*తేదీ/g, 'Date of Birth'],
+  [/జనన\s*తేదీ/g, 'Date of Birth'],
+  [/వార్షిక\s*ఆదాయం/g, 'Annual Income'],
+  [/ధృవీకరణ\s*పత్రం\s*సంఖ్య/g, 'Certificate Number'],
+  [/చిరునామా/g, 'Address'],
+  [/పేరు/g, 'Name'],
+  [/ఆదాయం/g, 'Income'],
+  [/కులం/g, 'Caste'],
+  [/తేదీ/g, 'Date'],
+
+  // Tamil
+  [/தந்தை\s*(?:யின்\s*)?பெயர்/g, 'Father Name'],
+  [/தாய்\s*(?:யின்\s*)?பெயர்/g, 'Mother Name'],
+  [/பிறந்த\s*தேதி/g, 'Date of Birth'],
+  [/ஆண்டு\s*வருமானம்/g, 'Annual Income'],
+  [/சான்றிதழ்\s*எண்/g, 'Certificate Number'],
+  [/முகவரி/g, 'Address'],
+  [/பெயர்/g, 'Name'],
+  [/வருமானம்/g, 'Income'],
+  [/சாதி/g, 'Caste'],
+  [/தேதி/g, 'Date'],
 ];
 
 /**
@@ -118,7 +154,7 @@ export function latinise(line: string): string {
    * Only the first separator, and only when the left of it is the other script:
    * a date is full of slashes and must survive intact.
    */
-  const bilingual = /^([^/|]*[ऀ-ॿಀ-೿][^/|]*)[/|]\s*(.+)$/.exec(line);
+  const bilingual = /^([^/|]*[\p{sc=Devanagari}\p{sc=Kannada}\p{sc=Telugu}\p{sc=Tamil}][^/|]*)[/|]\s*(.+)$/u.exec(line);
   if (bilingual !== null && /[A-Za-z]/.test(bilingual[2]!)) {
     return tidy(bilingual[2]!);
   }

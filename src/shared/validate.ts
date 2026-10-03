@@ -29,6 +29,7 @@
  * predicates are auditable in one sitting and add nothing to the bundle.
  */
 
+import { INDIC_SCRIPTS } from '@/documents/indic';
 import { isFieldKey } from '@/matching/taxonomy';
 import { PRIVILEGED_TYPES, type ExtensionRequest, type RequestType } from './messages';
 
@@ -88,6 +89,9 @@ function strArray(value: unknown): boolean {
   );
 }
 
+/** The scripts a page may be read in: the names `indic.ts` gives them, and nothing else. */
+const SCRIPT_NAMES: ReadonlySet<string> = new Set(Object.keys(INDIC_SCRIPTS));
+
 function key(value: unknown): boolean {
   return typeof value === 'string' && isFieldKey(value);
 }
@@ -135,7 +139,13 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
 
   // The image is base64 of a page the worker rendered; the ceiling is the
   // document upload cap with room for base64's third.
-  'ocr:recognise': (r) => str(r.image, Math.ceil(LIMITS.bytes * 1.4)) && str(r.mime, 100),
+  'ocr:recognise': (r) =>
+    str(r.image, Math.ceil(LIMITS.bytes * 1.4)) &&
+    str(r.mime, 100) &&
+    (r.scripts === undefined ||
+      (Array.isArray(r.scripts) &&
+        r.scripts.length <= SCRIPT_NAMES.size &&
+        r.scripts.every((script) => typeof script === 'string' && SCRIPT_NAMES.has(script)))),
 
   // One stored PDF as base64, under the same ceiling, and what it opens with.
   'pdf:lock': (r) => str(r.pdf, Math.ceil(LIMITS.bytes * 1.4)) && optionalStr(r.password, 256),
@@ -145,7 +155,9 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
     optionalStr(r.password, 256) &&
     num(r.width) &&
     (r.width as number) >= 1 &&
-    (r.width as number) <= 4000,
+    (r.width as number) <= 4000 &&
+    (r.page === undefined ||
+      (Number.isInteger(r.page) && (r.page as number) >= 1 && (r.page as number) <= 10_000)),
 
   'doc:put': (r) =>
     key(r.key) &&
@@ -162,6 +174,9 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'doc:derive': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,
   'doc:preflight': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,
   'doc:extract': (r) => str(r.id, 200),
+  'doc:scan': (r) => str(r.id, 200),
+  // A stored photo as base64, under the same ceiling as a page to read.
+  'ocr:scan': (r) => str(r.image, Math.ceil(LIMITS.bytes * 1.4)) && str(r.mime, 100),
   // Names a question, never a document or a file: the worker decides both.
   'doc:to-window': (r) =>
     num(r.tabId) &&

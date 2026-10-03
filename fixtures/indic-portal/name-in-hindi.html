@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Recruitment Application — names in two languages (made up)</title>
+<!--
+  Central and state forms ask for the applicant's name twice: in English, and
+  in Hindi or the state's language. This made-up form asks in Hindi, and in
+  Kannada — which a vault holding the name in Hindi must leave blank rather
+  than fill with the Hindi spelling. `data-expect` is ground truth for tests;
+  the matcher never reads it.
+-->
+<style>
+  body { font-family: sans-serif; margin: 24px; max-width: 720px; }
+  .row { margin: 14px 0; }
+  label { display: block; margin-bottom: 4px; }
+  input { width: 360px; padding: 6px; }
+</style>
+</head>
+<body>
+<h1>Recruitment Application Form</h1>
+<form id="reg" action="#" method="post">
+  <div class="row">
+    <label for="nameEn">Name (in English)</label>
+    <input id="nameEn" name="nameEn" type="text" data-expect="identity.full_name" />
+  </div>
+  <div class="row">
+    <label for="nameHi">Name in Hindi</label>
+    <input id="nameHi" name="nameHi" type="text" data-expect="identity.full_name_local" />
+  </div>
+  <div class="row">
+    <label for="fatherHi">Father's Name in Hindi</label>
+    <input id="fatherHi" name="fatherHi" type="text" data-expect="family.father_name_local" />
+  </div>
+  <div class="row">
+    <label for="nameKn">Name in Kannada</label>
+    <input id="nameKn" name="nameKn" type="text" data-expect="identity.full_name_local" />
+  </div>
+  <div class="row">
+    <label for="income">Annual Family Income (Rs.)</label>
+    <input id="income" name="income" type="text" data-expect="family.annual_income" />
+  </div>
+  <button type="submit">Submit</button>
+</form>
+<script>
+  document.getElementById('reg').addEventListener('submit', function (event) {
+    event.preventDefault();
+    document.body.setAttribute('data-submitted', 'yes');
+  });
+</script>
+</body>
+</html>

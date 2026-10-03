@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { PDF_WRAPPER_BYTES, jpegInPdf, jpegSize } from './pdf-wrap';
+import { PDF_WRAPPER_BYTES, jpegInPdf, jpegPagesInPdf, jpegSize, pdfWrapperBytes } from './pdf-wrap';
 
 /**
  * One JPEG, on one PDF page (§ derivation).
@@ -111,5 +111,69 @@ describe('what the wrapper adds', () => {
         expect(added, `${side} px, ${length} bytes`).toBeLessThanOrEqual(PDF_WRAPPER_BYTES.most);
       }
     }
+  });
+});
+
+describe('a PDF of several pages', () => {
+  /*
+   * A scanned marks card of three pages, remade for a portal — locked, or too
+   * big for the box — has to go in as three pages. It went in as one: the copy
+   * was made from the first page alone, and nothing said so.
+   */
+  const pages = [
+    { jpeg: jpeg(1240, 1754), width: 1240, height: 1754 },
+    { jpeg: jpeg(1754, 1240), width: 1754, height: 1240 },
+    { jpeg: jpeg(1240, 1754, 1), width: 1240, height: 1754 },
+  ];
+  const pdf = jpegPagesInPdf(pages);
+  const body = text(pdf);
+
+  it('has every page, in order, each its own size', () => {
+    expect(body).toMatch(/\/Type \/Pages \/Kids \[3 0 R 6 0 R 9 0 R\] \/Count 3/);
+    const boxes = [...body.matchAll(/\/MediaBox \[0 0 (\d+) (\d+)\]/g)].map((m) => [Number(m[1]), Number(m[2])]);
+    expect(boxes).toEqual([
+      [1240, 1754],
+      [1754, 1240],
+      [1240, 1754],
+    ]);
+  });
+
+  it('carries each page’s picture as it is, with its own colour', () => {
+    for (const page of pages) expect(body.indexOf(text(page.jpeg))).toBeGreaterThan(0);
+    expect([...body.matchAll(/\/ColorSpace \/(\w+)/g)].map((m) => m[1])).toEqual(['DeviceRGB', 'DeviceRGB', 'DeviceGray']);
+  });
+
+  it('has a cross-reference table whose every entry points at its object', () => {
+    const xref = body.slice(body.lastIndexOf('\nxref\n') + 1);
+    const offsets = [...xref.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+    expect(offsets).toHaveLength(2 + 3 * pages.length);
+    offsets.forEach((offset, index) => {
+      expect(body.slice(offset, offset + 12), `object ${index + 1}`).toMatch(new RegExp(`^${index + 1} 0 obj`));
+    });
+  });
+
+  it('is, for one page, exactly the one-page PDF', () => {
+    const one = pages[0]!;
+    expect([...jpegPagesInPdf([one])]).toEqual([...jpegInPdf(one.jpeg, one.width, one.height)]);
+  });
+
+  it('adds no more than the size search allows for, however many pages', () => {
+    for (let count = 1; count <= 10; count += 1) {
+      for (const length of [64, 99_999]) {
+        const many = Array.from({ length: count }, () => {
+          const image = new Uint8Array(length);
+          image.set(jpeg(9999, 9999));
+          return { jpeg: image, width: 9999, height: 9999 };
+        });
+        const added = jpegPagesInPdf(many).length - count * length;
+        const bounds = pdfWrapperBytes(count);
+        expect(added, `${count} pages`).toBeGreaterThanOrEqual(bounds.least);
+        expect(added, `${count} pages`).toBeLessThanOrEqual(bounds.most);
+      }
+    }
+  });
+
+  it('refuses a PDF of no pages', () => {
+    expect(() => jpegPagesInPdf([])).toThrow(/no pages/i);
   });
 });

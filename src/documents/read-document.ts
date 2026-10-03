@@ -38,6 +38,7 @@ import type { DocumentMeta } from '@/shared/types';
 import { detectScripts, readableScripts, type IndicScript } from './indic';
 import { extractFromText, type ExtractionHint, type ExtractionResult } from './extract';
 import type { PageBox } from './evidence-region';
+import type { ReadTable } from './table';
 
 /** How the text was obtained. The user should be told which. */
 export type TextSource =
@@ -64,19 +65,36 @@ export interface DocumentText {
    * and the wrong piece would be worse than none.
    */
   lines?: TextLine[];
-  /**
-   * Quarter turns clockwise that stood the page upright before it was read.
-   * The boxes in `lines` are places on that upright page, so whoever cuts a
-   * piece out of the stored document needs this to find it. Travels with
-   * `lines` or not at all.
-   */
-  turns?: 1 | 2 | 3;
+  /** Pages read as something other than the stored page, which `lines` on them refer to. */
+  pageImages?: PageImage[];
+  /** The tables the reader found, cell by cell (`table.ts`). Only from pixels: a text layer has none. */
+  tables?: ReadTable[];
+}
+
+/**
+ * A page as it was read, when that is not the page as it is stored: a photo
+ * flattened before it was read. Lines from that page sit on this image, so a
+ * picture of where a value was read is cut from it.
+ */
+export interface PageImage {
+  /** From 1. */
+  page: number;
+  image: Uint8Array;
+  mime: string;
 }
 
 /** A line of recognised text and the box that held it, as shares of the page. */
 export interface TextLine {
   text: string;
   box: PageBox;
+  /** The page it sat on, from 1, for a document read page by page. Absent: the first. */
+  page?: number;
+  /**
+   * Quarter turns clockwise that stood its page upright before it was read.
+   * `box` is a place on that upright page, so whoever cuts a piece out of the
+   * stored document needs this to find it. Absent: the page was upright.
+   */
+  turns?: 1 | 2 | 3;
 }
 
 /**
@@ -105,10 +123,12 @@ export interface OcrEngine {
      * a list of values misread from it.
      */
     notes?: string[];
-    /** Where each line of `text` sat, when the engine knows. */
+    /** Where each line of `text` sat — on which page, turned how far — when the engine knows. */
     lines?: TextLine[];
-    /** Quarter turns clockwise the engine turned the page before reading it. */
-    turns?: 0 | 1 | 2 | 3;
+    /** Pages it read as something other than the stored page — a photo flattened first. */
+    pageImages?: PageImage[];
+    /** The tables on the pages, cell by cell, when it found any. */
+    tables?: ReadTable[];
   }>;
 }
 
@@ -211,10 +231,13 @@ export async function readDocumentText(
     source: text === '' ? 'none' : 'ocr',
     scripts: detectScripts(text),
     ...(result.confidence === undefined ? {} : { engineConfidence: result.confidence }),
+    // Pages and turns travel on the lines, so they go wherever the lines go —
+    // and the flattened pages the lines sit on, with them.
     ...(inStep && text !== '' ? { lines: result.lines! } : {}),
-    ...(inStep && text !== '' && result.turns !== undefined && result.turns !== 0
-      ? { turns: result.turns }
+    ...(inStep && text !== '' && result.pageImages !== undefined && result.pageImages.length > 0
+      ? { pageImages: result.pageImages }
       : {}),
+    ...(text !== '' && result.tables !== undefined && result.tables.length > 0 ? { tables: result.tables } : {}),
     // Not "recognised from an image, so check each value": that is what
     // `source` says, and the screen says it once, in its own words. Driven
     // through the real panel, the two said it one under the other.
@@ -240,7 +263,7 @@ export async function readAndExtract(
   options: ReadOptions = {},
 ): Promise<ExtractionResult & { read: DocumentText }> {
   const read = await readDocumentText(bytes, meta, options);
-  const extracted = extractFromText(read.text, options.hint ?? {});
+  const extracted = extractFromText(read.text, options.hint ?? {}, { tables: read.tables ?? [] });
 
   if (read.source !== 'ocr') return { ...extracted, read };
 

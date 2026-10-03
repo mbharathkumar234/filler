@@ -215,14 +215,27 @@ describe('the dependency licences (§ Phase F)', () => {
 
   it('builds with the models it was measured with, and no others', () => {
     // Pinned by hash, so a changed file on the model host fails the build
-    // rather than quietly changing what reads the user's documents.
+    // rather than quietly changing what reads the user's documents. Each was
+    // measured in the real reader: the first three on the user's own documents
+    // (Phase 0), the other scripts' recognisers on made-up lines
+    // (`e2e/ocr.spec.ts` → "reads Hindi, Telugu and Tamil…"), UVDoc and the
+    // line classifier on a made-up curled photo and turned lines
+    // (`e2e/ocr.spec.ts` → "flattens a photo of a curled page…"), SLANet_plus
+    // on made-up grade cards, ruled and open (`e2e/ocr.spec.ts` → "reads a
+    // grade card's courses…").
     const fetcher = readFileSync('scripts/fetch-ocr-models.mjs', 'utf8');
     const reader = readFileSync('src/offscreen/reader-worker.ts', 'utf8');
     const pinned = [...fetcher.matchAll(/name: '([^']+)',\s*sha256: '([0-9a-f]{64})'/g)];
     expect(pinned.map((m) => m[1]).sort()).toEqual([
+      'PP-LCNet_x0_25_textline_ori',
       'PP-LCNet_x1_0_doc_ori',
       'PP-OCRv5_mobile_det',
+      'SLANet_plus',
+      'UVDoc',
+      'devanagari_PP-OCRv5_mobile_rec',
       'en_PP-OCRv5_mobile_rec',
+      'ta_PP-OCRv5_mobile_rec',
+      'te_PP-OCRv5_mobile_rec',
     ]);
     for (const [, name] of pinned) expect(reader).toContain(`'${name}'`);
   });

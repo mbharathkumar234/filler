@@ -48,6 +48,7 @@ import { extractAadhaarLetter } from './extract-aadhaar';
 import { extractCertifiedPerson } from './extract-certify';
 import { extractEntrance } from './extract-entrance';
 import { extractBankDetails, extractDrivingLicence } from './extract-bank';
+import type { ReadTable } from './table';
 
 export type DocumentType =
   | 'aadhaar'
@@ -189,8 +190,12 @@ const BOILERPLATE =
 
 // "Candidate Name", "Student Name" — what a marks card calls the person it is
 // about, and what an application form calls them too.
+//
+// The longer labels first. A regex takes the first alternative that fits, and
+// "name" alone fits "Name of the Student ARJUN MEHTA" — which once made the
+// student "of the Student ARJUN MEHTA".
 const NAME_LABEL =
-  /^(?:name|नाम|पूरा नाम|full name|candidate'?s?\s*name|student'?s?\s*name|name of (?:the )?(?:candidate|student)|நபர்|பெயர்)\s*[:-]?\s*(.*)$/i;
+  /^(?:name of (?:the )?(?:candidate|student)|candidate'?s?\s*name|student'?s?\s*name|full name|पूरा नाम|name|नाम|நபர்|பெயர்)\s*[:-]?\s*(.*)$/i;
 // "Father Name" with no apostrophe is how most cards print it.
 const FATHER_LABEL =
   /^(?:father'?s?\s*(?:\/\s*guardian'?s?\s*)?name|name of (?:the )?father|पिता का नाम|पिता)\s*[:-]?\s*(.*)$/i;
@@ -214,6 +219,22 @@ function isLatin(text: string): boolean {
   return /[A-Za-z]/.test(text);
 }
 
+/**
+ * Where a name printed in the person's own script goes: beside the English
+ * spelling, never in its place. An English form wants the English spelling; a
+ * form that asks "Name in Hindi" wants this one.
+ */
+const LOCAL_NAME: Partial<Record<FieldKey, FieldKey>> = {
+  'identity.full_name': 'identity.full_name_local',
+  'family.father_name': 'family.father_name_local',
+  'family.mother_name': 'family.mother_name_local',
+};
+
+/** The key a name value belongs under, by the script it is printed in. */
+export function nameKeyFor(key: FieldKey, value: string): FieldKey | null {
+  return isLatin(value) ? key : (LOCAL_NAME[key] ?? null);
+}
+
 // ---------------------------------------------------------------------------
 // The extractors
 // ---------------------------------------------------------------------------
@@ -231,12 +252,23 @@ export interface ExtractionHint {
   documentKey?: FieldKey;
 }
 
+/**
+ * What the reader saw besides the lines: the tables on the page, cell by cell
+ * (`table.ts`). A grade card's courses are a table, and read as lines a title
+ * that wraps onto two lines becomes two courses, one with no marks.
+ */
+export interface ReadLayout {
+  tables?: readonly ReadTable[];
+}
+
 export interface Ctx {
   lines: string[];
   joined: string;
   type: DocumentType;
   /** The slot the document is filed under, when the caller knows it. */
   hint: ExtractionHint;
+  /** The tables the reader found, each a grid of cell texts; none for a text layer. */
+  tables: readonly ReadTable[];
   push: (c: Omit<Candidate, 'confirmed' | 'suggestChecked'>) => void;
   warn: (message: string) => void;
   /**
@@ -378,7 +410,7 @@ function extractBank(ctx: Ctx): void {
 }
 
 /** Day-first, because that is what Indian documents print. */
-function toIsoDate(day: number, month: number, year: number): string | null {
+export function toIsoDate(day: number, month: number, year: number): string | null {
   if (month < 1 || month > 12) return null;
   if (day < 1 || day > 31) return null;
   // A plausible birth year, and never in the future.
@@ -514,10 +546,12 @@ function extractNames(ctx: Ctx): void {
       const value = inline !== '' ? inline : (ctx.lines[index + 1] ?? '').trim();
       const valueLine = inline !== '' ? index : index + 1;
       if (!looksLikeName(value)) return;
+      const target = nameKeyFor(key, value);
+      if (target === null) return;
       claimed.add(valueLine);
 
       ctx.push({
-        key,
+        key: target,
         value,
         confidence: 0.8,
         evidence: line.trim(),
@@ -548,16 +582,31 @@ function extractNames(ctx: Ctx): void {
   }
   if (above.length === 0) return;
 
-  const chosen = above.find((entry) => isLatin(entry.value)) ?? above[above.length - 1]!;
-  ctx.push({
-    key: 'identity.full_name',
-    value: chosen.value,
-    // No label said so; it was inferred from position. Lower, and never ticked.
-    confidence: 0.65,
-    evidence: chosen.value,
-    line: chosen.line,
-    verified: false,
-  });
+  // The Latin spelling is the name; the other, nearest the date, is the name in
+  // the holder's own language — both, when a card prints both.
+  const latin = above.find((entry) => isLatin(entry.value));
+  const local = [...above].reverse().find((entry) => !isLatin(entry.value));
+  if (latin) {
+    ctx.push({
+      key: 'identity.full_name',
+      value: latin.value,
+      // No label said so; it was inferred from position. Lower, and never ticked.
+      confidence: 0.65,
+      evidence: latin.value,
+      line: latin.line,
+      verified: false,
+    });
+  }
+  if (local && !ctx.candidatesHave('identity.full_name_local')) {
+    ctx.push({
+      key: 'identity.full_name_local',
+      value: local.value,
+      confidence: 0.65,
+      evidence: local.value,
+      line: local.line,
+      verified: false,
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -569,9 +618,19 @@ function extractNames(ctx: Ctx): void {
  * ("2O22"), or ending a run of two or more with no letter after it — "3000o (",
  * the income on the user's own certificate as it was read. A word is never
  * touched: an O with a letter beside it stays an O.
+ *
+ * And where a serif face's old-style 0, a small o, was read as one: in a date,
+ * beside its separator ("14/o3/2024"), and as a small o between a code's
+ * capitals and its digits ("RDo987654321012") — never a capital O there, which
+ * may be a letter of the code, and never after a single capital ("No12345").
  */
 export function zeroesForOs(text: string): string {
-  return text.replace(/(?<=\d)[oO](?=\d)/g, '0').replace(/(?<=\d{2})[oO](?![A-Za-z0-9])/g, '0');
+  return text
+    .replace(/(?<=\d)[oO](?=\d)/g, '0')
+    .replace(/(?<=\d{2})[oO](?![A-Za-z0-9])/g, '0')
+    .replace(/(?<=\d[/.-])[oO](?=\d)/g, '0')
+    .replace(/(?<=\d)[oO](?=[/.-]\d)/g, '0')
+    .replace(/(?<=\b[A-Z]{2,4})o(?=\d{4})/g, '0');
 }
 
 /**
@@ -581,7 +640,11 @@ export function zeroesForOs(text: string): string {
  * ISO — so the rest of the system never has to know which script the card was
  * printed in.
  */
-export function extractFromText(raw: string, hint: ExtractionHint = {}): ExtractionResult {
+export function extractFromText(
+  raw: string,
+  hint: ExtractionHint = {},
+  layout: ReadLayout = {},
+): ExtractionResult {
   const normalised = zeroesForOs(normaliseDigits(raw));
   /*
    * Every rule below reads English. A Karnataka document prints each label
@@ -604,6 +667,11 @@ export function extractFromText(raw: string, hint: ExtractionHint = {}): Extract
     joined,
     type: identify(joined),
     hint,
+    tables: (layout.tables ?? []).map((table) => ({
+      // A cell is a value, never a line to tidy: a lone "A" is a grade, and
+      // `trimNoise` would sweep it away as a fragment.
+      rows: table.rows.map((row) => row.map((cell) => latinise(zeroesForOs(normaliseDigits(cell)).trim()))),
+    })),
     push: (candidate) => {
       // One value per key. The extractors run in rough order of evidence, but
       // order alone is not enough: a guess from position (the line above a date

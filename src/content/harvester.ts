@@ -11,7 +11,8 @@
  */
 
 import type { FieldDescriptor, FieldOption, FieldTag } from '@/shared/types';
-import { resolveLabel, resolveNearbyText, type ResolvedLabel } from './labels';
+import { choiceWidgetOf, isSuggestionList, widgetOptions } from './choice-widgets';
+import { cleanLabel, resolveLabel, resolveNearbyText, type ResolvedLabel } from './labels';
 import { buildSelectors } from './selectors';
 import {
   isUploadCaption,
@@ -70,7 +71,13 @@ export interface WizardInfo {
   evidence: string;
 }
 
-const FIELD_SELECTOR = 'input, select, textarea';
+/**
+ * Native controls, and the choice questions that are not native controls: a
+ * Google Form's dropdowns and multiple-choice questions are divs with a role
+ * (`choice-widgets.ts`). One query, so every field keeps its place in the page.
+ */
+const FIELD_SELECTOR = 'input, select, textarea, [role="radiogroup"], [role="listbox"]';
+const CHOICE_ROLES = '[role="radiogroup"], [role="listbox"]';
 
 // ---------------------------------------------------------------------------
 // Visibility
@@ -124,6 +131,9 @@ function isEnabled(el: Element): boolean {
 // ---------------------------------------------------------------------------
 
 function classify(el: Element): FieldTag {
+  const widget = choiceWidgetOf(el);
+  if (widget === 'radiogroup') return 'radio-group';
+  if (widget === 'listbox') return 'select';
   const tag = el.tagName.toLowerCase();
   if (tag === 'select') return 'select';
   if (tag === 'textarea') return 'textarea';
@@ -188,6 +198,17 @@ export function harvest(
       const type = (el.getAttribute('type') ?? '').toLowerCase();
       if (SKIPPED_INPUT_TYPES.has(type)) continue;
 
+      // A role that is not a question we can answer — an autocomplete's list of
+      // suggestions, a group of real radio buttons — is passed over here; the
+      // real controls inside it are found on their own.
+      const widget = choiceWidgetOf(el);
+      if (el.matches(CHOICE_ROLES) && !(el.tagName.toLowerCase() === 'select')) {
+        if (!widget || isSuggestionList(el)) continue;
+      }
+      // A box inside a choice question is its "Other", answered with the choice.
+      const owner = widget ? null : el.parentElement?.closest(CHOICE_ROLES);
+      if (owner && choiceWidgetOf(owner)) continue;
+
       const identity = `${el.getAttribute('name') ?? ''} ${el.getAttribute('id') ?? ''}`;
       if (SECURITY_HINTS.test(identity)) {
         // Report, never describe as fillable (P4).
@@ -211,8 +232,11 @@ export function harvest(
 
       const tag = classify(el);
       const label = labelFor(el, tag);
-      const options =
-        tag === 'radio-group' ? radioGroupOptions(el, scope) : optionsOf(el);
+      const options = widget
+        ? widgetOptions(el).map(({ option }) => ({ value: option.value ?? option.text, text: option.text }))
+        : tag === 'radio-group'
+          ? radioGroupOptions(el, scope)
+          : optionsOf(el);
 
       const descriptor: FieldDescriptor = {
         ref,
@@ -308,6 +332,10 @@ const WEAK_SOURCES: ReadonlySet<ResolvedLabel['source']> = new Set([
  * than one that goes into the wrong box.
  */
 function labelFor(el: Element, tag: FieldTag): ResolvedLabel {
+  if (tag === 'radio-group' && el.tagName.toLowerCase() === 'input') {
+    const legend = groupLegend(el);
+    if (legend) return { text: legend, source: 'question-heading' };
+  }
   const label = resolveLabel(el);
   if (tag !== 'file') return label;
 
@@ -318,6 +346,33 @@ function labelFor(el: Element, tag: FieldTag): ResolvedLabel {
   const heading = questionLabelFor(el);
   if (heading) return { text: heading, source: 'question-heading' };
   return strayText ? { text: '', source: 'none' } : label;
+}
+
+/**
+ * A radio group's question, from the fieldset that holds it.
+ *
+ * A radio's own label is its option — "M", "Hindu" — and the first one's was
+ * standing in for the question. The legend is the question when the fieldset
+ * holds this group alone (and, at most, the box for its "Other"); a fieldset
+ * holding more is a section, and its legend a section heading.
+ */
+function groupLegend(radio: Element): string {
+  const fieldset = radio.closest('fieldset');
+  const legend = fieldset?.querySelector(':scope > legend');
+  if (!fieldset || !legend) return '';
+  const name = radio.getAttribute('name');
+  let boxes = 0;
+  for (const control of fieldset.querySelectorAll('input, select, textarea')) {
+    const type = (control.getAttribute('type') ?? '').toLowerCase();
+    if (type === 'hidden') continue;
+    if (type === 'radio' && control.getAttribute('name') === name) continue;
+    if (control.tagName.toLowerCase() === 'input' && (type === '' || type === 'text')) {
+      boxes += 1;
+      if (boxes === 1) continue;
+    }
+    return '';
+  }
+  return cleanLabel(legend.textContent);
 }
 
 function isRequired(el: Element): boolean {

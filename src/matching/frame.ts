@@ -22,6 +22,9 @@
  *     attribute                  address.permanent.city
  *   + section     "Current"   →  address.correspondence.city
  *
+ *     attribute                  eligibility.caste_certificate_date
+ *   + certificate "EWS Certificate Details"  →  eligibility.income_certificate_date
+ *
  * Nothing here knows which portal it is on. The same frame is read the same way
  * on a scholarship portal, a Google Form and a campus drive.
  *
@@ -57,6 +60,8 @@ export type Subject = 'self' | 'father' | 'mother' | 'guardian' | 'parent' | 'em
 export type Variant = 'confirm' | 'alternate' | 'official' | 'personal';
 export type Domain = 'bank' | 'education';
 export type FamilyMember = 'father' | 'mother' | 'guardian';
+/** The certificates a claim rests on, which forms ask for by number, date of issue and issuer. */
+export type CertificateKind = 'caste' | 'income' | 'domicile' | 'article371j';
 
 export interface LabelFrame {
   /** Whose value the box holds. `self` unless the label names someone else. */
@@ -75,6 +80,12 @@ export interface LabelFrame {
    * reading rather than a stand-in to be re-homed.
    */
   members?: ReadonlySet<FamilyMember>;
+  /**
+   * The certificate a box about a certificate's number, date of issue or
+   * issuer means — from its own words, or the heading over it. Undefined: none
+   * is named, and such a box is left alone.
+   */
+  certificate?: CertificateKind | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +112,35 @@ const EDUCATION_LEVELS: ReadonlyArray<{ level: string; pattern: RegExp }> = [
   { level: 'diploma', pattern: /\b(diploma|polytechnic)\b/i },
   { level: 'undergraduate', pattern: /\b(ug|under.?graduat\w*|bachelors?|graduation|b\.?tech|b\.?e\b|b\.?sc|b\.?com|b\.?a\b|bca|bba)\b/i },
 ];
+
+/**
+ * Which certificate, in the words forms use. 371(J) first: its Annexure-A is
+ * an eligibility certificate that also names a region. An EWS certificate is
+ * the income certificate, as the vault files it (`extract-claims.ts`).
+ */
+const CERTIFICATES: ReadonlyArray<{ certificate: CertificateKind; pattern: RegExp }> = [
+  { certificate: 'article371j', pattern: /371\s*\(?\s*j\b|annexure[-\s]*a\b|kalyana\s+karnataka|hyderabad[-\s]*karnataka/i },
+  {
+    certificate: 'caste',
+    pattern: /\b(caste|community|obc|ncl|non[-\s]*creamy|sc|st|scheduled\s+(caste|tribe)s?)\b/i,
+  },
+  { certificate: 'income', pattern: /\b(income|ews|economically\s+weaker)\b/i },
+  { certificate: 'domicile', pattern: /\b(domicile|residence|nativity|native)\b/i },
+];
+
+/** A heading is a certificate's section when it says so: "… Certificate", "Annexure-A", "… Details". */
+const CERTIFICATE_SECTION = /\b(certificate|annexure)\b/i;
+
+/**
+ * The certificate a heading's boxes are about: the nearest heading only, and
+ * only when it is a section — "EWS Certificate Details" — not a question that
+ * happens to name a claim, such as "Annual Family Income".
+ */
+export function headingCertificate(nearbyText: string): CertificateKind | undefined {
+  const nearest = nearbyText.split(NEARBY_SEPARATOR)[0]?.trim() ?? '';
+  if (nearest === '' || !(CERTIFICATE_SECTION.test(nearest) || SECTION_WORDS.test(nearest))) return undefined;
+  return firstMatch(CERTIFICATES, nearest)?.certificate;
+}
 
 /**
  * "Branch" is two different fields, and only the surrounding form says which.
@@ -183,11 +223,13 @@ const SUBJECT_HOMES: Readonly<
 > = {
   father: {
     'identity.full_name': 'family.father_name',
+    'identity.full_name_local': 'family.father_name_local',
     'contact.mobile': 'family.father_mobile',
     'contact.email': 'family.father_email',
   },
   mother: {
     'identity.full_name': 'family.mother_name',
+    'identity.full_name_local': 'family.mother_name_local',
     'contact.mobile': 'family.mother_mobile',
     'contact.email': 'family.mother_email',
   },
@@ -327,6 +369,7 @@ export function readFrame(field: FieldDescriptor): LabelFrame {
         .map((entry) => entry.subject)
         .filter(isFamilyMember),
     ),
+    certificate: firstMatch(CERTIFICATES, own)?.certificate ?? headingCertificate(field.nearbyText),
   };
 }
 
@@ -393,6 +436,22 @@ export function compose(key: FieldKey, frame: LabelFrame, carried?: AddressSecti
     if (isFieldKey(retargeted)) k = retargeted;
   }
 
+  /*
+   * A certificate's number, date of issue or issuer.
+   *
+   * The dictionary's bare phrases — "Date of Issue", "Issuing Authority" —
+   * stand on the caste certificate's keys; the certificate the box or its
+   * heading names decides whose they are. With none named, the box is about a
+   * certificate the vault cannot know — a passport's — and is left alone:
+   * a caste certificate's date in it would be a confident wrong answer.
+   */
+  const part = CERTIFICATE_PART.exec(k);
+  if (part !== null) {
+    if (frame.certificate === undefined) return null;
+    const home = `eligibility.${CERTIFICATE_STEM[frame.certificate]}_${part[1]}`;
+    return isFieldKey(home) ? home : null;
+  }
+
   const subject = frame.subject;
 
   /*
@@ -427,6 +486,15 @@ export function compose(key: FieldKey, frame: LabelFrame, carried?: AddressSecti
   return k;
 }
 
+const CERTIFICATE_PART =
+  /^eligibility\.(?:caste_certificate|income_certificate|domicile_certificate|article_371j)_(number|date|authority)$/;
+const CERTIFICATE_STEM: Readonly<Record<CertificateKind, string>> = {
+  caste: 'caste_certificate',
+  income: 'income_certificate',
+  domicile: 'domicile_certificate',
+  article371j: 'article_371j',
+};
+
 const SUBJECT_WORDS: Readonly<Record<Exclude<Subject, 'self'>, string>> = {
   father: 'your father',
   mother: 'your mother',
@@ -449,6 +517,11 @@ export function unhousedReason(key: FieldKey, frame: LabelFrame): string {
     .replace(/^dob$/, 'date of birth');
   if (frame.subject !== 'self') {
     return `this box is about ${SUBJECT_WORDS[frame.subject]}, and there is no saved ${attribute} for them — left for you to fill`;
+  }
+  const part = CERTIFICATE_PART.exec(key);
+  if (part !== null && frame.certificate === undefined) {
+    const what = { number: 'a number', date: 'a date of issue', authority: 'an issuing authority' }[part[1] as 'number' | 'date' | 'authority'];
+    return `this box asks for ${what} without saying which certificate's — left for you to fill`;
   }
   return `this box asks for ${frame.variant ?? 'another'} ${attribute}, which is not saved separately — left for you to fill`;
 }

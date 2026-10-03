@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Recruitment Application — Reservation Details (made up)</title>
+<!--
+  A central recruitment form's reservation page: each claim's certificate asked
+  for by its number, its date of issue and its issuing authority, under a
+  heading that names the certificate while the boxes do not. A passport block
+  asks "Date of Issue" too, and the vault has no passport date: that box must
+  be left alone, not given a caste certificate's date. `data-expect` is ground
+  truth for tests; the matcher never reads it.
+-->
+<style>
+  body { font-family: sans-serif; margin: 24px; max-width: 760px; }
+  fieldset { margin: 18px 0; padding: 10px 16px; }
+  .row { margin: 12px 0; }
+  label { display: block; margin-bottom: 4px; }
+  input { width: 360px; padding: 6px; }
+</style>
+</head>
+<body>
+<h1>Reservation Details</h1>
+<form id="reg" action="#" method="post">
+  <fieldset>
+    <legend>OBC (Non-Creamy Layer) Certificate Details</legend>
+    <div class="row">
+      <label for="f1">Certificate Number</label>
+      <input id="f1" name="f1" type="text" data-expect="eligibility.caste_certificate_number" />
+    </div>
+    <div class="row">
+      <label for="f2">Date of Issue</label>
+      <input id="f2" name="f2" type="text" placeholder="DD/MM/YYYY" data-expect="eligibility.caste_certificate_date" />
+    </div>
+    <div class="row">
+      <label for="f3">Issuing Authority</label>
+      <input id="f3" name="f3" type="text" data-expect="eligibility.caste_certificate_authority" />
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>EWS Certificate Details</legend>
+    <div class="row">
+      <label for="f4">Certificate Number</label>
+      <input id="f4" name="f4" type="text" data-expect="eligibility.income_certificate_number" />
+    </div>
+    <div class="row">
+      <label for="f5">Date of Issue</label>
+      <input id="f5" name="f5" type="text" placeholder="DD/MM/YYYY" data-expect="eligibility.income_certificate_date" />
+    </div>
+    <div class="row">
+      <label for="f6">Issued by</label>
+      <input id="f6" name="f6" type="text" data-expect="eligibility.income_certificate_authority" />
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Domicile</legend>
+    <div class="row">
+      <label for="f7">Domicile Certificate Number</label>
+      <input id="f7" name="f7" type="text" data-expect="eligibility.domicile_certificate_number" />
+    </div>
+    <div class="row">
+      <label for="f8">Domicile Certificate Issuing Authority</label>
+      <input id="f8" name="f8" type="text" data-expect="eligibility.domicile_certificate_authority" />
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Passport Details</legend>
+    <div class="row">
+      <label for="f9">Passport Number</label>
+      <input id="f9" name="f9" type="text" data-expect="id.passport" />
+    </div>
+    <div class="row">
+      <!-- The vault keeps no passport date, and a certificate's must not stand in. -->
+      <label for="f10">Date of Issue</label>
+      <input id="f10" name="f10" type="text" placeholder="DD/MM/YYYY" data-expect="unknown" />
+    </div>
+  </fieldset>
+  <button type="submit">Submit</button>
+</form>
+<script>
+  document.getElementById('reg').addEventListener('submit', function (event) {
+    event.preventDefault();
+    document.body.setAttribute('data-submitted', 'yes');
+  });
+</script>
+</body>
+</html>

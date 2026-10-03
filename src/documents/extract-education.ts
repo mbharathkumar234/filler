@@ -21,11 +21,18 @@
  *  - *Marks per subject.* There is one `subjects` key, so the subjects are
  *    listed in the order the card prints them and the totals go to
  *    `marks_obtained` and `max_marks`.
+ *
+ * **A table, where the reader found one.** A semester grade card's courses are
+ * a table (`table.ts`), and its rows start with a course code and wrap long
+ * titles onto a second line — which the line rules below read as no course at
+ * all. Read cell by cell, the columns say which figure is the total and which
+ * cell is the grade, so the card also gives how many courses are not cleared.
  */
 
 import type { FieldKey, MarkSubject } from '@/matching/taxonomy';
 import { isFieldKey } from '@/matching/taxonomy';
 import { labelledValue, type Ctx } from './extract';
+import type { ReadTable } from './table';
 
 /**
  * The qualification block a document slot belongs to.
@@ -59,17 +66,26 @@ const BLOCK_FOR_SLOT: Readonly<Record<string, string>> = {
   'doc.migration_certificate_12': 'education.class_12.',
 };
 
+/**
+ * The words that make a label a number's, not an institution's: VTU prints
+ * "University Seat Number", which once filed "Seat Number 1SA21CS042" as the
+ * student's university.
+ */
+const NUMBER_LABEL_WORDS = /\b(?:seat|register|registration|reg|roll|enrol(?:l?ment)?)\s*(?:no\b|number\b)|\busn\b/i;
+
 /** Labels, in the words the boards actually print. */
 const BOARD_LABEL =
-  /^(?:board|board\s*\/\s*university|university|examining\s+authority|name of (?:the )?board)\s*[:-]?\s*(.*)$/i;
+  /^(?:board\s*\/\s*university|name of (?:the )?board|examining\s+authority|(?:board|university)(?!\s*(?:seat|register|registration|reg|roll|enrol|code|no\b|number)))\s*[:-]?\s*(.*)$/i;
 /*
  * "College", but never "College Code No." — a 2nd PUC certificate prints both,
  * and the code was once filed as the institution's name.
  */
 const SCHOOL_LABEL =
   /^(?:school|school\s*name|name of (?:the )?(?:school|institution|college)|institution|college(?!\s*code))\s*[:-]?\s*(.*)$/i;
+// VTU's "University Seat Number" — the USN — is the number a student is
+// registered under for the whole degree, not one exam's seat.
 const REGISTER_LABEL =
-  /^(?:register(?:ed)?\s*(?:no\.?|number)|registration\s*(?:no\.?|number)|reg\.?\s*no\.?)\s*[:-]?\s*(.*)$/i;
+  /^(?:register(?:ed)?\s*(?:no\.?|number)|registration\s*(?:no\.?|number)|reg\.?\s*no\.?|university\s*seat\s*(?:no\.?|number)|usn)\s*[:-]?\s*(.*)$/i;
 const ROLL_LABEL = /^(?:roll\s*(?:no\.?|number)|seat\s*(?:no\.?|number))\s*[:-]?\s*(.*)$/i;
 const RESULT_LABEL = /^(?:result|result\s*status|division)\s*[:-]?\s*(.*)$/i;
 const PERCENTAGE_LABEL = /^(?:percentage|percentage of marks|per\s*cent(?:age)?)\s*[:-]?\s*(.*)$/i;
@@ -84,6 +100,34 @@ const YEAR_LABEL =
  */
 const SCHOOL_ADDRESS_LINE =
   /^(?:(?:school|institution|college)\s*address|address of (?:the )?(?:school|institution|college))\b|^(?:school|institution|college)\b.*(?<![0-9])[1-9][0-9]{5}(?![0-9])/i;
+
+/*
+ * A grade point, after its label — "SGPA 8.45", or "SGPA : 8.45 CGPA : 8.21"
+ * when a card prints both on one line. Out of ten; nothing else is.
+ */
+const SGPA = /(?<![a-z])(?:sgpa|s\.\s*g\.\s*p\.\s*a\.?|semester grade point average)\s*[:=-]?\s*(\d{1,2}(?:\.\d{1,2})?)(?![\d.])/i;
+const CGPA =
+  /(?<![a-z])(?:cgpa|c\.\s*g\.\s*p\.\s*a\.?|cumulative grade point average)\s*[:=-]?\s*(\d{1,2}(?:\.\d{1,2})?)(?![\d.])/i;
+const GRADE_POINT_LABEL = { sgpa: /^(?:sgpa|s\.\s*g\.\s*p\.\s*a\.?)\s*[:=-]?\s*$/i, cgpa: /^(?:cgpa|c\.\s*g\.\s*p\.\s*a\.?)\s*[:=-]?\s*$/i };
+
+function isGradePoint(value: string): boolean {
+  return /^\d{1,2}(?:\.\d{1,2})?$/.test(value) && Number(value) <= 10;
+}
+
+/** A grade point and the line it was read on: beside its label, or under it. */
+function gradePoint(ctx: Ctx, which: 'sgpa' | 'cgpa'): { value: string; line: number; evidence: string } | null {
+  const inline = which === 'sgpa' ? SGPA : CGPA;
+  for (const [index, raw] of ctx.lines.entries()) {
+    const value = inline.exec(raw)?.[1];
+    if (value !== undefined && isGradePoint(value)) return { value, line: index, evidence: raw.trim() };
+  }
+  for (const [index, raw] of ctx.lines.entries()) {
+    if (!GRADE_POINT_LABEL[which].test(raw.trim())) continue;
+    const value = (ctx.lines[index + 1] ?? '').trim();
+    if (isGradePoint(value)) return { value, line: index + 1, evidence: raw.trim() };
+  }
+  return null;
+}
 
 /** A board or a school is a line of words, not a number or a caption. */
 function looksLikeInstitution(value: string): boolean {
@@ -291,6 +335,118 @@ export function subjectRows(lines: readonly string[]): SubjectRow[] {
   return rows;
 }
 
+// ---- a table of courses ----------------------------------------------------
+
+/** A course read off a table: its name, its marks and whether it was cleared. */
+interface Course {
+  title: string;
+  obtained: number | null;
+  max: number | null;
+  /** Read from the Result column, or else the Grade column; null when neither says. */
+  cleared: boolean | null;
+}
+
+/** What a header cell says, less its punctuation: "Max. Marks" → "max marks". */
+function headWords(cell: string): string {
+  return cell.toLowerCase().replace(/[.:*()]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * The columns a marks table prints, by the words over them.
+ *
+ * "Course Code" is not the title — only "Course", "Course Title", "Subject
+ * Name" and their kin are. "Grade Points" is a number, not the grade.
+ */
+const HEAD = {
+  title:
+    /^(?:(?:course|subject|paper)s?(?: (?:title|name))?|title|name of (?:the )?(?:course|subject|paper)|sub name)$/,
+  total:
+    /^(?:total(?: marks)?(?: obtained| secured)?|marks (?:obtained|secured|awarded)|obtained(?: marks)?|secured|marks)$/,
+  max: /^(?:max(?:imum)?(?: marks)?|full marks|out of)$/,
+  grade: /^(?:grade|letter grade|grade (?:awarded|obtained|secured))$/,
+  result: /^(?:result|status|result status|p ?\/ ?f)$/,
+} as const;
+
+/** Rows under the courses that are not courses: the totals and the grade points. */
+const NOT_A_COURSE =
+  /^(?:total|grand total|aggregate|sgpa|cgpa|gpa|result|percentage|credits?(?: earned| registered)?|semester grade)\b/i;
+
+/*
+ * A course's outcome in the words universities print. A grade of "A" is a
+ * good grade, while a result of "A" is Absent — so the two columns have their
+ * own words. RA is Anna University's re-appear, U its "reappearance", NE "not
+ * eligible".
+ */
+const FAILED_GRADE = /^(?:f|fail(?:ed)?|ab|abs|absent|ra|u|re-?appear|ne)$/i;
+const PASSED_GRADE = /^(?:o|s|[a-e][+]{0,2}|[a-e][12]|p|pp|pass(?:ed)?)$/i;
+const FAILED_RESULT = /^(?:f|fail(?:ed)?|a|ab|abs|absent|ra|u|ne|x)$/i;
+const PASSED_RESULT = /^(?:p|pass(?:ed)?|q|qualified)$/i;
+
+function clearedBy(cell: string | undefined, failed: RegExp, passed: RegExp): boolean | null {
+  const word = (cell ?? '').trim();
+  if (failed.test(word)) return false;
+  if (passed.test(word)) return true;
+  return null;
+}
+
+/** A mark in a cell: a whole number of up to three figures, and nothing else. */
+function markIn(cell: string | undefined): number | null {
+  const value = (cell ?? '').trim();
+  return /^\d{1,3}$/.test(value) ? Number(value) : null;
+}
+
+/**
+ * The courses in a table, when it is a table of courses.
+ *
+ * Its header — in the first three rows, under any heading rows above it —
+ * must name a title column and one of a marks, grade or result column. A row
+ * with only a title in it is the tail of the title above, wrapped onto a row of
+ * its own. A row with marks and no title is a course the reader lost, and the
+ * table is then refused: a list missing one course would add up to the wrong
+ * total and count the wrong backlogs, and the lines are read instead.
+ */
+export function coursesIn(table: ReadTable): Course[] | null {
+  for (let at = 0; at < Math.min(3, table.rows.length); at += 1) {
+    const header = table.rows[at]!.map(headWords);
+    const column = (pattern: RegExp): number | null => {
+      const index = header.findIndex((cell) => pattern.test(cell));
+      return index === -1 ? null : index;
+    };
+    const title = column(HEAD.title);
+    const total = column(HEAD.total);
+    const grade = column(HEAD.grade);
+    const result = column(HEAD.result);
+    const max = column(HEAD.max);
+    if (title === null || (total === null && grade === null && result === null)) continue;
+
+    const courses: Course[] = [];
+    for (const row of table.rows.slice(at + 1)) {
+      const name = (row[title] ?? '').trim().replace(/\s+/g, ' ');
+      const filled = row.filter((cell, index) => index !== title && cell.trim() !== '').length;
+      if (name === '') {
+        if (filled >= 2) return null;
+        continue;
+      }
+      if (NOT_A_COURSE.test(name)) continue;
+      const last = courses[courses.length - 1];
+      if (filled === 0 && last !== undefined) {
+        last.title = `${last.title} ${name}`;
+        continue;
+      }
+      courses.push({
+        title: name,
+        obtained: total === null ? null : markIn(row[total]),
+        max: max === null ? null : markIn(row[max]),
+        cleared:
+          (result === null ? null : clearedBy(row[result], FAILED_RESULT, PASSED_RESULT)) ??
+          (grade === null ? null : clearedBy(row[grade], FAILED_GRADE, PASSED_GRADE)),
+      });
+    }
+    return courses.length >= 2 ? courses : null;
+  }
+  return null;
+}
+
 /** "APRIL 2023", "2022", "MAR-2019" — the year, whatever surrounds it. */
 function yearIn(text: string): string | null {
   const match = /\b(19|20)\d{2}\b/.exec(text);
@@ -347,12 +503,24 @@ export function extractEducation(ctx: Ctx): void {
    * labelled value: "KARNATAKA SECONDARY EDUCATION EXAMINATION BOARD".
    */
   if (!ctx.candidatesHave(key('board_or_university') ?? 'identity.full_name')) {
-    const index = ctx.lines.findIndex((line) => /\b(board|university|council)\b/i.test(line));
+    // The first line that is a heading, not the first with the word in it:
+    // "University Seat Number 1SA21CS042" names a university and is a number.
+    const index = ctx.lines.findIndex((raw) => {
+      const line = raw.trim();
+      return (
+        /\b(board|university|council)\b/i.test(line) &&
+        looksLikeInstitution(line) &&
+        !/^(?:board|university)\s*[:-]/i.test(line) &&
+        !NUMBER_LABEL_WORDS.test(line)
+      );
+    });
     const line = ctx.lines[index]?.trim();
-    if (line !== undefined && looksLikeInstitution(line) && !/^(?:board|university)\s*[:-]/i.test(line)) {
-      put('board_or_university', { value: line, line: index, evidence: line }, 0.7);
-    }
+    if (line !== undefined) put('board_or_university', { value: line, line: index, evidence: line }, 0.7);
   }
+
+  // What a grade card adds up to: this semester's, and every semester's so far.
+  put('sgpa', gradePoint(ctx, 'sgpa'), 0.85);
+  put('cgpa', gradePoint(ctx, 'cgpa'), 0.85);
 
   // The year: a labelled one first, then the examination line that names it.
   const labelledYear = labelledValue(ctx, YEAR_LABEL, (v) => yearIn(v) !== null);
@@ -367,12 +535,32 @@ export function extractEducation(ctx: Ctx): void {
   }
 
   // ---- the table ----------------------------------------------------------
-  const rows = subjectRows(ctx.lines);
+  /*
+   * A table the reader found comes first: its columns are known. The lines are
+   * the fallback, and the only reading a PDF's text layer has.
+   */
+  const courses = ctx.tables.map(coursesIn).find((found) => found !== null) ?? null;
+  const rows: Array<Omit<SubjectRow, 'obtained'> & { obtained: number | null }> =
+    courses === null
+      ? subjectRows(ctx.lines)
+      : courses.map((course) => {
+          const line = lineNaming(ctx, course.title);
+          return {
+            subject: course.title,
+            max: course.max,
+            obtained: course.obtained,
+            line,
+            evidence: ctx.lines[line]?.trim() || course.title,
+          };
+        });
   if (rows.length >= 2) {
+    // Separated by what the names do not hold: "Transform Calculus, Fourier
+    // Series and Numerical Techniques" is one course, and a comma would make it three.
+    const separator = rows.some((row) => row.subject.includes(',')) ? '; ' : ', ';
     put(
       'subjects',
       {
-        value: rows.map((row) => row.subject).join(', '),
+        value: rows.map((row) => row.subject).join(separator),
         line: rows[0]!.line,
         evidence: rows[0]!.evidence,
       },
@@ -390,7 +578,7 @@ export function extractEducation(ctx: Ctx): void {
     for (const row of rows) {
       const subject = subjectOf(row.subject);
       const target = subject === null ? null : key(`marks_${subject}`);
-      if (target === null || filled.has(target)) {
+      if (target === null || filled.has(target) || row.obtained === null) {
         unboxed.push(row.subject);
         continue;
       }
@@ -437,14 +625,18 @@ export function extractEducation(ctx: Ctx): void {
     const evidence = ctx.lines[totalLine]!.trim();
     put('marks_obtained', { value: obtained, line: totalLine, evidence }, 0.85);
     if (max !== null) put('max_marks', { value: max, line: totalLine, evidence }, 0.85);
-  } else if (rows.length >= 3) {
-    const obtained = rows.reduce((sum, row) => sum + row.obtained, 0);
+  } else if (rows.length >= 3 && rows.every((row) => row.obtained !== null)) {
+    const obtained = rows.reduce((sum, row) => sum + (row.obtained ?? 0), 0);
     const max = rows.every((row) => row.max !== null)
       ? rows.reduce((sum, row) => sum + (row.max ?? 0), 0)
       : null;
     put(
       'marks_obtained',
-      { value: String(obtained), line: rows[0]!.line, evidence: `added up from ${rows.length} subjects` },
+      {
+        value: String(obtained),
+        line: rows[0]!.line,
+        evidence: `added up from ${rows.length} ${courses === null ? 'subjects' : 'courses, the table’s Total column'}`,
+      },
       0.6,
     );
     if (max !== null) {
@@ -455,4 +647,34 @@ export function extractEducation(ctx: Ctx): void {
       );
     }
   }
+
+  /*
+   * Backlogs: the courses on this card not cleared. Only when every course's
+   * grade or result was read — one cell the reader could not make out would
+   * make the count a guess, and a form asking "Number of backlogs" is not a
+   * place to guess.
+   */
+  if (courses !== null && courses.every((course) => course.cleared !== null)) {
+    const failed = courses.filter((course) => course.cleared === false).length;
+    const line = lineNaming(ctx, courses[0]!.title);
+    put(
+      'backlogs',
+      {
+        value: String(failed),
+        line,
+        evidence: `${failed} of ${courses.length} courses on this card not cleared, by its Grade or Result column`,
+      },
+      0.7,
+    );
+  }
+}
+
+/**
+ * The line a table cell's text was read on, for the picture of where it came
+ * from: the first holding its first three words. A wrapped title is on two
+ * lines, and the first is where it starts. -1, and no picture, when none does.
+ */
+function lineNaming(ctx: Ctx, text: string): number {
+  const start = text.split(' ').slice(0, 3).join(' ').toLowerCase();
+  return ctx.lines.findIndex((line) => line.toLowerCase().includes(start));
 }

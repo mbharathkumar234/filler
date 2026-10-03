@@ -134,6 +134,11 @@ describe('reading an Aadhaar card', () => {
     expect(candidateFor(extractFromText(CARD), 'identity.full_name')?.value).toBe('Ravi Kumar');
   });
 
+  it('keeps the other spelling too, as the name in the holder’s own language', () => {
+    // "Name in Hindi" is a question forms ask; the card answers it.
+    expect(candidateFor(extractFromText(CARD), 'identity.full_name_local')?.value).toBe('रवि कुमार');
+  });
+
   it('carries the evidence it used, so the user can check it against the card', () => {
     for (const candidate of extractFromText(CARD).candidates) {
       expect(candidate.evidence.length, candidate.key).toBeGreaterThan(0);
@@ -160,12 +165,55 @@ describe('a Hindi card, where the digits are Devanagari', () => {
     expect(candidateFor(extractFromText(CARD), 'identity.dob')?.value).toBe('1992-08-15');
   });
 
-  it('reads the Devanagari name when there is no Latin one', () => {
-    expect(candidateFor(extractFromText(CARD), 'identity.full_name')?.value).toBe('अनिता शर्मा');
+  it('files a name printed only in Devanagari as the name in the holder’s language', () => {
+    // Not as the full name: an English form wants the English spelling, and
+    // offering the Devanagari one there filled English forms with Hindi.
+    const result = extractFromText(CARD);
+    expect(candidateFor(result, 'identity.full_name_local')?.value).toBe('अनिता शर्मा');
+    expect(candidateFor(result, 'identity.full_name')).toBeUndefined();
   });
 
   it('reports the scripts it saw', () => {
     expect(extractFromText(CARD).scripts).toContain('Devanagari');
+  });
+});
+
+describe('a certificate printed in Hindi, Telugu or Tamil alone', () => {
+  // Read in its own script by the reader (`paddle-reader.ts`), its labels put
+  // into English (`bilingual.ts`), its values left exactly as printed.
+  it('reads a Hindi income certificate: the amount for the vault, the names in Hindi', () => {
+    const result = extractFromText(
+      ['आय प्रमाण पत्र', 'नाम : सीमा वर्मा', 'पिता का नाम : राजेश वर्मा', 'वार्षिक आय : 48000'].join('\n'),
+    );
+    expect(candidateFor(result, 'identity.full_name_local')?.value).toBe('सीमा वर्मा');
+    expect(candidateFor(result, 'family.father_name_local')?.value).toBe('राजेश वर्मा');
+    expect(candidateFor(result, 'family.annual_income')?.value).toBe('48000');
+    expect(candidateFor(result, 'identity.full_name')).toBeUndefined();
+    expect(candidateFor(result, 'family.father_name')).toBeUndefined();
+  });
+
+  it('reads the same from Telugu, the label it misreads included', () => {
+    const result = extractFromText(
+      ['పేరు : లక్ష్మి దేవి', 'తం(డి పేరు : వెంకట రావు', 'వార్షిక ఆదాయం : 72000'].join('\n'),
+    );
+    expect(candidateFor(result, 'identity.full_name_local')?.value).toBe('లక్ష్మి దేవి');
+    expect(candidateFor(result, 'family.father_name_local')?.value).toBe('వెంకట రావు');
+    expect(candidateFor(result, 'family.annual_income')?.value).toBe('72000');
+  });
+
+  it('reads the same from Tamil', () => {
+    const result = extractFromText(
+      ['பெயர் : கவிதா முருகன்', 'தந்தை பெயர் : முருகன் செல்வம்', 'ஆண்டு வருமானம் : 60000'].join('\n'),
+    );
+    expect(candidateFor(result, 'identity.full_name_local')?.value).toBe('கவிதா முருகன்');
+    expect(candidateFor(result, 'family.father_name_local')?.value).toBe('முருகன் செல்வம்');
+    expect(candidateFor(result, 'family.annual_income')?.value).toBe('60000');
+  });
+
+  it('still files an English name as the name', () => {
+    const result = extractFromText('पिता का नाम : RAJESH VERMA');
+    expect(candidateFor(result, 'family.father_name')?.value).toBe('RAJESH VERMA');
+    expect(candidateFor(result, 'family.father_name_local')).toBeUndefined();
   });
 });
 
@@ -413,8 +461,24 @@ describe('a zero the engine read as a letter O', () => {
     expect(zeroesForOs('Year 2O22')).toBe('Year 2022');
   });
 
+  it('reads old-style figures in a date or a code as the zeros they are', () => {
+    // A serif face whose 0 is a small o — Georgia's — read off a made-up
+    // certificate (`fixtures/images/caste-certificate-seal.png`) as printed.
+    expect(zeroesForOs('Date of Issue : 14/o3/2024')).toBe('Date of Issue : 14/03/2024');
+    expect(zeroesForOs('1o/12/2023')).toBe('10/12/2023');
+    expect(zeroesForOs('RD Number : RDo987654321012')).toBe('RD Number : RD0987654321012');
+  });
+
   it('never touches an O in a word', () => {
-    for (const text of ['Roll No. 18315726', 'SCHOOL', 'O+ blood group', 'Form 16 Office', '10 o’clock']) {
+    for (const text of [
+      'Roll No. 18315726',
+      'Roll No12345678',
+      'SCHOOL',
+      'O+ blood group',
+      'Form 16 Office',
+      '10 o’clock',
+      'RDO Office 2024',
+    ]) {
       expect(zeroesForOs(text), text).toBe(text);
     }
   });

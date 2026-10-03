@@ -47,9 +47,10 @@ import { chromium, expect, test, type BrowserContext, type Worker } from '@playw
  *
  * It does not exercise `executeScript` itself. `content-script-format.test.ts`
  * asserts the property that makes injection possible; this asserts the file
- * actually runs. The step still untested by anything is the injection call on a
- * page the user has granted — that needs a toolbar click, and is noted in
- * STATUS.md as the remaining gap.
+ * actually runs. The injection call itself, on a page the user has granted, is
+ * driven by `panel.spec.ts`: the DevTools protocol can press the toolbar button
+ * (`side-panel.ts` → `pressToolbarButton`), which grants `activeTab` exactly as
+ * the user's click does, and a real fill runs from the real side panel.
  */
 
 const DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../../dist');

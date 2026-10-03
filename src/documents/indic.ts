@@ -89,7 +89,9 @@ export interface ScheduledLanguage {
 }
 
 /**
- * The twenty-two languages of the Eighth Schedule, with an honest verdict each.
+ * The twenty-two languages of the Eighth Schedule, with an honest verdict each
+ * — for this build: what its bundled recognisers read (`ocr.ts` →
+ * `READABLE_SCRIPTS`), not what some model somewhere might.
  *
  * `shared` is not a lesser tier by accident: a Konkani card read with the Hindi
  * Devanagari model will get the digits and the shapes right and may stumble on
@@ -97,8 +99,20 @@ export interface ScheduledLanguage {
  * name it is worth flagging, which is what the note is for.
  */
 export const SCHEDULED_LANGUAGES: readonly ScheduledLanguage[] = [
-  { name: 'Assamese', endonym: 'অসমীয়া', scripts: ['Bengali'], coverage: 'good' },
-  { name: 'Bengali', endonym: 'বাংলা', scripts: ['Bengali'], coverage: 'good' },
+  {
+    name: 'Assamese',
+    endonym: 'অসমীয়া',
+    scripts: ['Bengali'],
+    coverage: 'none',
+    note: 'PaddleOCR has no light model for this script — only its vision-language model, far too large to ship in an extension. Type these details in by hand.',
+  },
+  {
+    name: 'Bengali',
+    endonym: 'বাংলা',
+    scripts: ['Bengali'],
+    coverage: 'none',
+    note: 'PaddleOCR has no light model for this script — only its vision-language model, far too large to ship in an extension. Type these details in by hand.',
+  },
   {
     name: 'Bodo',
     endonym: 'बड़ो',
@@ -113,9 +127,21 @@ export const SCHEDULED_LANGUAGES: readonly ScheduledLanguage[] = [
     coverage: 'shared',
     note: 'Read with the Devanagari model.',
   },
-  { name: 'Gujarati', endonym: 'ગુજરાતી', scripts: ['Gujarati'], coverage: 'good' },
+  {
+    name: 'Gujarati',
+    endonym: 'ગુજરાતી',
+    scripts: ['Gujarati'],
+    coverage: 'none',
+    note: 'PaddleOCR has no light model for this script — only its vision-language model, far too large to ship in an extension. Type these details in by hand.',
+  },
   { name: 'Hindi', endonym: 'हिन्दी', scripts: ['Devanagari'], coverage: 'good' },
-  { name: 'Kannada', endonym: 'ಕನ್ನಡ', scripts: ['Kannada'], coverage: 'good' },
+  {
+    name: 'Kannada',
+    endonym: 'ಕನ್ನಡ',
+    scripts: ['Kannada'],
+    coverage: 'none',
+    note: 'PaddleOCR’s only Kannada model is its older generation, published as training weights only, and it read Karnataka cards worse than none. The English these cards also print is read; type the Kannada in by hand.',
+  },
   {
     name: 'Kashmiri',
     endonym: 'کٲشُر',
@@ -137,7 +163,13 @@ export const SCHEDULED_LANGUAGES: readonly ScheduledLanguage[] = [
     coverage: 'shared',
     note: 'Read with the Devanagari model.',
   },
-  { name: 'Malayalam', endonym: 'മലയാളം', scripts: ['Malayalam'], coverage: 'good' },
+  {
+    name: 'Malayalam',
+    endonym: 'മലയാളം',
+    scripts: ['Malayalam'],
+    coverage: 'none',
+    note: 'PaddleOCR has no light model for this script — only its vision-language model, far too large to ship in an extension. Type these details in by hand.',
+  },
   {
     name: 'Manipuri',
     endonym: 'ꯃꯤꯇꯩꯂꯣꯟ',
@@ -152,8 +184,20 @@ export const SCHEDULED_LANGUAGES: readonly ScheduledLanguage[] = [
     scripts: ['Devanagari'],
     coverage: 'good',
   },
-  { name: 'Odia', endonym: 'ଓଡ଼ିଆ', scripts: ['Odia'], coverage: 'good' },
-  { name: 'Punjabi', endonym: 'ਪੰਜਾਬੀ', scripts: ['Gurmukhi'], coverage: 'good' },
+  {
+    name: 'Odia',
+    endonym: 'ଓଡ଼ିଆ',
+    scripts: ['Odia'],
+    coverage: 'none',
+    note: 'PaddleOCR has no light model for this script — only its vision-language model, far too large to ship in an extension. Type these details in by hand.',
+  },
+  {
+    name: 'Punjabi',
+    endonym: 'ਪੰਜਾਬੀ',
+    scripts: ['Gurmukhi'],
+    coverage: 'none',
+    note: 'PaddleOCR has no light model for this script — only its vision-language model, far too large to ship in an extension. Type these details in by hand.',
+  },
   {
     name: 'Sanskrit',
     endonym: 'संस्कृतम्',
@@ -173,11 +217,17 @@ export const SCHEDULED_LANGUAGES: readonly ScheduledLanguage[] = [
     endonym: 'سنڌي',
     scripts: ['Arabic', 'Devanagari'],
     coverage: 'shared',
-    note: 'Read with the Urdu model, which is close but not exact.',
+    note: 'Read where it is written in Devanagari; not in the Perso-Arabic script.',
   },
   { name: 'Tamil', endonym: 'தமிழ்', scripts: ['Tamil'], coverage: 'good' },
   { name: 'Telugu', endonym: 'తెలుగు', scripts: ['Telugu'], coverage: 'good' },
-  { name: 'Urdu', endonym: 'اردو', scripts: ['Arabic'], coverage: 'good' },
+  {
+    name: 'Urdu',
+    endonym: 'اردو',
+    scripts: ['Arabic'],
+    coverage: 'none',
+    note: 'PaddleOCR’s Arabic-script model is not in this build, and Urdu’s Nastaliq is not the script it was trained on. Type these details in by hand.',
+  },
 ];
 
 export function scriptsForLanguage(name: string): IndicScript[] {
@@ -186,6 +236,91 @@ export function scriptsForLanguage(name: string): IndicScript[] {
 
 export function coverageOf(name: string): Coverage {
   return SCHEDULED_LANGUAGES.find((l) => l.name === name)?.coverage ?? 'none';
+}
+
+// ---------------------------------------------------------------------------
+// Whose documents
+// ---------------------------------------------------------------------------
+
+/**
+ * The script each state and union territory prints its documents in, besides
+ * English. Assam's Assamese and Manipur's older cards use the Bengali script;
+ * Jammu and Kashmir prints Urdu, and Hindi beside it.
+ */
+const STATE_SCRIPTS: ReadonlyArray<readonly [string, readonly IndicScript[]]> = [
+  ['andhra pradesh', ['Telugu']],
+  ['telangana', ['Telugu']],
+  ['tamil nadu', ['Tamil']],
+  ['puducherry', ['Tamil']],
+  ['pondicherry', ['Tamil']],
+  ['karnataka', ['Kannada']],
+  ['kerala', ['Malayalam']],
+  ['lakshadweep', ['Malayalam']],
+  ['west bengal', ['Bengali']],
+  ['tripura', ['Bengali']],
+  ['assam', ['Bengali']],
+  ['manipur', ['MeiteiMayek', 'Bengali']],
+  ['gujarat', ['Gujarati']],
+  ['dadra and nagar haveli and daman and diu', ['Gujarati']],
+  ['punjab', ['Gurmukhi']],
+  ['odisha', ['Odia']],
+  ['orissa', ['Odia']],
+  ['jammu and kashmir', ['Arabic', 'Devanagari']],
+  ['uttar pradesh', ['Devanagari']],
+  ['bihar', ['Devanagari']],
+  ['madhya pradesh', ['Devanagari']],
+  ['rajasthan', ['Devanagari']],
+  ['haryana', ['Devanagari']],
+  ['himachal pradesh', ['Devanagari']],
+  ['uttarakhand', ['Devanagari']],
+  ['jharkhand', ['Devanagari']],
+  ['chhattisgarh', ['Devanagari']],
+  ['delhi', ['Devanagari']],
+  ['chandigarh', ['Devanagari']],
+  ['maharashtra', ['Devanagari']],
+  ['goa', ['Devanagari']],
+  ['ladakh', ['Devanagari']],
+];
+
+const stateName = (text: string) =>
+  text.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z]+/g, ' ').trim().replace(/^(nct of |state of )/, '');
+
+/** The scripts a state's documents are printed in, besides English. */
+export function scriptsForState(state: string): IndicScript[] {
+  const name = stateName(state);
+  if (name === '') return [];
+  return [...(STATE_SCRIPTS.find(([known]) => known === name)?.[1] ?? [])];
+}
+
+/**
+ * The scripts to read a person's documents in, from the states they live in.
+ *
+ * Latin and Devanagari for everyone: a PAN card prints its labels in Hindi, as
+ * central documents do. Then each state's own script. Never a script for no
+ * reason: a recogniser reads a script that looks like its own as its own —
+ * measured, the Telugu model read a Karnataka card's Kannada as Telugu at 0.92 —
+ * so a person in Karnataka is never read in Telugu.
+ */
+export function readingScripts(states: readonly string[]): IndicScript[] {
+  const scripts: IndicScript[] = ['Latin', 'Devanagari'];
+  for (const state of states) {
+    for (const script of scriptsForState(state)) if (!scripts.includes(script)) scripts.push(script);
+  }
+  return scripts;
+}
+
+/**
+ * The script a question asks its answer to be written in, when it names a
+ * language — "Name in Hindi" is Devanagari, "Name in Kannada" Kannada — or
+ * `null` when it names none ("in your regional language" takes any).
+ */
+export function scriptAskedFor(question: string): IndicScript[] | null {
+  const words = question.toLowerCase();
+  if (/\bdevanagari\b/.test(words)) return ['Devanagari'];
+  for (const language of SCHEDULED_LANGUAGES) {
+    if (new RegExp(`\\b${language.name.toLowerCase()}\\b`).test(words)) return [...language.scripts];
+  }
+  return null;
 }
 
 /** Every script that has a model we can actually load. */

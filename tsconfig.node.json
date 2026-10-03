@@ -28,6 +28,7 @@
     "scripts/**/*",
     "tests/e2e/**/*.spec.ts",
     "tests/e2e/global-setup.ts",
+    "tests/e2e/side-panel.ts",
     "tests/e2e/harness/harness.d.ts"
   ]
 }

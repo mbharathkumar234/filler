@@ -275,6 +275,12 @@ export function FieldsPanel({ onFilled }: { onFilled?: (tabId: number) => void }
               {fill.skippedLowConfidence.length} field(s) left blank — not confident enough.
             </p>
           )}
+          {(fill.skippedOtherScript?.length ?? 0) > 0 && (
+            <p className="mt-0.5 text-slate-700">
+              {fill.skippedOtherScript!.length} name field(s) left blank — they ask for the name in a
+              language your vault does not hold it in.
+            </p>
+          )}
           {fill.blocked > 0 && (
             <p className="mt-0.5 text-red-700">
               Blocked {fill.blocked} submission attempt(s) during the run.

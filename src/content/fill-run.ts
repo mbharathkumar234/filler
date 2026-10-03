@@ -16,7 +16,8 @@
  *     exactly as it was, including fields the user had already filled.
  */
 
-import { fillElement, restore, snapshot, type FieldSnapshot, type FillOutcome, type FileValue } from './filler';
+import { fillField } from './fill-field';
+import { restore, snapshot, type FieldSnapshot, type FillOutcome, type FileValue } from './filler';
 
 /** §Phase 5: "a small randomised inter-field delay (60–200 ms)". */
 export const MIN_DELAY_MS = 60;
@@ -122,8 +123,10 @@ export function findDependentSelects(doc: Document): Set<string> {
 /**
  * Execute a fill plan.
  *
- * Never submits, never clicks anything. The only element this touches is a
- * field it was told to fill.
+ * Never submits, and never presses anything but a choice. The only element
+ * this touches is a field it was told to fill — and, for a Google Forms-style
+ * question, the option that answers it (`choice-widgets.ts` → `pressChoice`,
+ * which refuses buttons, links and anything that could send).
  */
 export async function runFill(
   writes: readonly PlannedWrite[],
@@ -168,13 +171,13 @@ export async function runFill(
       }
     }
 
-    let outcome: FillOutcome = fillElement(el, write.value);
+    let outcome: FillOutcome = await fillField(el, write.value, delay);
     let attempts = 1;
 
     // Retry exactly once. A second failure is a real problem, not a race.
     if (!outcome.ok) {
       await delay(interFieldDelay());
-      outcome = fillElement(el, write.value);
+      outcome = await fillField(el, write.value, delay);
       attempts = 2;
     }
 

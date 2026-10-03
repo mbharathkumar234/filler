@@ -48,6 +48,7 @@ import {
   type AddressSection,
 } from './frame';
 import rawSynonyms from './synonyms.json';
+import { isOtherOption } from './choose-option';
 
 export type { AddressSection } from './frame';
 
@@ -644,6 +645,41 @@ function sectionOpt(section: AddressSection | undefined): { section?: AddressSec
   return section === undefined ? {} : { section };
 }
 
+/** "Religion, if others", "If others, please specify", "Others (mention)". */
+const OTHER_BOX = /\bif (any )?others?\b|\bothers?\b.*\b(specify|mention|state)\b|^\W*(please )?(specify|mention)\W*$/i;
+
+/**
+ * Is this the box for the "Other" of the question just before it?
+ *
+ * "Religion: Hindu / Muslim / Christian / Others", then "Religion, if others".
+ * The box names the key as plainly as the question does, and matched it — so a
+ * Hindu applicant had "Hindu" typed into the box for other religions. It is
+ * the question's own: `fill-field.ts` writes it when the answer is "Other",
+ * and leaves it empty when it is not.
+ */
+function isOtherBoxOf(field: FieldDescriptor, before: FieldDescriptor | undefined): boolean {
+  if (!before || before.frameId !== field.frameId) return false;
+  if (field.tag !== 'input' && field.tag !== 'textarea') return false;
+  if (before.tag !== 'select' && before.tag !== 'radio-group') return false;
+  if (!(before.options ?? []).some((option) => isOtherOption(option))) return false;
+  return OTHER_BOX.test(field.labelText) || OTHER_BOX.test(field.placeholder ?? '');
+}
+
+/**
+ * Keys more than one question on a form may ask for, and keep.
+ *
+ * "Name in Hindi" and "Name in Kannada" both ask for the name in the
+ * applicant's own language. Re-matched as a duplicate, the second fell through
+ * to its next best key — the English name — and the English spelling was typed
+ * into the box for Kannada. Each keeps the key; which of them the vault's
+ * spelling answers is decided at the fill, by script (`fill-service.ts`).
+ */
+const SHARED_KEYS: ReadonlySet<FieldKey> = new Set([
+  'identity.full_name_local',
+  'family.father_name_local',
+  'family.mother_name_local',
+]);
+
 export function matchForm(fields: readonly FieldDescriptor[]): MatchResult[] {
   // Two passes over the address keys: the first finds which fields are in an
   // address block at all, the second re-matches them with the section that the
@@ -654,7 +690,12 @@ export function matchForm(fields: readonly FieldDescriptor[]): MatchResult[] {
   const first = fields.map((field, index) => ({
     field,
     index,
-    result: matchField(field, { ...sectionOpt(sections[index]) }),
+    result: isOtherBoxOf(field, fields[index - 1])
+      ? {
+          ...unknownFor(field.ref),
+          rationale: 'The box for "Other" in the question before it — written only when that question is answered "Other".',
+        }
+      : matchField(field, { ...sectionOpt(sections[index]) }),
   }));
 
   const order = [...first].sort((a, b) => b.result.confidence - a.result.confidence);
@@ -664,7 +705,9 @@ export function matchForm(fields: readonly FieldDescriptor[]): MatchResult[] {
   for (const { field, index, result } of order) {
     // Repeatable rows legitimately reuse a key across rows.
     if (result.key !== 'unknown' && !result.key.includes('[]') && taken.has(result.key)) {
-      const rematched = matchField(field, { taken, ...sectionOpt(sections[index]) });
+      const rematched = SHARED_KEYS.has(result.key)
+        ? unknownFor(field.ref)
+        : matchField(field, { taken, ...sectionOpt(sections[index]) });
 
       if (rematched.key !== 'unknown' && !taken.has(rematched.key)) {
         final.set(field.ref, rematched);

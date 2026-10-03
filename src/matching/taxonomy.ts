@@ -419,6 +419,50 @@ export const FIELD_KEYS = [
   'education.class_12.marks_computer_science',
   'education.class_12.marks_english',
   'education.class_12.marks_language',
+
+  /*
+   * Names as printed in the person's own script — Hindi, Marathi, Telugu,
+   * Tamil — which the reader now reads (`documents/ocr.ts`). Kept apart from
+   * the English spelling, never instead of it: an English form wants the name
+   * the person's English documents use, and a transliteration would be a guess
+   * at it. Central and state forms ask for these by name: "Name in Hindi",
+   * "Candidate's name in regional language".
+   */
+  'identity.full_name_local',
+  'family.father_name_local',
+  'family.mother_name_local',
+
+  /*
+   * Off a semester grade card (Stage 3, the table reader): the SGPA it prints,
+   * and how many courses on it are not yet cleared — what placement and
+   * scholarship forms ask as "SGPA" and "Number of backlogs". The card's own
+   * semester is not the current one, so it fills neither `semester` key.
+   */
+  'education[].sgpa',
+  'education[].backlogs',
+  'education.diploma.sgpa',
+  'education.diploma.backlogs',
+  'education.undergraduate.sgpa',
+  'education.undergraduate.backlogs',
+  'education.postgraduate.sgpa',
+  'education.postgraduate.backlogs',
+
+  /*
+   * When, and by whom, each claim's certificate was issued (Stage 4, the seal
+   * reader): what central EWS and OBC formats and state scholarship portals ask
+   * beside the certificate's number — "Date of issue", "Issuing authority". The
+   * authority is often printed only in the certificate's seal. A domicile
+   * certificate's number, which had no box, has one now.
+   */
+  'eligibility.caste_certificate_date',
+  'eligibility.caste_certificate_authority',
+  'eligibility.income_certificate_date',
+  'eligibility.income_certificate_authority',
+  'eligibility.domicile_certificate_number',
+  'eligibility.domicile_certificate_date',
+  'eligibility.domicile_certificate_authority',
+  'eligibility.article_371j_date',
+  'eligibility.article_371j_authority',
 ] as const;
 
 export type FieldKey = (typeof FIELD_KEYS)[number];
@@ -841,6 +885,26 @@ export const SENSITIVITY: Readonly<Record<FieldKey, Sensitivity>> = {
   'education.class_12.marks_computer_science': 'low',
   'education.class_12.marks_english': 'low',
   'education.class_12.marks_language': 'low',
+  'identity.full_name_local': 'low',
+  'family.father_name_local': 'low',
+  'family.mother_name_local': 'low',
+  'education[].sgpa': 'medium',
+  'education[].backlogs': 'medium',
+  'education.diploma.sgpa': 'medium',
+  'education.diploma.backlogs': 'medium',
+  'education.undergraduate.sgpa': 'medium',
+  'education.undergraduate.backlogs': 'medium',
+  'education.postgraduate.sgpa': 'medium',
+  'education.postgraduate.backlogs': 'medium',
+  'eligibility.caste_certificate_date': 'medium',
+  'eligibility.caste_certificate_authority': 'medium',
+  'eligibility.income_certificate_date': 'medium',
+  'eligibility.income_certificate_authority': 'medium',
+  'eligibility.domicile_certificate_number': 'medium',
+  'eligibility.domicile_certificate_date': 'medium',
+  'eligibility.domicile_certificate_authority': 'medium',
+  'eligibility.article_371j_date': 'medium',
+  'eligibility.article_371j_authority': 'medium',
 };
 
 /**

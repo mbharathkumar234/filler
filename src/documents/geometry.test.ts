@@ -155,6 +155,16 @@ describe('inspectQuality', () => {
     expect(inspectQuality(source, box).map((w) => w.code)).not.toContain('heavy-crop');
   });
 
+  it('says nothing about a source it could not measure, such as a PDF', () => {
+    // A PDF has no pixels until it is drawn, so its stored size is 0 x 0. Judged
+    // as a picture, every PDF was "being enlarged by Infinity%" — said, in the
+    // real panel, about an e-Aadhaar the moment it was saved. Its real size is
+    // settled when it is drawn, at whatever the portal asks.
+    const unmeasured = { width: 0, height: 0 };
+    const { constraint } = parseConstraint('JPEG, 3.5 cm × 4.5 cm, 20 KB to 50 KB');
+    expect(inspectQuality(unmeasured, planTargetBox(unmeasured, constraint))).toEqual([]);
+  });
+
   it('never produces a message containing a placeholder', () => {
     const source = { width: 50, height: 900 };
     const { constraint } = parseConstraint('JPEG, 3.5 cm × 4.5 cm, 200 dpi');

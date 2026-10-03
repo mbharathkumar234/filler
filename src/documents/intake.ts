@@ -31,6 +31,7 @@
 import type { DocumentMeta } from '@/shared/types';
 import type { FieldKey } from '@/matching/taxonomy';
 import type { ShapeReading } from './trim';
+import type { FitMode } from './geometry';
 import { READABLE_SOURCE_MIMES, unreadableFormatLabel } from './constraints';
 
 export type IntakeRole = 'photo' | 'signature' | 'thumb' | 'document';
@@ -161,6 +162,37 @@ export function roleFor(key: FieldKey): IntakeRole {
  */
 export function trimsToInk(role: IntakeRole): boolean {
   return role !== 'photo';
+}
+
+/**
+ * How a document is fitted to a shape a portal asks for.
+ *
+ * A photograph may be cropped — `undefined` leaves it to the requirement, and
+ * a fixed size centres the face and trims the edges, the lesser harm. Anything
+ * written on paper is padded instead: the account number sits at the edge of a
+ * passbook and the underline at the edge of a signature, and cropping to a
+ * shape cut them away.
+ */
+export function fitFor(role: IntakeRole): FitMode | undefined {
+  return role === 'photo' ? undefined : 'pad';
+}
+
+/**
+ * What each kind of document is previewed against before a portal's own
+ * requirement is pasted — the shape each kind is usually asked for in.
+ *
+ * There was one example for all of them, a passport photo's, and a bank
+ * passbook was cut down the middle to 3.5 x 4.5 cm to fit it.
+ */
+const EXAMPLE_REQUIREMENTS: Readonly<Record<IntakeRole, string>> = {
+  photo: 'JPEG, 20 KB to 50 KB, 3.5 cm × 4.5 cm',
+  signature: 'JPEG, 10 KB to 20 KB, 3.5 cm × 1.5 cm',
+  thumb: 'JPEG, 10 KB to 20 KB, 3.5 cm × 1.5 cm',
+  document: 'JPEG or PDF, up to 500 KB',
+};
+
+export function exampleRequirement(role: IntakeRole): string {
+  return EXAMPLE_REQUIREMENTS[role];
 }
 
 /**

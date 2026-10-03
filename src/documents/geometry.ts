@@ -139,7 +139,8 @@ function scaleOf(source: SourceImage, width: number, height: number): number {
 }
 
 export interface QualityWarning {
-  code: 'upscaled' | 'heavy-crop';
+  /** `first-page-only`: a PDF of several pages, copied as a picture, which holds one. */
+  code: 'upscaled' | 'heavy-crop' | 'first-page-only';
   message: string;
 }
 
@@ -152,6 +153,11 @@ export interface QualityWarning {
  */
 export function inspectQuality(source: SourceImage, box: TargetBox): QualityWarning[] {
   const warnings: QualityWarning[] = [];
+
+  // Nothing measured, nothing to judge. A PDF is 0 x 0 until it is drawn, at
+  // whatever size the portal asks; judged as a picture, every PDF was "being
+  // enlarged by Infinity%".
+  if (!(source.width > 0) || !(source.height > 0)) return warnings;
 
   if (box.scale > MIN_USEFUL_UPSCALE) {
     const percent = Math.round((box.scale - 1) * 100);

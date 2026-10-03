@@ -39,3 +39,43 @@ export function loadPdfJs(): Promise<PdfJs> {
   });
   return loading;
 }
+
+/**
+ * Where pdf.js finds the decoders for the images scanners write: `pdfjs/` in
+ * this package (`vite.config.ts` → `pdfjsDecoders`).
+ *
+ * A black-and-white scan is usually stored as CCITT fax or JBIG2, both decoded
+ * by `jbig2.wasm`; JPEG 2000 by `openjpeg.wasm`; embedded colour profiles by
+ * `qcms_bg.wasm`. Without them pdf.js draws such an image as nothing, and a
+ * scanned page reads as blank. Outside the extension — a test page — there is
+ * no package to point at, and pdf.js goes without.
+ */
+function decoderBase(): string | undefined {
+  try {
+    return typeof chrome !== 'undefined' && typeof chrome.runtime?.getURL === 'function'
+      ? chrome.runtime.getURL('pdfjs/')
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Open a PDF — with `password`, if it is locked — the one way every caller does. */
+export async function openPdf(
+  bytes: Uint8Array,
+  password?: string,
+): Promise<ReturnType<PdfJs['getDocument']>> {
+  const { getDocument, VerbosityLevel } = await loadPdfJs();
+  const wasmUrl = decoderBase();
+  return getDocument({
+    // A copy: pdf.js takes ownership of the buffer it is handed.
+    data: new Uint8Array(bytes),
+    // Errors only. pdf.js warns "Setting up fake worker." on every PDF — the
+    // in-thread worker this file sets up on purpose — and about every oddity of
+    // a scanner's file; Chrome listed each under the extension's Errors. A PDF
+    // that cannot be opened or drawn still throws, and the panel says so.
+    verbosity: VerbosityLevel.ERRORS,
+    ...(password === undefined ? {} : { password }),
+    ...(wasmUrl === undefined ? {} : { wasmUrl }),
+  });
+}

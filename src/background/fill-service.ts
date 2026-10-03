@@ -38,6 +38,8 @@ import { variantFor } from './document-service';
 import { __resetUploadsForTests, forgetUploads, uploadedKeys } from './upload-state';
 import { constraintForField, fileNameFor } from '@/documents/field-constraint';
 import { describeBytes, describeConstraint } from '@/documents/constraints';
+import { detectScripts, scriptAskedFor } from '@/documents/indic';
+import { dateAsAsked } from '@/matching/date-format';
 import { bytesToBase64 } from '@/shared/base64';
 
 /** A document on its way into the page. Base64: see `shared/base64.ts`. */
@@ -106,6 +108,11 @@ export interface FillReport {
   aborted: boolean;
   /** Fields matched but left blank because confidence was too low. */
   skippedLowConfidence: { key: string; confidence: number }[];
+  /**
+   * Fields asking for a name in a language whose script the vault's spelling
+   * is not in — "Name in Kannada", with the name kept in Hindi. Left blank.
+   */
+  skippedOtherScript?: { key: string }[];
   /** Every document the form asked for, attached or not, and why. */
   documents: DocumentOutcome[];
   /**
@@ -132,15 +139,26 @@ export function buildWrites(
   values: ReadonlyMap<string, string>,
   dependentSelects: ReadonlySet<string>,
   fieldSelectors: ReadonlyMap<string, string[]>,
+  /** Each field's own question, by ref: what says which language a name is asked in. */
+  questions: ReadonlyMap<string, string> = new Map(),
+  /**
+   * What each box shows of the format it wants, by ref — its placeholder and
+   * label — so a date goes in as "14/03/2024" where the box says DD/MM/YYYY.
+   * Empty for a native date picker, which takes a date as the vault keeps it.
+   */
+  formats: ReadonlyMap<string, string> = new Map(),
 ): {
   writes: WriteInstruction[];
   skipped: { key: string; confidence: number }[];
   /** Document fields: no vault value, a file — see `prepareDocuments`. */
   documents: { ref: string; key: FieldKey }[];
+  /** Names asked in a language whose script the vault's spelling is not in. */
+  otherScript: { key: string }[];
 } {
   const writes: WriteInstruction[] = [];
   const skipped: { key: string; confidence: number }[] = [];
   const documents: { ref: string; key: FieldKey }[] = [];
+  const otherScript: { key: string }[] = [];
 
   for (const match of matches) {
     if (match.key === 'unknown') continue;
@@ -159,6 +177,17 @@ export function buildWrites(
     const value = values.get(match.key);
     if (value === undefined || value === '') continue;
 
+    // A name in the applicant's own language answers "Name in Hindi" only if
+    // it is spelt in Devanagari, and "Name in Kannada" only if in Kannada. A
+    // question that names no language ("in your regional language") takes it.
+    if (LOCAL_NAME_KEYS.has(match.key)) {
+      const asked = scriptAskedFor(questions.get(match.fieldRef) ?? '');
+      if (asked !== null && !detectScripts(value).some((script) => asked.includes(script))) {
+        otherScript.push({ key: match.key });
+        continue;
+      }
+    }
+
     const selectors = fieldSelectors.get(match.fieldRef) ?? [];
     const dependent = selectors.some((selector) => {
       const id = selector.replace(/^#/, '').replace(/^\w+\[name="(.+)"\]$/, '$1');
@@ -168,13 +197,20 @@ export function buildWrites(
     writes.push({
       ref: match.fieldRef,
       key: match.key,
-      value,
+      value: dateAsAsked(value, formats.get(match.fieldRef) ?? ''),
       ...(dependent ? { dependent: true } : {}),
     });
   }
 
-  return { writes, skipped, documents };
+  return { writes, skipped, documents, otherScript };
 }
+
+/** Names kept as printed in the applicant's own script. */
+const LOCAL_NAME_KEYS: ReadonlySet<string> = new Set([
+  'identity.full_name_local',
+  'family.father_name_local',
+  'family.mother_name_local',
+]);
 
 // ---------------------------------------------------------------------------
 // Documents
@@ -580,12 +616,16 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
   const fieldSelectors = new Map(harvest.fields.map((field) => [field.ref, field.selectors]));
   const dependent = new Set(harvest.frames.flatMap((frame) => frame.dependentSelects));
 
-  const { writes: textWrites, skipped, documents: documentMatches } = buildWrites(
-    harvest.matches,
-    values,
-    dependent,
-    fieldSelectors,
+  const questions = new Map(harvest.fields.map((field) => [field.ref, field.labelText]));
+  const formats = new Map(
+    harvest.fields.map((field) => [field.ref, field.type === 'date' ? '' : `${field.placeholder ?? ''} ${field.labelText}`]),
   );
+  const {
+    writes: textWrites,
+    skipped,
+    documents: documentMatches,
+    otherScript,
+  } = buildWrites(harvest.matches, values, dependent, fieldSelectors, questions, formats);
 
   const alreadyUploaded = uploadedKeys(tabId);
   const slots = documentSlotsFor(harvest, documentMatches);
@@ -623,6 +663,7 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
         records: [],
         aborted: false,
         skippedLowConfidence: skipped,
+        ...(otherScript.length === 0 ? {} : { skippedOtherScript: otherScript }),
         documents,
         unrecognisedUploads: unrecognisedUploadsIn(harvest, documentMatches),
         blocked: 0,
@@ -689,6 +730,7 @@ export async function fillTab(tabId: number): Promise<Result<FillReport>> {
       records: response.data.records,
       aborted: response.data.aborted,
       skippedLowConfidence: skipped,
+      ...(otherScript.length === 0 ? {} : { skippedOtherScript: otherScript }),
       documents,
       unrecognisedUploads: unrecognisedUploadsIn(harvest, documentMatches),
       blocked: response.data.blocked,

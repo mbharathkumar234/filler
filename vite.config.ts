@@ -102,6 +102,33 @@ function ocrAssets() {
 }
 
 /**
+ * pdf.js's decoders for the images scanners write, copied into `pdfjs/`.
+ *
+ * A black-and-white scan is usually stored as CCITT fax or JBIG2, both decoded
+ * by `jbig2.wasm`; JPEG 2000 by `openjpeg.wasm`; embedded colour profiles by
+ * `qcms_bg.wasm`. pdf.js fetches them from the `wasmUrl` it is given
+ * (`documents/pdfjs.ts` → `openPdf`), and without them draws such an image as
+ * nothing: a scanned page read as blank. They are pdf.js's own files, from the
+ * same pinned package, so they are copied as they are — the JavaScript
+ * fallbacks beside them are not, since nothing here may load script that way.
+ */
+const PDFJS_DECODERS = ['jbig2.wasm', 'openjpeg.wasm', 'qcms_bg.wasm'] as const;
+
+function pdfjsDecoders() {
+  return {
+    name: 'autofill:pdfjs-decoders',
+    generateBundle(this: {
+      emitFile: (f: { type: 'asset'; fileName: string; source: Uint8Array | string }) => void;
+    }) {
+      for (const name of PDFJS_DECODERS) {
+        const path = fileURLToPath(new URL(`./node_modules/pdfjs-dist/wasm/${name}`, import.meta.url));
+        this.emitFile({ type: 'asset', fileName: `pdfjs/${name}`, source: readFileSync(path) });
+      }
+    },
+  };
+}
+
+/**
  * Make Vite's dynamic-import helper survive a service worker.
  *
  * `__vitePreload` ends with `window.dispatchEvent(e)` in its error handler. In
@@ -177,6 +204,7 @@ export default defineConfig({
     crx({ manifest }),
     practiceForm(),
     ocrAssets(),
+    pdfjsDecoders(),
     workerSafePreload(),
     buildContentScript(),
   ],

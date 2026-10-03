@@ -20,7 +20,7 @@
  * harvester promises not to leave, and could trip a portal's own validation.
  */
 
-import { fillElement } from './filler';
+import { fillField } from './fill-field';
 import { readValue } from './reverify';
 
 const HIGHLIGHT_ID = 'autofill-assistant-highlight';
@@ -110,8 +110,8 @@ export interface EditOutcome {
  * or an input mask can quietly keep something other than what was sent, and
  * the review must show what the field really holds.
  */
-export function applyEdit(el: Element, value: string): EditOutcome {
-  const outcome = fillElement(el, value);
+export async function applyEdit(el: Element, value: string): Promise<EditOutcome> {
+  const outcome = await fillField(el, value);
   const after = readValue(el);
 
   return {

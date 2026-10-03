@@ -6,9 +6,13 @@ import {
   coverageOf,
   detectScripts,
   normaliseDigits,
+  readingScripts,
+  scriptAskedFor,
   scriptsForLanguage,
+  scriptsForState,
   type IndicScript,
 } from './indic';
+import { READABLE_SCRIPTS } from './ocr';
 
 /**
  * Scripts, not languages (§ document extraction).
@@ -38,13 +42,37 @@ describe('the twenty-two, and what we can honestly do with each', () => {
     }
   });
 
-  it('says plainly which three we cannot read', () => {
-    // Ol Chiki and Meitei Mayek have no usable trained data, and Kashmiri's
-    // Perso-Arabic orthography is not the same as the Urdu model. Claiming
-    // otherwise would mean shipping a feature that returns empty and blames
-    // the user's photo.
+  it('says plainly which this build cannot read', () => {
+    // PaddleOCR has light recognisers for Devanagari, Telugu and Tamil and no
+    // others worth shipping; Ol Chiki and Meitei Mayek have no usable trained
+    // data anywhere. Claiming otherwise would mean shipping a feature that
+    // returns empty and blames the user's photo.
     const unreadable = SCHEDULED_LANGUAGES.filter((l) => l.coverage === 'none').map((l) => l.name);
-    expect(unreadable.sort()).toEqual(['Kashmiri', 'Manipuri', 'Santali']);
+    expect(unreadable.sort()).toEqual([
+      'Assamese',
+      'Bengali',
+      'Gujarati',
+      'Kannada',
+      'Kashmiri',
+      'Malayalam',
+      'Manipuri',
+      'Odia',
+      'Punjabi',
+      'Santali',
+      'Urdu',
+    ]);
+    for (const language of SCHEDULED_LANGUAGES.filter((l) => l.coverage === 'none')) {
+      expect(language.note, language.name).toBeTruthy();
+    }
+  });
+
+  it('claims to read a language only through a script this build ships a recogniser for', () => {
+    for (const language of SCHEDULED_LANGUAGES.filter((l) => l.coverage !== 'none')) {
+      expect(
+        language.scripts.some((script) => READABLE_SCRIPTS.includes(script)),
+        language.name,
+      ).toBe(true);
+    }
   });
 
   it('reads most of them through Devanagari', () => {
@@ -152,5 +180,73 @@ describe('working out which script a scan is in', () => {
     // One misrecognised glyph in a page of English must not switch the whole
     // document to another script and re-run OCR with the wrong model.
     expect(detectScripts(`${'Government of India '.repeat(20)}क`)).toEqual(['Latin']);
+  });
+});
+
+describe('which scripts a person’s documents can be in', () => {
+  /*
+   * Each recogniser for another script reads a box the English model could
+   * only guess at — and a script that looks like another is read as that one,
+   * confidently: measured in the real reader, the Telugu model read a Karnataka
+   * card's Kannada as Telugu at 0.83 and 0.92. Nonsense in the wrong alphabet,
+   * filed as a name. So a page is read only in the scripts its owner's
+   * documents can be in: Devanagari for everyone — a PAN card prints its labels
+   * in Hindi, as central documents do — and the script of the state they live
+   * in. With Devanagari alone, the same Kannada card read exactly as before.
+   */
+  it('reads English and Hindi for everyone', () => {
+    expect(readingScripts([])).toEqual(['Latin', 'Devanagari']);
+  });
+
+  it('adds the script of the state a person lives in', () => {
+    expect(readingScripts(['Telangana'])).toEqual(['Latin', 'Devanagari', 'Telugu']);
+    expect(readingScripts(['TAMIL NADU'])).toEqual(['Latin', 'Devanagari', 'Tamil']);
+    expect(readingScripts(['Andhra Pradesh', 'Puducherry', 'Andhra Pradesh'])).toEqual([
+      'Latin',
+      'Devanagari',
+      'Telugu',
+      'Tamil',
+    ]);
+  });
+
+  it('names Kannada for Karnataka — and so never Telugu, which would misread it', () => {
+    expect(scriptsForState('Karnataka')).toEqual(['Kannada']);
+    expect(readingScripts(['Karnataka'])).not.toContain('Telugu');
+  });
+
+  it('knows the states written in Devanagari, and adds nothing for them', () => {
+    for (const state of ['Uttar Pradesh', 'Maharashtra', 'Bihar', 'Goa', 'Delhi', 'Madhya Pradesh']) {
+      expect(scriptsForState(state), state).toEqual(['Devanagari']);
+    }
+    expect(readingScripts(['Maharashtra'])).toEqual(['Latin', 'Devanagari']);
+  });
+
+  it('reads the state however it was typed, and nothing for one it does not know', () => {
+    expect(scriptsForState('  andhra   pradesh ')).toEqual(['Telugu']);
+    expect(scriptsForState('Jammu & Kashmir')).toEqual(['Arabic', 'Devanagari']);
+    expect(scriptsForState('Atlantis')).toEqual([]);
+    expect(scriptsForState('')).toEqual([]);
+  });
+});
+
+describe('the script a question asks for', () => {
+  /*
+   * "Name in Hindi" and "Name in Kannada" are both answered from the name in
+   * the applicant's own language — but only one of them by a Hindi spelling.
+   * A question that names its language is filled only in that language's
+   * script; one that names none ("in your regional language") takes either.
+   */
+  it('names the script of the language a question names', () => {
+    expect(scriptAskedFor('Name in Hindi')).toEqual(['Devanagari']);
+    expect(scriptAskedFor('Candidate Name (in Marathi)')).toEqual(['Devanagari']);
+    expect(scriptAskedFor('Name in Devanagari script')).toEqual(['Devanagari']);
+    expect(scriptAskedFor('Name in Kannada')).toEqual(['Kannada']);
+    expect(scriptAskedFor("Father's Name in Telugu")).toEqual(['Telugu']);
+    expect(scriptAskedFor('பெயர் (in Tamil)')).toEqual(['Tamil']);
+  });
+
+  it('asks for no script in particular when the question names none', () => {
+    expect(scriptAskedFor('Name in Regional Language')).toBeNull();
+    expect(scriptAskedFor('Name in your mother tongue')).toBeNull();
   });
 });

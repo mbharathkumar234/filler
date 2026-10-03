@@ -260,7 +260,7 @@ happy-path only · 🔴 not implemented, or failing, or amber on a safety/privac
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
-| 10-1 | Strict CSP, no eval, no remote code | 🟢 | built `manifest.json` inspected; two `.wasm` files in `dist/` — Argon2id and ONNX Runtime (the document reader) — both bundled, neither fetched: `release-gates.test.ts` → "points the document reader at this package, never at a CDN"; `e2e/ocr.spec.ts` → "reads the words off a rendered page, under the extension’s CSP, with nothing fetched" |
+| 10-1 | Strict CSP, no eval, no remote code | 🟢 | built `manifest.json` inspected; the `.wasm` files in `dist/` — Argon2id, ONNX Runtime (the document reader) and pdf.js's three image decoders (`pdfjs/`, Phase 3) — all bundled, none fetched: `release-gates.test.ts` → "points the document reader at this package, never at a CDN"; `e2e/ocr.spec.ts` → "reads the words off a rendered page, under the extension’s CSP, with nothing fetched" |
 | 10-2 | `npm audit` + licence check | 🟢 | 0 vulnerabilities; ISC/MIT/Apache-2.0 only |
 | 10-3 | Isolation review | 🟡 | `docs/ISOLATION_REVIEW.md` — 9 claims each citing a test. It is a document, not a test. |
 | 10-4 | Message-bus schema validation | 🟢 | `validate.test.ts` (35 tests) → "refuses a type nobody declared"; "knows every privileged type" |
@@ -653,6 +653,12 @@ demonstrates the submit succeeding *first*, then blocks it.
 injection *call* on a user-granted page remains untested; what is tested is that
 the file it injects parses, runs, and wires itself. Closing the last step would
 need a driver that can operate browser chrome.
+
+> **Closed in Phase 3.** The DevTools protocol can press an extension's toolbar
+> button (`Extensions.triggerAction`, on the tab's own target), which grants
+> `activeTab` exactly as the user's click does. `e2e/panel.spec.ts` uses it to
+> run a real Scan and Fill from the real side panel — see "Phase 3, step 3:
+> filling a form from what the documents gave".
 
 ---
 
@@ -1428,9 +1434,8 @@ reads rendered text without the vault, and jsdom has no layout.
 
 ## Still open
 
-- **This is not yet a test that runs every time.** The driver proves the path
-  once, on this machine, with the user's documents. An e2e test could drive the
-  real side panel the same way with a drawn document; it does not exist yet.
+- ~~**This is not yet a test that runs every time.**~~ It is now:
+  `e2e/panel.spec.ts`, below (Phase 3, the permanent panel test).
 - Everything under Phase 2's "Still open", except the line this closes.
 
 # Phase 3, step 2: PDFs locked with a password — and PDFs at all
@@ -1495,9 +1500,512 @@ The built extension, its real side panel, a new vault, and two made-up PDFs
 
 ## Still open
 
-- **JPEG 2000 and JBIG2 images inside a PDF** are not drawn: pdf.js decodes them
-  with WebAssembly modules this package does not ship yet. Text and ordinary
-  images are unaffected.
-- **A scanned PDF is read from its first page only** — Phase 3, step 3.
+- ~~**JPEG 2000 and JBIG2 images inside a PDF** are not drawn~~ — closed in
+  step 3, below, and it was worse than written: CCITT fax, the usual way a
+  black-and-white scan is stored, needed the same missing decoder.
+- ~~**A scanned PDF is read from its first page only**~~ — closed in step 3, below.
 - **A PDF saved locked before this change** has no password with it; reading it
   says so and asks for it to be saved again.
+
+# Phase 3, step 3: every page of a scanned PDF
+
+A scanned PDF has no text layer — each page is a picture — and only its first
+page was ever read. A marks card's subjects on page 2 and its total on page 3
+were simply not there.
+
+## What happens now
+
+- **Every page is rendered and read in turn, up to five** (`MAX_PDF_PAGES` in
+  `documents/preprocess.ts`, shared with the text-layer reader). A PDF that goes
+  on is said to: "This PDF has 9 pages. The first 5 were read; the rest were
+  not." A blank page is read past.
+- **Each page is turned upright on its own** — a page fed into the scanner
+  sideways is turned, the others are left alone — and the user is told which:
+  "Page 2 was sideways, so it was turned upright before it was read."
+- **Each line carries its page and its turn** (`TextLine.page`, `.turns`), in
+  place of one turn for the whole document. They travel on the lines, so they
+  are kept or dropped exactly when the lines are — the boxes are only honest
+  when they are, line for line, the text.
+- **The pictures are cut page by page** (`documents/evidence-region.ts` →
+  `planCrops`): each page of the stored document drawn once, each piece carried
+  back onto its own page and stood upright as that page was.
+- **The screen says which page a value came from** — "Read from page 2: …" —
+  when more than one page was read.
+- **The offscreen page stays open for the whole reading** (`QueuedJobs.during`):
+  it used to be closed after every step and started afresh — models and all —
+  for the next, twice a page.
+
+## The pages that read as blank
+
+pdf.js decodes some images with WebAssembly it fetches from a `wasmUrl`, and
+none was given: **CCITT fax and JBIG2** (`jbig2.wasm`) — CCITT fax is how most
+black-and-white scans are stored — **JPEG 2000** (`openjpeg.wasm`) and colour
+profiles (`qcms_bg.wasm`). Such a page drew as plain white, and read as nothing.
+They are now copied from pdf.js's own package into `pdfjs/`
+(`vite.config.ts` → `pdfjsDecoders`), every PDF is opened through one function
+that points pdf.js at them (`documents/pdfjs.ts` → `openPdf`), and
+`verify-dist.mjs` fails a build without them. Their JavaScript fallbacks are
+not shipped.
+
+## Evidence
+
+A made-up three-page marks card (`fixtures/pdf/scanned-three-pages.pdf`, from
+`scripts/make-scanned-pdf-fixture.py`): page 1 colour JPEG, page 2 black-and-
+white **CCITT fax fed in sideways**, page 3 **JPEG 2000**, no text layer.
+
+| Claim | Proof |
+|-------|-------|
+| Every page is read, in order, with its page and turn on its lines; the reader is held open throughout; extra pages are counted and said; a blank page is read past | `ocr-reads.test.ts` → "a scanned PDF of several pages" (all failing first) |
+| Pieces are planned per page and carried back onto their own page | `evidence-region.test.ts` → "which piece of which page each value is cut from" |
+| "Read from page 2" | `ExtractedDetails.test.tsx` |
+| In the built extension, each of the three pages draws with ink and reads — page 2 turned back — and asking for a fourth page says there is none | `e2e/ocr.spec.ts` → "draws and reads every page of a scanned PDF…" — run first **without** `dist/pdfjs/`: "page 2 drew blank", ink 0 |
+| Through the real side panel, saved as a 2nd PUC card: 15 values in 9 s — name, register number, college, board, year from page 1; six subjects' marks from page 2; total, maximum and result from page 3 — each with its picture, the page-2 pieces cut from the sideways fax page and shown upright | driven by hand, as in step 1; pictures inspected |
+| Nothing else moved | the five real documents still 34 / 34 and the sideways letter 11 / 11; the locked-PDF flow unchanged; 2,866 unit and 127 browser tests pass |
+
+## Still open
+
+- ~~**A portal copy of a multi-page PDF that has to be re-made**~~ — closed:
+  "Copies of a PDF keep every page", below.
+- **A PDF with a text layer on some pages and scans on others** is read from its
+  text layer alone, when that layer is long enough to count as one.
+
+# Phase 3: the real side panel, pressed by every test run
+
+Pressing the panel by hand found four bugs no test could see, and then that no
+PDF had ever opened. Those were found once, on one machine, with the user's own
+documents. `e2e/panel.spec.ts` now presses it on every run, with made-up
+documents, against the built extension.
+
+**How.** The worker answers vault and document requests only from an extension
+page that is not in a tab, so the test needs the real side panel; Playwright
+does not attach to one. `tests/e2e/side-panel.ts` opens it with a real click
+and drives it over the DevTools protocol, and the same connection watches the
+network of every extension page and worker — the panel, the service worker, the
+offscreen page and the reader worker inside it, each new worker held at its
+first line until it is watched. The watch has to show it saw the reader fetch
+its model from the package, or the "nothing left" assertion fails rather than
+passing over an unwatched worker.
+
+| Test | What it would have caught |
+|------|---------------------------|
+| A new vault; a three-page scanned marks card saved and read: values from every page, a picture beside each, "Read from page 2", the warning said once | every PDF failing to open; pages after the first; the warning said twice |
+| Every value box shows its whole value at the panel's real width (under 500 px), every tick inside its row, nothing scrolls sideways | the 92-pixel value box |
+| Ticked values are saved, and nothing before | — |
+| Read is not pressable while a new copy is being saved over the old | reading the copy on its way out |
+| A locked PDF: asked for its password, nothing saved without it, a wrong one refused, the right one saved and never listed; read exactly, the Aadhaar number checksum-ticked | — |
+| No request left any extension page or worker; no error or warning in the panel | — |
+
+**Proved to catch what it is for.** Each of three step-1 fixes was undone in
+turn and the extension rebuilt: without the value box growing to fit, the
+layout test failed; with Read pressable during a save, the race test failed;
+with the warning said twice again, the first test failed. Each restored.
+
+133 browser tests pass.
+
+# Phase 3, step 3: filling a form from what the documents gave
+
+Until now the document work ended in the vault, and no test had ever run a real
+fill: injecting into a page needs `activeTab`, which only a toolbar click grants.
+
+**The toolbar click, from a test.** Chrome 151's DevTools protocol can press an
+extension's toolbar button — `Extensions.triggerAction`, given the *tab* target
+(listed only when asked for), with `--enable-unsafe-extension-debugging` on the
+test browser. It runs the extension's own click handler, so `activeTab` is
+granted by the same path a person's click takes. `tests/e2e/side-panel.ts` →
+`pressToolbarButton`.
+
+**The form.** `fixtures/entrance-portal/page-1.html`, made up: an entrance
+application that asks for the 2nd PUC register number, college and year, each
+subject's marks by name, the total and the maximum, and the Aadhaar card and
+marks card as PDF uploads. It is annotated, so it is in the matching record
+(A.2.1): **13 of 13 fields auto-filled correctly**, no confident mistakes, every
+other portal unchanged.
+
+**The test** (`e2e/panel.spec.ts`), after the vault has been filled by reading
+the made-up scanned marks card and the locked e-Aadhaar saved with its password:
+press the toolbar button on the portal, Scan, Fill, then read the form back.
+
+| Checked | Result |
+|---------|--------|
+| Name, register number, college, year | as read off page 1 of the scan |
+| Physics, Chemistry, Mathematics, Biology, English, each in its own box | as read off page 2 — the sideways fax page |
+| Total and maximum | as read off page 3 — the JPEG 2000 page |
+| The Aadhaar upload | a PDF under the box's 500 KB, **not locked**, and its picture has ink — made fresh from the locked original with the password the vault keeps |
+| The marks card upload | the PDF as saved, under 2 MB |
+| Submitted | never: the page is where it was, for the person to review |
+
+## What it found
+
+| Found | Fixed | Proof |
+|-------|-------|-------|
+| "Register Number" — the words Karnataka's SSLC and PUC cards print, and an entrance form uses — matched nothing; the dictionary knew only "registration number" | `register number`, `register no` added for the registration number | `deterministic.test.ts` → "a Karnataka register number", failing first; it takes the level its label or heading names, and leaves "Registered Mobile Number" and "CET Registration Number" alone |
+| Every PDF, the moment it was saved, was said to be "being enlarged by Infinity%": a PDF's size is 0 x 0 until it is drawn, and the quality check judged it as a picture | No quality verdict on a source with no measured size (`geometry.ts` → `inspectQuality`) | `geometry.test.ts`, failing first; the panel test's no-alert check |
+
+2,874 unit tests and 134 browser tests pass.
+
+## Still open
+
+- **The review screen is not exercised** by this test — the fill is checked on
+  the page itself. The review screen's own tests are unchanged.
+- **Real portals.** This is a made-up form shaped like the real ones; filling a
+  real portal is still a person's job, as P1 means it to be, and the real-portal
+  smoke test (10-12) is still not done.
+
+# The passbook preview that cut a passbook down the middle
+
+Reported by the user, with a screenshot of their own bank passbook: "Preview for
+this portal" showed a 276 x 354 picture, 64 pixels tall, of a strip from the
+middle of the page.
+
+**Why.** The Documents section has one "Portal requirement" box, and it started
+out holding a passport photo's: "JPEG, 20 KB to 50 KB, 3.5 cm x 4.5 cm". Every
+document was previewed against it. A fixed physical size means the copy is made
+to that shape, and anything but a signature was made to it by cropping — so the
+passbook was cut to a passport photo. A plainer page could not even be made
+that small and big at once, and the panel waited with nothing to show. And the
+copy, once made, was cached under the same key a corrected one would use.
+
+| Fixed | Where | Proof |
+|-------|-------|-------|
+| Each kind of document is previewed against an example for its kind until a portal's own requirement is pasted — a document "JPEG or PDF, up to 500 KB", a photo a passport photo, a signature a signature strip — and the preview says it is an example | `intake.ts` → `exampleRequirement`; `DocumentsPanel.tsx` | `intake.test.ts`, `DocumentsPanel.test.tsx` → "previewing a document for a portal", failing first |
+| A document, a signature or a thumb impression asked for at a shape is padded to it, never cut; only a photograph may be cropped | `intake.ts` → `fitFor`; `document-service.ts` → `variantFor` | `intake.test.ts`; driven in the panel with the passport-photo requirement pasted on purpose: a whole landscape page, letterboxed, where it used to be a strip |
+| The preview is shown across the panel for a document, with "Open it at full size" | `DocumentsPanel.tsx` | `DocumentsPanel.test.tsx`; `e2e/panel.spec.ts` |
+| A copy made the old way is never served again: copies are keyed by how they were made (`VARIANT_RECIPE`), and the old ones go with their document | `vault/document-store.ts` → `variantId` | `document-store.test.ts` → "never serves a copy made the way copies used to be made" |
+
+`e2e/panel.spec.ts` → "previews a bank passbook whole…" saves a made-up passbook
+(`fixtures/images/passbook.jpg`) and measures the preview: the whole 1600 x 1000
+page, across the panel, called an example. With the passport-photo example put
+back for documents it fails.
+
+On the way, a raw NUL character was found inside the cache-key template in
+`document-store.ts` — a `\0` mangled into the byte itself at some point. It
+behaved the same, and made `grep` treat the file as binary; it is now written
+`\u0000`, and the keys of existing copies are unchanged.
+
+2,884 unit tests and 135 browser tests pass.
+
+# Copies of a PDF keep every page
+
+When a PDF has to be remade for a portal — it is locked, too big for the box,
+or the box names pixel limits — the copy was made from its first page alone,
+and nothing said so. A scanned marks card's subjects and total, on pages 2 and
+3, never reached the portal.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| Remade as a PDF, every page goes in, in order, each page fitted to the requirement on its own; one JPEG quality is searched for the whole document, so the whole of it — not each page — lands inside the limit | `derive.ts` → `deriveEveryPage`; `pdf-wrap.ts` → `jpegPagesInPdf`, `pdfWrapperBytes` | `derive.test.ts` → "a PDF of several pages"; `pdf-wrap.test.ts` → "a PDF of several pages" (every cross-reference entry checked, the wrapper's size held to its bounds for 1–10 pages) |
+| Where the box wants a picture, which holds one page, the copy is page 1 **and says so**: "This PDF has 3 pages, and a JPEG holds one…" | `derive.ts` | `derive.test.ts` |
+| A PDF of more than ten pages is refused, never sent in part | `MAX_COPY_PAGES` | `derive.test.ts` |
+| The preview says how many pages a copy has | `DocumentsPanel.tsx` | `DocumentsPanel.test.tsx` |
+
+In the real panel (`e2e/panel.spec.ts` → "remakes a scanned PDF of three pages
+as three pages…"): the made-up three-page scan, previewed against "PDF only, up
+to 1 MB, maximum 1000 x 1500 pixels" — which no PDF passes as it is — comes back
+a PDF of three pages under 1 MB, unlocked, with ink on every page, the fax page
+and the JPEG 2000 page included. With copies made from page 1 again, it fails
+("expected 3, received 1").
+
+2,896 unit tests and 136 browser tests pass.
+
+# Choosing options
+
+A Google Form's dropdowns and multiple-choice questions were never filled: they
+are divs with a role, not `<select>` or radio buttons, and the harvester did not
+see them. Native dropdowns took a value only when an option said it nearly
+letter for letter, so "Computer Science and Engineering" never became
+"Computer Science / IT", "GM" never "General", ₹30,000 never "Below 1 Lakh", and
+"Other" with its box was never used.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| Which option a value means, in tested steps: same words; same meaning (gender, yes/no, marital status, category, blood group, months, CBSE/ICSE/state boards, renamed cities, initials such as VTU); the band a number falls in (₹, commas, lakh, crore, %); a course's family ("Political Science" is arts, "Computer Science" never science); shared words; then "Other" with the value as its answer. Inferences say `sure: false` and the review flags them; no fit and no "Other" chooses nothing | `matching/choose-option.ts` | `choose-option.test.ts` (32, including the user's screenshot's options and the answers it must never give) |
+| Google Forms-style questions found as one field each, options counted once, their "Other response" box not taken for a question | `content/harvester.ts`, `content/choice-widgets.ts` | `choice-widgets.test.ts`, fixture snapshots |
+| Answered by pressing the option as a person does — opening a dropdown first — and read back from what the page shows chosen | `choice-widgets.ts` → `fillChoiceWidget`, `reverify.ts` | `choice-widgets.test.ts`, driven against the fixture's own script |
+| The press refuses buttons, links, anything inside one, anything submit-ish, a label that would pass it on; Space and Escape only, never Enter | `pressChoice`, `mayPress` | `choice-widgets.test.ts` → "refuses …" (each dispatches nothing) |
+| Native dropdowns and radios use the same chooser; a native "Other" writes its "please specify" box, waiting for it to appear, and never types into the next question's box | `content/filler.ts`, `content/fill-field.ts` | `choice-widgets.test.ts` |
+| A "Religion, if others" box is the question's own, not a second religion field — before this, a Hindu applicant got "Hindu" typed into it | `deterministic.ts` → `isOtherBoxOf` | `deterministic.test.ts` |
+| A native radio group is named by its fieldset's question ("Gender"), not its first option ("Male") | `harvester.ts` → `groupLegend` | fixture snapshots (ugly-portal's gender group changed exactly so) |
+| An income asked in bands and a year chosen from a list can be matched at all — the veto that keeps an Aadhaar number off a dropdown kept these off too | `traits.ts` → `listed` | `deterministic.test.ts` → "a number a form offers as a list" |
+| "Field of study" and "major subject" are the branch; bare "major" is not ("Are you a major?") | `synonyms.json` | `deterministic.test.ts` |
+
+In the real panel (`e2e/panel.spec.ts` → "answers a Google Forms-style survey…"):
+made-up answers in the vault, the toolbar button, Scan, Fill. The page records
+Female, Computer Science / IT, OBC, Below ₹1,00,000, State Board, and "Other:"
+with Tumkur University in its box; both dropdowns are left closed; Submit and
+Clear form are never pressed; the network check after it still finds nothing
+sent. With the harvester's old selector the same test fails with every answer
+blank — what the user saw.
+
+**Not yet:** tried on a live Google Form (the fixture copies its structure as
+known, not a capture of it); checkboxes ("choose all that apply") and grids are
+not answered; Undo does not put back a Google-style choice or a typed "Other"
+answer; autocomplete boxes (select2-style typing) are not handled.
+
+2,971 unit tests and 137 browser tests pass.
+
+# The extension's Errors list
+
+`chrome://extensions` showed a screenful of "errors" from `src/offscreen/ocr.html`
+after every reading: ONNX Runtime announcing each unused constant in the
+reader's converted models ("Removing initializer 'p2o.pd_op.full.0.0'. It is
+not used by any node…"), written to the console as errors. Nothing had failed.
+Setting `env.logLevel` had been meant to stop it, but each session and each
+run has a level of its own that defaults to warnings, so it never did. pdf.js
+added a warning of its own on every PDF: "Setting up fake worker.", the
+in-thread worker `pdfjs.ts` sets up on purpose.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| Errors only, from every reader session and every run; a real failure still throws and the reading says so | `offscreen/reader-worker.ts` → `logSeverityLevel` | `e2e/panel.spec.ts` |
+| pdf.js at errors only; a PDF that cannot be opened or drawn still throws | `documents/pdfjs.ts` → `verbosity` | `e2e/panel.spec.ts` |
+| Every extension page and worker — offscreen page, the reader and its threads, service worker, panel — watched for console errors, warnings and exceptions, as the Errors list collects them | `e2e/side-panel.ts` → `logged` | `e2e/panel.spec.ts` → "logs no error or warning on any extension page or worker": before the fix, 62 ONNX Runtime lines from the reader worker and 15 pdf.js warnings from the offscreen page; after it, none |
+
+2,971 unit tests and 138 browser tests pass.
+
+# PaddleOCR, used on the device: the plan
+
+The user asked for every feature of PaddleOCR 3.7 (`Downloads/PaddleOCR-main`)
+that can make this a far bigger product without a document ever leaving the
+device. What fits, in the order it is being done:
+
+| Stage | PaddleOCR feature | For the user | Package |
+|-------|-------------------|--------------|---------|
+| **1 — done** | Devanagari, Telugu, Tamil recognisers (PP-OCRv5) | Hindi, Marathi, Telugu, Tamil certificates read; "Name in Hindi" answered | +23.7 MB |
+| **2 — done** | Document preprocessing: UVDoc unwarping, text-line orientation | A built-in scanner: phone photos of curled pages flattened and cropped | +32.7 MB |
+| **3 — done** | Table recognition: SLANet_plus | Courses, their total, SGPA/CGPA and backlogs from semester grade cards; subject tables from marks cards | +7.8 MB |
+| **4 — done** | Seal text recognition: the ring unrolled and read by the shipped models (PaddleOCR's seal detector has no ONNX build; layout models are 130 MB and up, not shipped) | A certificate's issuing authority from its seal; every certificate's date of issue and issuer | +0 MB |
+| **5 — done** | Measured: PP-OCRv6, WebGPU, int8. Shipped: none of the three — each lost accuracy or made the usual read slower. Recognition's padding halved instead | Grade cards and other tables read about a fifth faster | ±0 MB |
+
+What does not fit, and why — each a decision, not an oversight:
+
+- **Cloud and server parts** — `api_sdk`, `mcp_server`, `langchain-paddleocr`,
+  `skills`, hub/pd serving, Docker: each sends the document to a server.
+- **PP-ChatOCRv4 and PP-DocTranslation** need a large language model behind an
+  API — a server chatbot, which the user ruled out.
+- **PaddleOCR-VL (0.9B), PP-DocBee (2–7B), HPD-Parsing**: 1–15 GB, far too large
+  to ship in an extension or run on a laptop's CPU in a browser. The only route
+  to Bengali, Gujarati, Punjabi, Odia and Malayalam today.
+- **Server-size models** (PP-OCRv5_server 101 + 81 MB, PP-DocLayout-L 124 MB,
+  SLANeXt 351 MB, RT-DETR 124–470 MB): the mobile and small tiers instead.
+- **KIE (SER/RE, VI-LayoutXLM)**: licensed CC BY-NC-SA — non-commercial — so it
+  cannot ship in a paid product. The rule-based extractors are this product's KIE.
+- **Kannada**: PaddleOCR's only Kannada model is the older generation, published
+  as training weights only (no ONNX archive), and it read the user's own cards
+  worse than none (Phase 0). Re-evaluate when a PP-OCRv5 Kannada model appears.
+- **Formula and chart recognition**: nothing on an Indian application needs it.
+- **Training, PPOCRLabel, data synthesis, slim/quantisation**: tools for us, not
+  features — fine-tuning on made-up Indian documents is a later workstream.
+
+And "SaaS": a server holding customer documents is the opposite of this
+product's promise. What can be sold without one — a licence checked offline, a
+library of portal profiles shipped with releases — is a business decision, not a
+PaddleOCR feature. Two "SaaS" ideas are ruled out outright: filling forms for
+many people (P6) and unattended runs (P1).
+
+# Stage 1: Hindi, Telugu and Tamil
+
+PaddleOCR's light recognisers for Devanagari (Hindi, Marathi, Sanskrit, Nepali,
+Konkani, Maithili, Bodo, Dogri), Telugu and Tamil — 7.5 MB each, the same shape
+as the English model, so the reading loop reads with any of them.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| The English model reads every box; one it was guessing at — a low mean, one weak character, too few characters for the box's width, or a stretch read as nothing — is read again by the other recognisers, and the best reading in its own script, sure throughout and clearly better, wins | `paddle-reader.ts` → `isDoubtful`, `chooseReading`; `paddle.ts` → `decodeCtc` (`weakest`, `gap`) | `paddle-reader.test.ts`, `paddle.test.ts`; every threshold measured in the real reader |
+| The other recognisers load the first time a page needs one — a page of English never loads them | `reader-worker.ts` → `othersReady` | `e2e/ocr.spec.ts` → "reads a page of English without loading any other script's model" |
+| A page is read only in the scripts its owner's documents can be in: English and Hindi for everyone, then the state's. Measured, the Telugu model reads Kannada as confident Telugu (0.92) — so a person in Karnataka is never read in Telugu, and with Devanagari alone a Kannada card reads exactly as before | `indic.ts` → `readingScripts`, `scriptsForState`; `document-service.ts` → `ownersScripts`; `ocr:recognise` → `scripts` (validated) | `indic.test.ts`, `validate-adversarial.test.ts`, `ocr-reads.test.ts`, `e2e/ocr.spec.ts` → "never reads a Karnataka card's Kannada as Hindi…" |
+| A number the other readings agree on outvotes the chosen reading's: the Tamil model dropped the 6 of 60000, the English and Devanagari models read it | `paddle-reader.ts` → `agreedNumber` | `paddle-reader.test.ts`, `e2e/ocr.spec.ts` |
+| Hindi, Telugu and Tamil labels become English, the reader's usual misreadings included ("తం(డి", "तिथ"); values stay as printed | `bilingual.ts` | `bilingual.test.ts` |
+| A name printed only in an Indian script is the name *in your language* — never the English name; a card printing both gives both | `taxonomy.ts` (`identity.full_name_local`, `family.father_name_local`, `family.mother_name_local`), `extract.ts` → `nameKeyFor` | `extract.test.ts` |
+| "Name in Hindi", "Name in Regional Language", "Father's Name in Hindi" find those keys; "Name in English" the English name; two language questions on one form each keep theirs | `synonyms.json`, `frame.ts`, `deterministic.ts` → `SHARED_KEYS` | `deterministic.test.ts`, `indic-portal.test.ts` (the fixture page, as harvested) |
+| A question naming a language is filled only in its script: the Hindi spelling answers "Name in Hindi", and "Name in Kannada" is left blank, said so in the panel | `fill-service.ts` → `buildWrites`; `indic.ts` → `scriptAskedFor` | `fill-service.test.ts` |
+| The coverage table says what this build reads, tied to the shipped recognisers | `indic.ts` → `SCHEDULED_LANGUAGES` | `indic.test.ts` |
+
+In the real panel (`e2e/panel.spec.ts` → "reads a certificate printed in
+Hindi…"): a made-up Hindi income certificate, rendered by the browser, saved and
+read through the panel's own buttons — 48000, सीमा वर्मा and राजेश वर्मा as the
+names in Hindi, no English name invented — then a form filled: the English name
+in English, the Hindi names in Hindi, "Name in Kannada" blank, nothing
+submitted, nothing sent, nothing logged as an error.
+
+**Not yet:** Kannada (no usable model); Bengali, Gujarati, Punjabi, Odia,
+Malayalam (none light enough); text under a seal or watermark (measured: a
+watermark across a line loses it); transliteration between scripts — never
+guessed, by design.
+
+3,017 unit tests and 143 browser tests pass. The package is 67 MB, of which
+the six models are 43 MB.
+
+# Stage 2: a phone photo made a scan
+
+PaddleOCR's document preprocessing: UVDoc, which flattens a page photographed
+curled or at an angle, and the text-line orientation classifier
+(PP-LCNet_x0_25_textline_ori), which says which lines are upside down.
+
+Measured first. A made-up marks card, photographed curled on a table: every word
+read correctly as photographed, but the rows no longer lined up, and pairing by
+row gave Mathematics 87, Science 93, Social Science 89 — each the next subject's
+mark — and Total 84. Flattened, every row was back in line. On a page already
+flat, UVDoc does harm: it takes the margins for background, stretches the page
+into the frame and cuts a letter off the edge. So it runs only on a photo with
+something other than the page around it.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| A photo with a table around the page — judged by the frame's edges against the page's own colour, shadow included, so a lavender passbook or a cream certificate is paper — is flattened before it is read; a scan, a PDF page, a photo the page fills, never is | `scan.ts` → `hasBackground`; `paddle-reader.ts` → `flattenPage` | `scan.test.ts`, `paddle-reader.test.ts`; `e2e/ocr.spec.ts` → "flattens a photo of a curled page…" (rows within 15 px of their marks; the flat card and the passbook untouched) |
+| What UVDoc leaves of the table is trimmed — told the table's colour by the photo it came from, so a band along one side goes too, and a page's own top rule never does | `scan.ts` → `backgroundColour`, `trimBackground` | `scan.test.ts` |
+| The flattened page goes back with the reading; its lines carry no turns, and the picture beside each value is cut from it | `ocr:recognise` → `flattened`; `read-document.ts` → `PageImage`; `document-service.ts` → `evidenceCrops` | `ocr-reads.test.ts`; `e2e/panel.spec.ts` (every value with its picture) |
+| A line still arched after flattening — the card's title — is found by its own pixels when its rectangle is mostly paper (PaddleOCR's "slow" box score, after its "fast" one) | `paddle.ts` → `findTextBoxes` | `paddle.test.ts` |
+| A line the classifier calls upside down (≥ 0.9) is read both ways and kept turned only if that reads well (≥ 0.8) and clearly better; a Hindi line, which the classifier can take for upside down, is never turned for a better guess | `paddle-reader.ts` → `upsideDown`, `turnOver` | `paddle-reader.test.ts`; `e2e/ocr.spec.ts` → "reads a line printed upside down…" (without the classifier: "SSS") |
+| "Make a clean scan" on a photographed document or signature — not a face photo, not a PDF: upright, flattened if photographed on something, the light evened out by a smooth surface fitted to the paper alone (a passport photo on a card is not bleached), staged as if chosen; only the user's Save replaces the stored photo | `doc:scan` → `ocr:scan` (validated, privileged); `scan.ts` → `evenLighting`; `DocumentsPanel.tsx` | `DocumentsPanel.test.tsx`, `validate-adversarial.test.ts`; `e2e/panel.spec.ts` → "makes a clean scan…" |
+
+In the real panel (`e2e/panel.spec.ts`): the curled photo saved as a Class 10
+marks card reads English 87, Mathematics 93, Science 89, Social Science 84, the
+register number and the date of birth, each with its picture, and says it was
+flattened; with flattening switched off the same test fails with Mathematics 87,
+Science 93, Social Science 89. Made a clean scan, it is shown, stored only on
+Save — smaller, the table gone — and reads the same with nothing left to
+flatten. About 2 seconds a photo to flatten in the browser, 3 the first time.
+
+3,050 unit tests and 147 browser tests pass. The package is 99 MB, of which the
+eight models are 76 MB.
+
+# Stage 3: a grade card's table, cell by cell
+
+PaddleOCR's table structure model, SLANet_plus (7.8 MB): shown a picture of a
+table, it answers with the table's rows and cells — which cells span columns —
+and where each cell is. The reader's own text fills the cells.
+
+Measured first. A made-up semester grade card
+(`scripts/make-grade-card-fixtures.mjs`), ruled and open, read as lines: each
+course row starts with a course code ("21MAT31"), which the subject rules did
+not take for a subject; the first title wraps onto a line of its own; nothing
+says which figure is the total. All the card gave the vault was its result —
+and "of the Student ARJUN MEHTA" as the name, "Seat Number 1SA21CS042" as the
+university. Shown the table, SLANet_plus gives 8 rows of 7 cells on both
+cards. PaddleOCR finds a table with a layout model first; none of the small
+ones (PP-DocLayout-S, the PicoDet layouts) is published as ONNX, so the table
+is found from the text already read. PaddleOCR's table classifier only chooses
+between SLANet_plus and SLANeXt (351 MB), so it is not shipped.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| Where a table is, from the text already read: three rows or more of three pieces across, each within a line of the one above; one row with less — a wrapped title — may sit between, and a gap or a heading ends the table. A page with none never loads the model | `table.ts` → `tableRegions`; `paddle-reader.ts` → `readTables` | `table.test.ts`, `paddle-reader.test.ts`; `e2e/ocr.spec.ts` → "reads a grade card's courses…" (none on a certificate or the passbook) |
+| The model is shown the table out to its ruled border, which the text stops short of: cut at the text, it merged the header with the first row | `table.ts` → `widenToRules` | `table.test.ts` |
+| Its picture and its answer, as PaddleOCR prepares and reads them: the longer side to 488, blue-green-red, zero padding; tokens up to the first end, cells put back on the page | `table.ts` → `tableInput`, `decodeStructure`; `paddle.ts` → `modelConfigFrom` (`TableLabelDecode`) | `table.test.ts` |
+| Each piece of text goes to the cell it lies in, the cells given their column's and row's median edges: SLANet drew one header cell 54 px too wide and, taken at its word, cut "Course Title" in two. A piece run across narrow columns ("45 52") is shared out word by word | `table.ts` → `fillTable`, `edges` | `table.test.ts` (that header, as drawn) |
+| The tables travel with the reading, page by page, to the rules | `ocr:recognise` → `tables`; `ocr-host.ts`; `read-document.ts` → `DocumentText.tables`; `extract.ts` → `ReadLayout` | `ocr-reads.test.ts`, `read-document.test.ts` |
+| A table of courses is read by its header — title, total or marks obtained, maximum, grade, result ("Course Code" is not a title, "Grade Points" not a grade): the course list, joined with semicolons when a title holds a comma; the total, added up; each school subject's own marks; and the backlogs — failed or absent courses, counted only when every grade or result was read ("A" is a grade in a Grade column and Absent in a Result column). A table that lost a course's title is refused rather than counted short | `extract-education.ts` → `coursesIn` | `extract-education.test.ts` |
+| Off the lines: the name after "Name of the Student"; the USN as the registration number; the university from its heading, never from "University Seat Number"; SGPA and CGPA beside their labels or under them | `extract.ts` → `NAME_LABEL`; `extract-education.ts` → `REGISTER_LABEL`, `BOARD_LABEL`, `NUMBER_LABEL_WORDS`, `gradePoint` | `extract-education.test.ts` |
+| A form's "SGPA", "Number of backlogs" and "USN" find what a grade card gave; "CGPA" stays CGPA | `taxonomy.ts` (`education[].sgpa`, `education[].backlogs`, appended), `synonyms.json`, `traits.ts` | `deterministic.test.ts` → "what a grade card answers on a form"; `placement-portal.test.ts` (the fixture page, as harvested — without the new words, "SGPA of previous semester" took the current semester) |
+
+In the real panel (`e2e/panel.spec.ts` → "reads a semester grade card's
+table…"): the ruled card saved as a Semester marks card reads ARJUN MEHTA,
+1SA21CS042, the university, SGPA 8.45, CGPA 8.21, PASS, the seven courses with
+the wrapped title whole, 659 and no backlogs — nothing ticked for the user, and
+the card's own semester left alone. With the table step switched off in the
+worker, both browser tests fail: no table, no course list. The school marks
+cards give their subject table too — the curled photo once flattened.
+
+**Not yet:** a PDF's text layer carries no tables, so a digital grade card's
+courses are read as lines, as before; a table whose rows the reader saw as one
+run of text each, with no gap between columns, is not found; a degree's
+per-course marks have no keys — the list, the total and the backlogs are what is
+saved; credits are read and not used.
+
+3,095 unit tests and 149 browser tests pass. The package is 111 MB, of which the
+nine models are 84 MB.
+
+# Stage 4: the seal on a certificate
+
+Central EWS and OBC formats end "Signature with seal of Office": the issuing
+officer's designation is stamped, not printed, and forms ask for it — "Issuing
+Authority" — beside the certificate's number and its date of issue. The vault
+had no box for either.
+
+Measured first, on a made-up caste certificate whose authority is printed only
+in a round violet seal stamped at an angle over the signature
+(`scripts/make-seal-fixtures.mjs`). Read as the page is, the top arc came back
+"TAHSILDAR" and the bottom one "SAMMPLEPURAT"; the printed line the seal
+crosses came back "Sit E". PaddleOCR reads seals with a curved-text detector,
+PP-OCRv4_seal_det — published as Paddle weights only, not ONNX, on its model
+host and on Hugging Face — so it cannot run here. What its pipeline does with
+what it finds, straightening a curved line before reading it, is done here for
+the shape a seal has: its ring is unrolled into two straight strips and read by
+the models already shipped. Unrolled, the bottom arc read "SAMPLEPURA TA";
+with only the seal's own ink kept, both arcs read whole at 1.00. The package
+does not grow.
+
+Layout detection, which Stage 4 was to add, is not shipped: every PaddleOCR
+layout model published as ONNX (PP-DocLayout_plus-L, PP-DocBlockLayout,
+PP-DocLayoutV2/V3) is 130 MB or more, more than all nine models together, and
+the small ones (PP-DocLayout-S/M, the PicoDet layouts) are not published as
+ONNX. Tables are already found from the text (Stage 3). "The photo found on a
+card" went with it.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| A round seal is found by its ring of coloured ink: three points at a time agreeing on a circle, the circle most a ring winning — a thin line, paper beyond it, standing out from both sides, so a photo on a card (ink everywhere) is not one — and the outer of two rings taken | `seal.ts` → `findSeals`, `inkMask` | `seal.test.ts`; `e2e/ocr.spec.ts` → "reads a round seal straightened…" (no seal on the passbook, the curled photo, a certificate, a grade card) |
+| The ring unrolled into two strips — clockwise from the bottom with the outer edge up for the top arc, anticlockwise from the top with the inner edge up for the bottom arc — drawn large enough to read, keeping only ink within 24° of the ring's own hue: black print and another pen are paper | `seal.ts` → `unrollSeal` | `seal.test.ts` (each rule fails its test when removed) |
+| Each strip read by the page's own reader; its middle half is its own arc. What the page guessed along the ring is set aside; the seal's straight middle and the signature over it are kept | `paddle-reader.ts` → `readSeals`; `seal.ts` → `sealWords`, `outsideSeals` | `paddle-reader.test.ts`, `seal.test.ts` |
+| Each seal a line after its page's — "Seal: TAHSILDAR, SAMPLEPURA TALUK" — placed where the seal is, so the picture beside the value is the seal | `ocr:recognise` → `seals`; `ocr-host.ts` | `ocr-reads.test.ts` |
+| Each certificate's date of issue and issuing authority, filed by the kind of certificate like its number: a labelled authority first, then a signature-block line that starts with an officer's title, then the seal — each must name an officer (Tahsildar, SDM, Assistant Commissioner …), so a school's seal is not one. "Date" alone counts; "Date of Birth" never does. A domicile certificate's number has a box at last | `extract-claims.ts` → `issueDate`, `issuingAuthority`; `taxonomy.ts` (nine keys, appended); `pathway.ts` (asked only of those who claim) | `extract-claims.test.ts` |
+| A serif face's old-style 0, read as a small o, is a zero in a date ("14/o3/2024") and between a code's capitals and digits ("RDo98…") — never after one capital ("No12345") | `extract.ts` → `zeroesForOs` | `extract.test.ts` |
+| "Date of Issue", "Issuing Authority", "Certificate Number" under a heading that names the certificate — "OBC Certificate Details", "EWS Certificate Details" — are that certificate's; with none named, as under "Passport Details", the box is left alone and the review says why | `frame.ts` → `CertificateKind`, `headingCertificate`, `compose`; `synonyms.json` | `frame.test.ts`; `certificate-portal.test.ts` (the fixture page, as harvested — both rules fail it when removed) |
+| A date is typed as its box asks — "14/03/2024" where it says DD/MM/YYYY — and as kept into a date picker. Dates of birth too: until now every date went in as 2024-03-14 | `date-format.ts` → `dateAsAsked`; `fill-service.ts` → `buildWrites` | `date-format.test.ts`, `fill-service.test.ts` |
+
+In the real panel (`e2e/panel.spec.ts` → "reads a certificate's issuing
+authority off its seal…"): the certificate saved as a Caste certificate reads
+TAHSILDAR, SAMPLEPURA TALUK with the seal as its picture, 2024-03-14 and
+RD0987654321012, none ticked; the three saved, a reservation form fills them
+under "OBC Certificate Details" — the date as 14/03/2024 — leaves the EWS boxes
+to the income certificate and the passport's date blank, and submits nothing.
+With the seal step switched off in the worker, both browser tests fail; the
+panel then offers only "TAHSILDAR", the page's own reading of the top arc.
+
+**Not yet:** a seal in black ink — a photocopy — is not found, since print and
+seal are one colour; an oval or rectangular stamp is read as the page is
+(rectangular ones are straight, and read well); lettering running all the way
+round a ring in one direction is read only where it crosses the top and the
+bottom; the photo on an ID card is not located (no layout model).
+
+3,147 unit tests and 151 browser tests pass. The package is still 111 MB.
+
+# Stage 5: faster and smaller — measured first
+
+Every candidate was put into the real reader in place of what it would
+replace and scored on the nine made-up image fixtures (marks cards flat and
+curled, both grade cards, the sealed certificate, the passbook, the Hindi,
+Telugu and Tamil certificates): the words each fixture prints, read exactly,
+of 533; its figures, of 110; words read that it does not print; and the time
+to read all nine, warm, and a first page from cold. Today's reader: **514/533,
+108/110, 10 junk, 30.2 s, 4.1 s.** Not measured: the user's own documents,
+which Phase 0 measured today's models on.
+
+| Candidate | Words | Figures | Junk | 9 pages | Cold | Verdict |
+|-----------|-------|---------|------|---------|------|---------|
+| PP-OCRv6_tiny_det (1.8 MB, for 4.8) | 518 | 108 | 8 | 30.1 s | 3.4 s | **Not shipped**: better on the fixtures, but the browser test of drawn Hindi lines lost a vowel sign — "राजेश वर्मा" read "राजेश वर्म" — at every box margin tried. A misspelt name is the one mistake this reader must not make |
+| PP-OCRv6_small_det (9.9 MB) | 511 | 108 | 11 | 32.1 s | 4.3 s | Not shipped: no better |
+| PP-OCRv6_tiny_rec / small_rec (4.5 / 21 MB) | 504 / 508 | 106 / 107 | 16 / 13 | 26.8 / 31.6 s | — | Not shipped: Chinese-first alphabets (6,904 / 18,708 classes), no Indian scripts, worse at English than the English-only v5 model |
+| WebGPU for detection, recognition and UVDoc (+12.6 MB runtime) | 514 | 108 | 10 | **21.2 s** | **6.7 s** | **Not shipped**: identical readings, 1.5× faster warm — but the reader's page closes after every document, so nothing of it stays resident, and every reading starts cold, where compiling for the GPU costs 2.8 s. It pays from a document's third page; most documents here have one or two |
+| int8 detector (1.4 MB, for 4.8) | 483 | 107 | 33 | 21.5 s | 3.0 s | Not shipped: faster only because it finds less text — the Telugu certificate read 9 of 27 words |
+| int8 UVDoc (8.1 MB, for 31.7) | 507 | 108 | 15 | 27.9 s | 3.6 s | Not shipped: the curled card lost 7 of its 61 words — flattening is all UVDoc is for |
+| **Recognition padded to 160, not 320** | **514** | **108** | **9** | **29.6 s** | 3.9 s | **Shipped**: grade cards 4.9 → 4.0 s and 6.2 → 5.0 s, nothing else changed |
+
+Where a page's time goes, from timers put round each stage for the
+measurement and taken out: recognition is 75–90% of every page, detection
+about 0.3 s, everything else — decoding, standing upright, flattening, seals,
+tables — the rest. PaddleOCR pads every crop to 320 pixels, its training
+width; recognition costs in proportion to width; a grade card's "3" and "45"
+paid for 320 pixels each (`paddle.ts` → `RECOGNITION_BASE_WIDTH`,
+`paddle.test.ts`; every browser test that checks a reading word for word passes
+at 160). Threads stay at four: past that the gain was about a third, and the
+reader would take most of the machine while its owner is using it.
+
+Two things learnt that a later attempt needs. PP-OCRv6's archives are on
+PaddleOCR's own model host, pinnable like the rest, should a v6 detector that
+keeps Devanagari's vowel signs appear. And ONNX Runtime's GPU backend must
+start its runtime itself: a CPU session created first — the orientation
+classifier — made every GPU session fall back to the CPU without a word
+("multiple calls to initWasm"), which first made WebGPU look slower than it is.
+
+3,148 unit tests and 151 browser tests pass. The package is still 111 MB.

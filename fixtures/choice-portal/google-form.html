@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Student Survey 2026 — Google Forms style (made up)</title>
+<!--
+  A Google Form has no <select> and no radio button. Its dropdowns are
+  role="listbox" divs of role="option" divs, each carrying data-value; the
+  closed list shows only the chosen option, and pressing the list opens a
+  second copy of the options to press. Its multiple-choice questions are
+  role="radiogroup" divs of role="radio" divs; "Other:" is the radio whose
+  data-value is __other_option__, with an "Other response" box beside it, and
+  typing in that box chooses "Other". The answer lives in a hidden entry.N
+  input. Submit is a role="button" div.
+
+  This page copies that structure, and the script at the bottom copies the
+  behaviour: nothing changes unless an option is pressed. Every value here is
+  made up. `data-expect` is ground truth for tests; the matcher never reads it.
+-->
+<style>
+  body { font-family: sans-serif; background: #f0ebf8; margin: 0; }
+  form { max-width: 640px; margin: 24px auto; }
+  [role="listitem"] { background: #fff; border-radius: 8px; padding: 20px 24px; margin-bottom: 12px; }
+  [role="heading"] { font-size: 16px; margin-bottom: 14px; }
+  .req { color: #d93025; }
+  .choice { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+  .choice label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  [role="radio"] { width: 18px; height: 18px; border: 2px solid #5f6368; border-radius: 50%; box-sizing: border-box; }
+  [role="radio"][aria-checked="true"] { border-color: #673ab7; background: radial-gradient(#673ab7 45%, transparent 50%); }
+  .other-box { border: 0; border-bottom: 1px solid #ccc; width: 260px; }
+  [role="listbox"] { position: relative; display: inline-block; min-width: 240px; border: 1px solid #dadce0; border-radius: 4px; padding: 8px 12px; cursor: pointer; }
+  .closed > [role="option"] { display: none; }
+  .closed > [role="option"][aria-selected="true"] { display: block; }
+  .popup { display: none; position: absolute; left: 0; top: 0; z-index: 5; background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.3); min-width: 100%; }
+  [role="listbox"][aria-expanded="true"] .popup { display: block; }
+  .popup [role="option"] { padding: 8px 12px; white-space: nowrap; }
+  .text { border: 0; border-bottom: 1px solid #ccc; width: 60%; padding: 6px 0; }
+  .actions { display: flex; justify-content: space-between; }
+  [role="button"] { display: inline-block; padding: 8px 24px; border-radius: 4px; cursor: pointer; }
+  .submit { background: #673ab7; color: #fff; }
+  .done { display: none; }
+  form[data-submitted="yes"] .done { display: block; }
+</style>
+</head>
+<body>
+<form id="mG61Hd" action="#" method="POST">
+  <div role="list">
+
+    <div role="listitem">
+      <div role="heading" aria-level="3" id="i1">Full name <span class="req" aria-label="Required question">*</span></div>
+      <input type="text" class="text" aria-labelledby="i1" aria-required="true" data-expect="identity.full_name" />
+      <input type="hidden" name="entry.1000001" value="" />
+    </div>
+
+    <div role="listitem">
+      <div role="heading" aria-level="3" id="i5">Gender <span class="req" aria-label="Required question">*</span></div>
+      <div role="radiogroup" aria-labelledby="i5" aria-required="true" data-expect="identity.gender">
+        <div class="choice"><label for="i6"><div role="radio" id="i6" data-value="Male" aria-label="Male" aria-checked="false" tabindex="0"></div><span>Male</span></label></div>
+        <div class="choice"><label for="i7"><div role="radio" id="i7" data-value="Female" aria-label="Female" aria-checked="false" tabindex="-1"></div><span>Female</span></label></div>
+        <div class="choice"><label for="i8"><div role="radio" id="i8" data-value="Prefer not to say" aria-label="Prefer not to say" aria-checked="false" tabindex="-1"></div><span>Prefer not to say</span></label></div>
+        <div class="choice"><label for="i9"><div role="radio" id="i9" data-value="__other_option__" aria-label="Other:" aria-checked="false" tabindex="-1"></div><span>Other:</span></label>
+          <input type="text" class="other-box" aria-label="Other response" /></div>
+      </div>
+      <input type="hidden" name="entry.1000002" value="" />
+    </div>
+
+    <div role="listitem">
+      <div role="heading" aria-level="3" id="i20">What is your current field of study or major? <span class="req" aria-label="Required question">*</span></div>
+      <div role="listbox" aria-labelledby="i20" aria-expanded="false" aria-required="true" tabindex="0" data-expect="education[].branch">
+        <div class="closed" role="presentation">
+          <div role="option" data-value="" aria-selected="true"><span>Choose</span></div>
+          <div role="option" data-value="Computer Science / IT" aria-selected="false"><span>Computer Science / IT</span></div>
+          <div role="option" data-value="Electronics / Communication" aria-selected="false"><span>Electronics / Communication</span></div>
+          <div role="option" data-value="Mechanical / Civil Engineering" aria-selected="false"><span>Mechanical / Civil Engineering</span></div>
+          <div role="option" data-value="Commerce / Business Administration" aria-selected="false"><span>Commerce / Business Administration</span></div>
+          <div role="option" data-value="Arts / Humanities" aria-selected="false"><span>Arts / Humanities</span></div>
+          <div role="option" data-value="Science / Pure Sciences" aria-selected="false"><span>Science / Pure Sciences</span></div>
+          <div role="option" data-value="Other" aria-selected="false"><span>Other</span></div>
+        </div>
+        <div class="popup" role="presentation">
+          <div role="option" data-value="" aria-selected="true"><span>Choose</span></div>
+          <div role="option" data-value="Computer Science / IT" aria-selected="false"><span>Computer Science / IT</span></div>
+          <div role="option" data-value="Electronics / Communication" aria-selected="false"><span>Electronics / Communication</span></div>
+          <div role="option" data-value="Mechanical / Civil Engineering" aria-selected="false"><span>Mechanical / Civil Engineering</span></div>
+          <div role="option" data-value="Commerce / Business Administration" aria-selected="false"><span>Commerce / Business Administration</span></div>
+          <div role="option" data-value="Arts / Humanities" aria-selected="false"><span>Arts / Humanities</span></div>
+          <div role="option" data-value="Science / Pure Sciences" aria-selected="false"><span>Science / Pure Sciences</span></div>
+          <div role="option" data-value="Other" aria-selected="false"><span>Other</span></div>
+        </div>
+      </div>
+      <input type="hidden" name="entry.1000003" value="" />
+    </div>
+
+    <div role="listitem">
+      <div role="heading" aria-level="3" id="i30">Reservation category</div>
+      <div role="radiogroup" aria-labelledby="i30" data-expect="identity.category">
+        <div class="choice"><label for="i31"><div role="radio" id="i31" data-value="General / Unreserved" aria-label="General / Unreserved" aria-checked="false" tabindex="0"></div><span>General / Unreserved</span></label></div>
+        <div class="choice"><label for="i32"><div role="radio" id="i32" data-value="OBC" aria-label="OBC" aria-checked="false" tabindex="-1"></div><span>OBC</span></label></div>
+        <div class="choice"><label for="i33"><div role="radio" id="i33" data-value="SC" aria-label="SC" aria-checked="false" tabindex="-1"></div><span>SC</span></label></div>
+        <div class="choice"><label for="i34"><div role="radio" id="i34" data-value="ST" aria-label="ST" aria-checked="false" tabindex="-1"></div><span>ST</span></label></div>
+        <div class="choice"><label for="i35"><div role="radio" id="i35" data-value="EWS" aria-label="EWS" aria-checked="false" tabindex="-1"></div><span>EWS</span></label></div>
+      </div>
+      <input type="hidden" name="entry.1000004" value="" />
+    </div>
+
+    <div role="listitem">
+      <div role="heading" aria-level="3" id="i40">Annual family income</div>
+      <div role="listbox" aria-labelledby="i40" aria-expanded="false" tabindex="0" data-expect="family.annual_income">
+        <div class="closed" role="presentation">
+          <div role="option" data-value="" aria-selected="true"><span>Choose</span></div>
+          <div role="option" data-value="Below ₹1,00,000" aria-selected="false"><span>Below ₹1,00,000</span></div>
+          <div role="option" data-value="₹1,00,001 – ₹2,50,000" aria-selected="false"><span>₹1,00,001 – ₹2,50,000</span></div>
+          <div role="option" data-value="₹2,50,001 – ₹5,00,000" aria-selected="false"><span>₹2,50,001 – ₹5,00,000</span></div>
+          <div role="option" data-value="Above ₹5,00,000" aria-selected="false"><span>Above ₹5,00,000</span></div>
+        </div>
+        <div class="popup" role="presentation">
+          <div role="option" data-value="" aria-selected="true"><span>Choose</span></div>
+          <div role="option" data-value="Below ₹1,00,000" aria-selected="false"><span>Below ₹1,00,000</span></div>
+          <div role="option" data-value="₹1,00,001 – ₹2,50,000" aria-selected="false"><span>₹1,00,001 – ₹2,50,000</span></div>
+          <div role="option" data-value="₹2,50,001 – ₹5,00,000" aria-selected="false"><span>₹2,50,001 – ₹5,00,000</span></div>
+          <div role="option" data-value="Above ₹5,00,000" aria-selected="false"><span>Above ₹5,00,000</span></div>
+        </div>
+      </div>
+      <input type="hidden" name="entry.1000005" value="" />
+    </div>
+
+    <div role="listitem">
+      <div role="heading" aria-level="3" id="i50">Board of your Class 10 examination</div>
+      <div role="radiogroup" aria-labelledby="i50" data-expect="education.class_10.board_or_university">
+        <div class="choice"><label for="i51"><div role="radio" id="i51" data-value="CBSE" aria-label="CBSE" aria-checked="false" tabindex="0"></div><span>CBSE</span></label></div>
+        <div class="choice"><label for="i52"><div role="radio" id="i52" data-value="ICSE" aria-label="ICSE" aria-checked="false" tabindex="-1"></div><span>ICSE</span></label></div>
+        <div class="choice"><label for="i53"><div role="radio" id="i53" data-value="State Board" aria-label="State Board" aria-checked="false" tabindex="-1"></div><span>State Board</span></label></div>
+        <div class="choice"><label for="i54"><div role="radio" id="i54" data-value="__other_option__" aria-label="Other:" aria-checked="false" tabindex="-1"></div><span>Other:</span></label>
+          <input type="text" class="other-box" aria-label="Other response" /></div>
+      </div>
+      <input type="hidden" name="entry.1000006" value="" />
+    </div>
+
+    <div role="listitem">
+      <div role="heading" aria-level="3" id="i60">Which university are you studying in?</div>
+      <div role="radiogroup" aria-labelledby="i60" data-expect="education[].board_or_university">
+        <div class="choice"><label for="i61"><div role="radio" id="i61" data-value="VTU" aria-label="VTU" aria-checked="false" tabindex="0"></div><span>VTU</span></label></div>
+        <div class="choice"><label for="i62"><div role="radio" id="i62" data-value="Bangalore University" aria-label="Bangalore University" aria-checked="false" tabindex="-1"></div><span>Bangalore University</span></label></div>
+        <div class="choice"><label for="i63"><div role="radio" id="i63" data-value="Mysore University" aria-label="Mysore University" aria-checked="false" tabindex="-1"></div><span>Mysore University</span></label></div>
+        <div class="choice"><label for="i64"><div role="radio" id="i64" data-value="__other_option__" aria-label="Other:" aria-checked="false" tabindex="-1"></div><span>Other:</span></label>
+          <input type="text" class="other-box" aria-label="Other response" /></div>
+      </div>
+      <input type="hidden" name="entry.1000007" value="" />
+    </div>
+
+  </div>
+
+  <div class="actions">
+    <div role="button" class="submit" data-action="submit" tabindex="0"><span>Submit</span></div>
+    <div role="button" data-action="clear" tabindex="0"><span>Clear form</span></div>
+  </div>
+  <p class="done">Your response has been recorded.</p>
+</form>
+
+<script>
+(function () {
+  var form = document.getElementById('mG61Hd');
+  function entryOf(item) { return item.querySelector('input[type="hidden"]'); }
+
+  function chooseRadio(radio) {
+    var group = radio.closest('[role="radiogroup"]');
+    var item = group.closest('[role="listitem"]');
+    group.querySelectorAll('[role="radio"]').forEach(function (member) {
+      member.setAttribute('aria-checked', member === radio ? 'true' : 'false');
+    });
+    var value = radio.getAttribute('data-value');
+    if (value === '__other_option__') {
+      var box = radio.closest('.choice').querySelector('[aria-label="Other response"]');
+      value = box ? box.value : '';
+    }
+    entryOf(item).value = value;
+  }
+
+  function setOpen(listbox, open) { listbox.setAttribute('aria-expanded', open ? 'true' : 'false'); }
+
+  function chooseFromList(listbox, value) {
+    listbox.querySelectorAll('[role="option"]').forEach(function (option) {
+      option.setAttribute('aria-selected', option.getAttribute('data-value') === value ? 'true' : 'false');
+    });
+    entryOf(listbox.closest('[role="listitem"]')).value = value;
+    setOpen(listbox, false);
+  }
+
+  // Google answers a press, and nothing else: a click on a radio, on a list, or
+  // on an option in a list's open copy.
+  form.addEventListener('click', function (event) {
+    var target = event.target;
+    var radio = target.closest('[role="radio"]');
+    if (radio) { chooseRadio(radio); return; }
+    var option = target.closest('.popup [role="option"]');
+    if (option) { chooseFromList(option.closest('[role="listbox"]'), option.getAttribute('data-value')); return; }
+    var listbox = target.closest('[role="listbox"]');
+    if (listbox) { setOpen(listbox, listbox.getAttribute('aria-expanded') !== 'true'); return; }
+    var button = target.closest('[role="button"]');
+    if (button && button.getAttribute('data-action') === 'submit') form.setAttribute('data-submitted', 'yes');
+  });
+
+  form.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape') {
+      var open = event.target.closest('[role="listbox"]');
+      if (open) setOpen(open, false);
+    }
+  });
+
+  // Typing in "Other response" chooses "Other", as Google's box does.
+  form.addEventListener('input', function (event) {
+    if (!event.target.matches('[aria-label="Other response"]')) return;
+    var other = event.target.closest('.choice').querySelector('[data-value="__other_option__"]');
+    if (event.target.value) chooseRadio(other);
+  });
+
+  form.addEventListener('submit', function (event) { event.preventDefault(); });
+})();
+</script>
+</body>
+</html>

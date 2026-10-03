@@ -14,8 +14,8 @@
 import type { RasterBackend, RasterSource } from './derive';
 import type { TargetBox } from './geometry';
 import { readShape, type ContentBox, type LuminanceImage, type ShapeReading } from './trim';
-import { loadPdfJs } from './pdfjs';
-import { jpegInPdf } from './pdf-wrap';
+import { openPdf } from './pdfjs';
+import { jpegInPdf, jpegPagesInPdf } from './pdf-wrap';
 
 /** White, so a letterboxed photograph looks like a photograph and not a hole. */
 const PAD_COLOUR = '#ffffff';
@@ -189,7 +189,62 @@ export async function measureShape(
  * (`background/ocr-host.ts` → `workerRasterBackend`). Everywhere else pdf.js
  * runs in place and this is left out.
  */
-export type PdfRenderer = (bytes: Uint8Array, width: number, password?: string) => Promise<Uint8Array>;
+export type PdfRenderer = (
+  bytes: Uint8Array,
+  width: number,
+  password?: string,
+  page?: number,
+) => Promise<{ image: Uint8Array; pages: number }>;
+
+/**
+ * Page `pageNumber` (from 1) of a PDF, drawn `width` pixels wide, and how many
+ * pages the PDF has — so a reader can go on to the next.
+ */
+export async function renderPdfPage(
+  bytes: Uint8Array,
+  width: number,
+  password?: string,
+  pageNumber = 1,
+): Promise<{ source: RasterSource; pages: number }> {
+  const task = await openPdf(bytes, password);
+  try {
+    const pdf = await task.promise;
+    if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > pdf.numPages) {
+      throw new RangeError(`This PDF has ${pdf.numPages} pages; there is no page ${pageNumber}.`);
+    }
+    const page = await pdf.getPage(pageNumber);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: width / base.width });
+
+    const canvas = new OffscreenCanvas(Math.round(viewport.width), Math.round(viewport.height));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('OffscreenCanvas 2D context unavailable.');
+
+    ctx.fillStyle = PAD_COLOUR;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({
+      canvas: canvas as unknown as HTMLCanvasElement,
+      canvasContext: ctx as unknown as CanvasRenderingContext2D,
+      viewport,
+      /*
+       * "print", not the default "display". A display render paces itself by
+       * `requestAnimationFrame`, and a page nobody can see — the offscreen
+       * page, where this runs — never gets an animation frame: the render
+       * waited forever and every portal copy of a PDF timed out after two and
+       * a half minutes. Print renders straight through, and draws the page as
+       * it would come out on paper, which is the copy a portal wants anyway.
+       */
+      intent: 'print',
+    }).promise;
+
+    const bitmap = canvas.transferToImageBitmap();
+    return { source: { width: bitmap.width, height: bitmap.height, handle: bitmap }, pages: pdf.numPages };
+  } finally {
+    // destroy() lives on the loading task, not the document proxy, and
+    // releases the transport as well as the document.
+    await task.destroy();
+  }
+}
 
 export function createRasterBackend(options: { renderPdf?: PdfRenderer } = {}): RasterBackend {
   return {
@@ -279,62 +334,24 @@ export function createRasterBackend(options: { renderPdf?: PdfRenderer } = {}): 
       return toBytes(await canvas.convertToBlob({ type: 'image/png' }));
     },
 
-    async rasterisePdf(bytes, targetWidth, password) {
+    async rasterisePdf(bytes, targetWidth, password, page) {
       if (options.renderPdf !== undefined) {
-        const png = await options.renderPdf(bytes, targetWidth, password);
-        const bitmap = await createImageBitmap(new Blob([png as BlobPart], { type: 'image/png' }));
-        return { width: bitmap.width, height: bitmap.height, handle: bitmap };
+        const { image, pages } = await options.renderPdf(bytes, targetWidth, password, page);
+        const bitmap = await createImageBitmap(new Blob([image as BlobPart], { type: 'image/png' }));
+        return { width: bitmap.width, height: bitmap.height, handle: bitmap, pages };
       }
-      const { getDocument } = await loadPdfJs();
-      // `data` is transferred, so hand pdf.js a copy the caller still owns.
-      const task = getDocument({
-        data: new Uint8Array(bytes),
-        ...(password === undefined ? {} : { password }),
-      });
-      const pdf = await task.promise;
-      try {
-        const page = await pdf.getPage(1);
-        const base = page.getViewport({ scale: 1 });
-        const viewport = page.getViewport({ scale: targetWidth / base.width });
-
-        const canvas = new OffscreenCanvas(
-          Math.round(viewport.width),
-          Math.round(viewport.height),
-        );
-        const ctx = canvas.getContext('2d');
-        if (!ctx) throw new Error('OffscreenCanvas 2D context unavailable.');
-
-        ctx.fillStyle = PAD_COLOUR;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        await page.render({
-          canvas: canvas as unknown as HTMLCanvasElement,
-          canvasContext: ctx as unknown as CanvasRenderingContext2D,
-          viewport,
-          /*
-           * "print", not the default "display". A display render paces itself
-           * by `requestAnimationFrame`, and a page nobody can see — the
-           * offscreen page, where this runs — never gets an animation frame:
-           * the render waited forever and every portal copy of a PDF timed out
-           * after two and a half minutes. Print renders straight through, and
-           * draws the page as it would come out on paper, which is the copy a
-           * portal wants anyway.
-           */
-          intent: 'print',
-        }).promise;
-
-        const bitmap = canvas.transferToImageBitmap();
-        return { width: bitmap.width, height: bitmap.height, handle: bitmap };
-      } finally {
-        // destroy() lives on the loading task, not the document proxy, and
-        // releases the transport as well as the document.
-        await task.destroy();
-      }
+      const { source, pages } = await renderPdfPage(bytes, targetWidth, password, page);
+      return { ...source, pages };
     },
 
     async wrapJpegInPdf(jpeg, width, height) {
       // Written here rather than by pdf-lib, which had to be loaded with
       // `import()` — not allowed in the service worker, where fills run.
       return jpegInPdf(jpeg, width, height);
+    },
+
+    async wrapJpegPagesInPdf(pages) {
+      return jpegPagesInPdf(pages);
     },
 
     release(source) {
