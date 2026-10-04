@@ -92,6 +92,9 @@ const VALID: Record<string, { payload: Payload; optional?: string[] }> = {
   // A stored photo, on its way to be made a clean scan.
   'ocr:scan': { payload: { image: 'aGVsbG8=', mime: 'image/jpeg' } },
   'doc:scan': { payload: { id: 'doc-1' } },
+  // A real public branch code and a real public PIN: neither is anyone's detail.
+  'ref:ifsc': { payload: { code: 'SBIN0000001' } },
+  'ref:pincode': { payload: { pin: '560001' } },
   // A PDF, on its way to the page that can open one (a service worker cannot load pdf.js).
   'pdf:lock': { payload: { pdf: 'JVBERi0=', password: 'RAVI1998' }, optional: ['password'] },
   'pdf:text': { payload: { pdf: 'JVBERi0=', password: 'RAVI1998' }, optional: ['password'] },
@@ -496,5 +499,20 @@ describe('the door itself', () => {
     const result = validateRequest({ type: 'vault:set', key: 'identity.full_name', value: { secret } });
     expect(result.ok).toBe(false);
     expect(JSON.stringify(result)).not.toContain(secret);
+  });
+});
+
+describe('a lookup asks about a code and nothing else', () => {
+  /*
+   * The lists are read in the worker, on this device, so nothing leaves it
+   * either way. Holding the request to the exact shape of a code still keeps
+   * anything else — a name, an address — from being carried to them.
+   */
+  it.each(['Ravi Kumar', 'sbin0000001', 'SBIN0000001 ', 'SBIN1000001', '', 'SBIN0000001\n'])('refuses "%s" as an IFSC', (code) => {
+    expect(validateRequest({ type: 'ref:ifsc', code }).ok).toBe(false);
+  });
+
+  it.each(['56000', '0560001', '560 001', '5600011', 'Bengaluru', 560001])('refuses %s as a PIN', (pin) => {
+    expect(validateRequest({ type: 'ref:pincode', pin }).ok).toBe(false);
   });
 });

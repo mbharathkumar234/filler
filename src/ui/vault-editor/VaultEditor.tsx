@@ -5,7 +5,7 @@
  * never touches IndexedDB or the key directly.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import type { FieldKey } from '@/matching/taxonomy';
 import type { ProfileEntry, Completeness } from '@/vault/profile-store';
 import { errorMessage, isLockedError, send } from '@/ui/lib/client';
@@ -14,7 +14,9 @@ import { describePath, type AcademicPath } from '@/matching/pathway';
 import { suggestionsFor } from '@/matching/courses';
 import { PathSetup } from '@/ui/onboarding/PathSetup';
 import { hasSkippedPath, rememberPathSkipped } from '@/ui/lib/path-skip';
+import { codeToLookUp, offerFor, type Looked } from '@/ui/lib/reference-offer';
 import { FieldRow } from './FieldRow';
+import { ReferenceNote } from './ReferenceNote';
 import { BackupPanel } from './BackupPanel';
 import { DocumentsPanel } from './DocumentsPanel';
 
@@ -40,6 +42,8 @@ export function VaultEditor({ onLocked }: Props) {
   const [editingPath, setEditingPath] = useState(false);
   /** The control at the foot: the path offers, it never forbids. */
   const [showAll, setShowAll] = useState(false);
+  /** The IFSC or PIN last saved, and what its list said of it. */
+  const [looked, setLooked] = useState<Looked | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -91,6 +95,41 @@ export function VaultEditor({ onLocked }: Props) {
     },
     [onLocked],
   );
+
+  /*
+   * An IFSC or PIN, once saved, looked up in the lists the extension carries
+   * (`reference-offer.ts`). A lookup that fails is said nowhere: the lists help
+   * the save, they are not part of it.
+   */
+  const saveAndLookUp = useCallback(
+    async (key: FieldKey, value: string) => {
+      await save(key, value);
+      const code = codeToLookUp(key, value);
+      if (code === null) {
+        setLooked((was) => (was?.key === key ? null : was));
+        return;
+      }
+      try {
+        setLooked(
+          code.list === 'ifsc'
+            ? { list: 'ifsc', key, code: code.code, record: await send({ type: 'ref:ifsc', code: code.code }) }
+            : { list: 'pincode', key, code: code.code, record: await send({ type: 'ref:pincode', pin: code.code }) },
+        );
+      } catch {
+        // The code is saved either way.
+      }
+    },
+    [save],
+  );
+
+  /** What the user chose to take from the list — still only into boxes left empty. */
+  async function fillFromList(fills: Array<[FieldKey, string]>) {
+    for (const [key, value] of fills) {
+      if ((values.get(key) ?? '') !== '') continue;
+      await save(key, value);
+    }
+    setLooked(null);
+  }
 
   /** Store the answers, and lay the vault out from them at once. */
   async function savePath(next: AcademicPath | null) {
@@ -252,13 +291,21 @@ export function VaultEditor({ onLocked }: Props) {
                 <div className="mt-1">
                   {group.hint && <p className="mb-1 text-xs text-slate-500">{group.hint}</p>}
                   {group.keys.map((key) => (
-                    <FieldRow
-                      key={key}
-                      fieldKey={key}
-                      value={values.get(key) ?? ''}
-                      onSave={save}
-                      suggestions={suggestionsFor(key, path)}
-                    />
+                    <Fragment key={key}>
+                      <FieldRow
+                        fieldKey={key}
+                        value={values.get(key) ?? ''}
+                        onSave={saveAndLookUp}
+                        suggestions={suggestionsFor(key, path)}
+                      />
+                      {looked !== null && looked.key === key && (
+                        <ReferenceNote
+                          offer={offerFor(looked, values)}
+                          onFill={(fills) => void fillFromList(fills)}
+                          onClose={() => setLooked(null)}
+                        />
+                      )}
+                    </Fragment>
                   ))}
                 </div>
               )}

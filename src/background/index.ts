@@ -18,6 +18,7 @@ import {
 } from '@/shared/messages';
 import { handleVaultRequest, isVaultRequest } from './vault-service';
 import { handleDocumentRequest, setOcrEngine } from './document-service';
+import { handleReferenceRequest } from './reference-data';
 import { createOcrHost } from './ocr-host';
 import { forgetHarvest, harvestTab } from './harvest-service';
 import { putInUploadWindow } from './upload-window-service';
@@ -238,6 +239,9 @@ async function route(request: ExtensionRequest, tabId: number | null): Promise<R
   }
 
   switch (request.type) {
+    case 'ref:ifsc':
+    case 'ref:pincode':
+      return handleReferenceRequest(request);
     case 'harvest:tab':
       return harvestTab(request.tabId);
     case 'fill:tab': {

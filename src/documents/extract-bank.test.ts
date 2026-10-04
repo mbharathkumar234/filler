@@ -62,6 +62,104 @@ describe('a bank passbook', () => {
   });
 });
 
+describe('a passbook that prints its holder as a block', () => {
+  /*
+   * Found on the user's own passbook, read off a phone photo: the reading held
+   * nearly every detail, and the panel offered two — one of them "& Address",
+   * the rest of an empty box's heading. Its layout, with made-up values and the
+   * reader's own slips kept: the bank's heading twice with the branch stamped
+   * under the second, the account number after "A/C No.", the holder's name,
+   * relation and address under one label ("ADORESS"), and the codes on the last
+   * line — the IFSC a character short and its label half read ("SC COd").
+   */
+  const BLOCK = `
+MOBILE : SMS Seal on it
+SAVINGS BANK A/C No.: 1234500100067890 : Business Hours, Weekly Holidays, Telephone Nos.
+Sample Bank Ltd.
+FACILITIES FOR SB ACCOUNT HOLDERS
+specified in the Cheque Collection Policy.
+FREE DEBIT INTERNET MOBILE SMS
+Conditions apply
+Sample Bank Ltd.
+SAMPLEPURT-NIHRUNAGAR
+Branch Name & Address
+SAVINGS BANK A/C No.: 1234500100067890 Business Hours, Weekly Holidays, Telephone Nos.
+NAME AND ADORESS OF THE ACCOUNT HOLDER/S:
+1.MEHTA R ARJUN KUMAR
+S/0 R RAMAPPA,
+SAMPLEPURA
+572101 INDIA
+Customer-id: 1)123456789
+Operational Instructions: SELF
+Nomination Registration No: 117
+SC COd: ZZZZ000123 MICR CODE:572052123 P.BRANCH MANAGER
+`;
+  const read = (text = BLOCK) => extractFromText(text, { documentKey: 'doc.bank_passbook' });
+
+  it('reads the account number printed after “A/C No.”', () => {
+    expect(valueOf(BLOCK, 'bank.account_number', 'doc.bank_passbook')).toBe('1234500100067890');
+  });
+
+  it('reads the holder’s name from the block, without the number before it', () => {
+    expect(valueOf(BLOCK, 'bank.account_holder', 'doc.bank_passbook')).toBe('MEHTA R ARJUN KUMAR');
+  });
+
+  it('reads the father’s name from “S/O”, the O read as a nought', () => {
+    expect(valueOf(BLOCK, 'family.father_name', 'doc.bank_passbook')).toBe('R RAMAPPA');
+  });
+
+  it('reads the holder’s own address and PIN from the block', () => {
+    expect(valueOf(BLOCK, 'address.permanent.line1', 'doc.bank_passbook')).toBe('SAMPLEPURA');
+    expect(valueOf(BLOCK, 'address.permanent.pincode', 'doc.bank_passbook')).toBe('572101');
+  });
+
+  it('reads the town printed before the PIN, when the reader caught it', () => {
+    const fuller = BLOCK.replace('572101 INDIA', 'TUMAKURU 572101 INDIA');
+    expect(valueOf(fuller, 'address.permanent.city', 'doc.bank_passbook')).toBe('Tumakuru');
+    expect(valueOf(fuller, 'address.permanent.line1', 'doc.bank_passbook')).toBe('SAMPLEPURA');
+  });
+
+  it('reads the MICR code printed beside the IFSC', () => {
+    expect(valueOf(BLOCK, 'bank.micr', 'doc.bank_passbook')).toBe('572052123');
+  });
+
+  it('takes no box’s heading for a value: “Branch Name & Address” names no branch', () => {
+    expect(valueOf(BLOCK, 'bank.branch', 'doc.bank_passbook')).toBeUndefined();
+    expect(read().candidates.map((c) => c.value)).not.toContain('& Address');
+  });
+
+  it('offers no IFSC a character short, and keeps it for RBI’s list to put right', () => {
+    const result = read();
+    expect(result.candidates.find((c) => c.key === 'bank.ifsc')).toBeUndefined();
+    expect(result.nearMisses).toEqual([
+      {
+        key: 'bank.ifsc',
+        read: 'ZZZZ000123',
+        line: result.nearMisses![0]!.line,
+        // The half-read label is tidied away as a fragment; the MICR code beside it says what it is.
+        evidence: 'ZZZZ000123 MICR CODE:572052123 P.BRANCH MANAGER',
+      },
+    ]);
+  });
+
+  it('keeps no near miss when the IFSC was read whole', () => {
+    const whole = read(BLOCK.replace('SC COd: ZZZZ000123', 'IFSC Code: ZZZZ0000123'));
+    expect(whole.candidates.find((c) => c.key === 'bank.ifsc')?.value).toBe('ZZZZ0000123');
+    expect(whole.nearMisses ?? []).toEqual([]);
+  });
+
+  it('never reads the branch’s address as the holder’s', () => {
+    const branchBox = BLOCK.replace('Branch Name & Address', 'Branch Name & Address\nMG ROAD, SAMPLEPURA 572102');
+    expect(valueOf(branchBox, 'address.permanent.pincode', 'doc.bank_passbook')).toBe('572101');
+  });
+
+  it('reads no holder’s block off a document that is not a bank’s', () => {
+    const keys = extractFromText(BLOCK, { documentKey: 'doc.marksheet_10' }).candidates.map((c) => c.key);
+    expect(keys).not.toContain('address.permanent.pincode');
+    expect(keys).not.toContain('bank.micr');
+  });
+});
+
 describe('what a passbook never becomes', () => {
   it('reads no bank name off a document that is not a bank’s', () => {
     const card = `

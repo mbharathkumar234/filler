@@ -746,7 +746,7 @@ async function bytesAt(url: string): Promise<Uint8Array> {
 window.__pdf = {
   lock: async (url, password) => pdfLock(await bytesAt(url), password),
   read: async (url, password) => {
-    const text = await readPdfText(await bytesAt(url), password);
+    const { text } = await readPdfText(await bytesAt(url), password);
     return extractFromText(text, { documentKey: 'doc.aadhaar_card' }).candidates.map((c) => ({
       key: c.key,
       value: c.value,

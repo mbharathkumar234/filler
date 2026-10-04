@@ -463,6 +463,13 @@ export const FIELD_KEYS = [
   'eligibility.domicile_certificate_authority',
   'eligibility.article_371j_date',
   'eligibility.article_371j_authority',
+
+  /*
+   * What a form asks beside the IFSC, and what RBI's list of IFSC codes knows
+   * from it (`reference/ifsc.ts`): the branch's MICR code and its address.
+   */
+  'bank.micr',
+  'bank.branch_address',
 ] as const;
 
 export type FieldKey = (typeof FIELD_KEYS)[number];
@@ -905,6 +912,9 @@ export const SENSITIVITY: Readonly<Record<FieldKey, Sensitivity>> = {
   'eligibility.domicile_certificate_authority': 'medium',
   'eligibility.article_371j_date': 'medium',
   'eligibility.article_371j_authority': 'medium',
+  // A bank branch's own public details, not the account holder's.
+  'bank.micr': 'low',
+  'bank.branch_address': 'low',
 };
 
 /**

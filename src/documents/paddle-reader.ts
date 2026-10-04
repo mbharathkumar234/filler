@@ -83,6 +83,27 @@ export interface OrientationRunner {
 }
 
 /**
+ * A photo smaller than this across its longer side is read enlarged.
+ *
+ * Measured on the user's own passbook photo, 780 pixels across: read as it
+ * came, its IFSC came back a nought short beside "SC COd:" — four noughts too
+ * small to tell apart — a locality's name with three letters dropped, and the
+ * town at 0.61. Read at one and a half times its size, resampled by the
+ * browser, every one came right; at twice, "IFSC" became "IPSC", and at two and a half
+ * lines split. Every other document measured is 1,112 pixels across or more,
+ * and reads no better for a second look at its unsure lines — only slower.
+ */
+export const SMALL_PHOTO_BELOW = 1000;
+
+/** How much larger a small photo is read. */
+export const SMALL_PHOTO_SCALE = 1.5;
+
+/** How much larger to read a page: a small photo at one and a half times, anything else as it came. */
+export function readingScale(width: number, height: number): number {
+  return Math.max(width, height) < SMALL_PHOTO_BELOW ? SMALL_PHOTO_SCALE : 1;
+}
+
+/**
  * How sure the classifier must be before a page is turned.
  *
  * Measured on the user's five documents, each turned all four ways: twenty of

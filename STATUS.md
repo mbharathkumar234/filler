@@ -2009,3 +2009,119 @@ classifier — made every GPU session fall back to the CPU without a word
 ("multiple calls to initWasm"), which first made WebGPU look slower than it is.
 
 3,148 unit tests and 151 browser tests pass. The package is still 111 MB.
+
+# Tables in a downloaded PDF
+
+The gap Stage 3 left: a grade card downloaded from a university portal is a
+PDF with real text in it, read exactly and never recognised — so it had no
+picture for the table model, and its courses were read as lines: every row
+starting with a course code, one title wrapped onto a line of its own. It gave
+its SGPA and nothing of its courses.
+
+pdf.js gives every piece of a PDF's text with where it sits, exactly. The grid
+is laid out from that alone — no model, no rendering, nothing added to the
+package.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| Pieces on one baseline join into a cell while the gap between them is a word's space; a cell's padding parts them. A PDF that places every word, or every letter, on its own reads the same | `text-table.ts` → `cellsOf` | `text-table.test.ts` |
+| The table is found as a photo's is, allowing for a PDF's rows standing further apart and a title wrapping onto three lines; label rows above and below it stay out | `table.ts` → `tableRegions` (`rowGapLines`, `looseRows`; the photo path's values unchanged) | `text-table.test.ts`, `table.test.ts` |
+| A cell's further lines — closer to the line above than rows are — fold into it: "Transform Calculus, Fourier Series and Numerical Techniques" is one course | `text-table.ts` → `foldedRows` | `text-table.test.ts` |
+| Columns are where the body's cells sit; each heading goes in the column under it, and a heading over a column every row left empty keeps its column | `text-table.ts` → `columnsOf`, `lay` | `text-table.test.ts` |
+| The grids travel with the text (`pdf:text` → `tables`) to the same course rules a photo's table reaches | `pdf-text.ts` → `readPdfText`; `read-document.ts` → `PdfText` | `read-document.test.ts`, `ocr-reads.test.ts` |
+
+In the real panel (`e2e/panel.spec.ts` → "reads a downloaded grade card's
+table…"): the made-up card printed to a PDF (`fixtures/pdf/grade-card.pdf`),
+saved as a Semester marks card, reads "directly from the document" its seven
+courses with the wrapped title whole, 659 and no backlogs, beside the SGPA,
+CGPA and USN; with the tables taken out of the PDF reader, the same test finds
+no courses. Each rule above fails its own test when removed.
+
+**Not yet:** one portal's PDF generator; others place text differently — a
+cell's text overflowing into the next column joins the two columns, and a
+heading wrapped over two lines folds as a cell does, which is right, but has
+only been seen on made-up cards.
+
+3,154 unit tests and 152 browser tests pass. The package is still 111 MB.
+
+# RBI's IFSC list and India Post's PIN directory
+
+Two codes a form asks for beside the details they stand for: an IFSC, with the
+bank, branch, MICR code and branch address; a PIN, with the district and state.
+Each is a public address — of a bank branch, of a delivery area — and each has
+an official list. Shipped inside the extension, the lists say what goes with a
+code, and whether a code read off a photo exists at all, without the code going
+anywhere.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| RBI's list of every branch (razorpay/ifsc v2.0.62, MIT): 183,214 branches of 260 banks, packed one zipped file per bank so a lookup opens one bank — 7.9 MB in all, State Bank of India's 952 KB. The list's "NA" is kept as nothing | `scripts/fetch-reference-data.mjs` (pinned by SHA-256, fetched at build only), `vite.config.ts` → `referenceData()`, `reference/ifsc.ts` | `ifsc.test.ts`, `verify-dist.mjs` |
+| India Post's All India Pincode Directory (data.gov.in, GODL-India, credited): 19,300 PINs in 732 districts, 0.85 MB zipped; the published spellings of states put right ("ODHISA", "CHATTISGARH", "TAMILNADU" and the rest) | `reference/pincode.ts`, `reference/places.ts` | `pincode.test.ts` |
+| Read by the background worker from the package, unzipped by the browser, each file kept once opened. A list missing from the build is an error — the code stays unchecked — never "not in the list" | `background/reference-data.ts` | `reference-data.test.ts`, `release-gates.test.ts` |
+| A document's IFSC and PIN are checked as it is read. A code no list has is said to be probably misread; a printed branch, bank or state the list contradicts is said to be — one of the two was misread — and nothing is offered from the list | `documents/reference-check.ts`, called from `read-document.ts` → `readAndExtract` | `reference-check.test.ts`, `read-document.test.ts` |
+| What the list knows and the page did not print — a passbook's MICR code and branch address, a PIN's district and state — is offered, marked as the list's ("From RBI’s list of IFSC codes, for …"), with no piece of the page beside it, and never over what the page printed | `reference-check.ts` → `offer`, `Candidate.listed`; `ExtractedDetails.tsx` → `fromList`; `document-service.ts` (no crop) | `ExtractedDetails.reference.test.tsx` |
+| The branch printed beside an IFSC is compared by its own name less its town: spelled two ways (MALLESHWARAM, MALLESWARAM), run together (RAJAJI NAGAR) or under the town's old name, it is the same branch; JAYANAGAR is not VIJAYANAGAR; and the town alone proves nothing — a bank has a hundred branches in Bengaluru | `reference-check.ts` → `compareBranch` | `reference-check.test.ts` |
+| Agreement is said on the IFSC's row, never ticked: a code misread by one digit can still be a real branch, so only a checksum pre-ticks a row. A PIN is never said to agree — PINs narrow from region to post office, so one misread in its last digit is its neighbour, in the same district and state | `reference-check.ts`, `Candidate.agreement` | `reference-check.test.ts`, `ExtractedDetails.reference.test.tsx` |
+| A code of a bank that merged into another — Syndicate, Andhra, Corporation, Vijaya, Dena, the State Bank associates, sixteen in all, whose branches the list no longer has — is said to be out of date, naming the bank that took it over; a passbook still printed under the old name is not taken for another bank | `reference/ifsc.ts` → `mergedBank`, `formerBanks`, `notListed` | `ifsc.test.ts`, `reference-check.test.ts` |
+| An IFSC or PIN typed in the vault editor is looked up once saved: what the list says appears under the row, and what it knows is offered for the boxes still empty — saved only on "Fill these in" | `ui/lib/reference-offer.ts`, `vault-editor/ReferenceNote.tsx`; `ref:ifsc` / `ref:pincode`, privileged and exactly a code's shape | `reference-offer.test.ts`, `VaultEditor.test.tsx`, `validate-adversarial.test.ts` |
+| Two keys a form asks for, appended: `bank.micr`, `bank.branch_address` — with their words, and a page asking for both beside the applicant's own address | `taxonomy.ts`, `traits.ts`, `synonyms.json`, `fixtures/bank-portal/bank-details.html` | `bank-portal.test.ts` |
+
+In the real panel (`e2e/panel.spec.ts`): the made-up passbook's SMPL0001234 is
+read and said to be in no list, with nothing offered from one; SBIN0000001
+typed in the editor fills State Bank of India, KOLKATA MAIN, 700002021 and the
+branch's address; 560001 fills Bengaluru Urban, Karnataka. The run saw the
+worker read the index, SBI's file and the directory from the package, and
+nothing leave the extension.
+
+Found on the way: the first design ticked a PIN whose district and state agreed
+with the page, and an IFSC whose printed branch shared a word with the listed
+one — "Bengaluru" would have done. Both would have ticked a misread code. And
+RBI's list keeps a merged bank only as one IMPS entry, so every Syndicate Bank
+passbook would have been told its code was misread.
+
+**Not yet:** the PIN directory is India Post's of December 2020 — a PIN opened
+since is reported missing, and a typed one is told the directory's year. RBI's
+list is razorpay's v2.0.62; a newer release is a new pin. The published list
+gives some branches' city and district the wrong way round (Guwahati's are
+filed under Kamrup); they are used only to compare names, and shown as given.
+
+3,266 unit tests and 154 browser tests pass; `npm audit` is clean. The lists
+add 8.8 MB, so the package is now 120 MB.
+
+# A passbook read nearly whole, and offered two details
+
+The user's own passbook, photographed at 780 pixels across: the text the
+reader returned held the account number, the holder, the father's name, the
+address and PIN, the IFSC and the MICR code — and the panel offered two
+details, one of them "& Address", the rest of an empty box's heading.
+
+| Now | Where | Proof |
+|-----|-------|-------|
+| The account number after "A/C No.:", the commonest label a passbook prints | `extract.ts` → `extractBank` | `extract-bank.test.ts` |
+| The holder's block — "NAME AND ADDRESS OF THE ACCOUNT HOLDER/S:" (read "ADORESS") — gives the holder's name without its "1.", the father's from "S/O" (the O read as a nought), and the holder's own street, town and PIN. Never the "Branch Name & Address" box, which is the bank's | `extract-bank.ts` → `readHolderBlock` | `extract-bank.test.ts` |
+| The MICR code printed beside the IFSC | `extract-bank.ts` → `MICR` | `extract-bank.test.ts` |
+| A heading is not a value: "Branch Name & Address" names no branch, and a value made only of heading words is never offered | `extract-bank.ts` → `BRANCH_LABEL`; `extract.ts` → `isOnlyLabelWords` | `extract-bank.test.ts`, `extract.test.ts` |
+| An IFSC read a character short (four noughts read as three) is never offered as read; RBI's list puts it right when one branch of the bank can be it — or one the branch stamped on the page names — and the row says what was read and what it became, beside the picture of the code as printed. Otherwise the user is told to type it | `extract-bank.ts` → `nearMissIfsc`; `reference/ifsc.ts` → `nearCodes`; `reference-check.ts`; `ExtractedDetails.tsx` | `ifsc.test.ts`, `reference-check.test.ts`, `read-document.test.ts`, `ExtractedDetails.reference.test.tsx` |
+| A branch printed with no label — stamped under the bank's name — is found by the list's branch name, a letter misread or not ("SAMPLEPURT-NIHRUNAGAR" is Samplepura's NEHRU NAGAR), and said to agree; a MICR code the list gives differently is said in a note, the printed one kept | `reference-check.ts` → `compareBranch`, `printedBranch` | `reference-check.test.ts` |
+| A photo under 1,000 pixels across is read at one and a half times its size, resampled by the browser: on the user's passbook every misread line came right — the IFSC whole, the locality's name, the town at 0.99 | `paddle-reader.ts` → `readingScale`; `reader-worker.ts` → `pixelsOf` | `paddle-reader.test.ts`, `e2e/panel.spec.ts` |
+
+Measured in the scratchpad bench on the user's six documents, field by field
+against their answer keys: the passbook went from 2 offered (1 wrong) to 11 of
+11, with the branch, its address, the district and the state from the lists
+besides; the CBSE and PUC marks cards, Aadhaar, caste and income certificates
+were unchanged, field for field and in time. In the real panel
+(`e2e/panel.spec.ts` → "reads a small photo of a passbook laid out as the
+user's…"): a made-up passbook in the same layout, as small
+(`fixtures/images/passbook-holder-block.jpg`), gives every detail, the lists'
+rows saying whose they are, nothing ticked.
+
+**Measured and not shipped.** A second look at each line the reader was unsure
+of, cut from the page enlarged: it mended words ("valid for le time" → "life
+time") but changed no field on any of the six documents, read the passbook's
+IFSC still a nought short, and made reading 20–70% slower. And a note naming
+every labelled line nothing was taken from: on five of the six documents it
+named table headings, web addresses, a certificate's sentence — and the
+Aadhaar's VID, which must never be stored.
+
+**Not yet:** a passbook that prints its holder under some other label, or a
+cheque's address band; the PUC card's total marks (516) still read as "8".

@@ -303,7 +303,7 @@ describe('PDFs, opened by the offscreen page', () => {
     const engine = createPdfEngine(ask, jobs);
 
     expect(await engine.lock(new Uint8Array([1, 2]), 'RAVI1998')).toBe('needs-password');
-    expect(await engine.text(new Uint8Array([1, 2]))).toBe('Name : Ravi Kumar');
+    expect(await engine.text(new Uint8Array([1, 2]))).toEqual({ text: 'Name : Ravi Kumar' });
     const rendered = await engine.render(new Uint8Array([1, 2]), 2000, 'RAVI1998', 2);
     expect([...rendered.image]).toEqual([137, 80, 78, 71]);
     expect(rendered.pages).toBe(3);

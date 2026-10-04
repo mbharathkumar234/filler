@@ -175,6 +175,9 @@ const CHECKS: Partial<Record<RequestType, Check>> = {
   'doc:preflight': (r) => key(r.key) && typeof r.constraint === 'object' && r.constraint !== null,
   'doc:extract': (r) => str(r.id, 200),
   'doc:scan': (r) => str(r.id, 200),
+  // Exactly an IFSC or a PIN, so the lists are asked about nothing else.
+  'ref:ifsc': (r) => typeof r.code === 'string' && /^[A-Z]{4}0[A-Z0-9]{6}$/.test(r.code),
+  'ref:pincode': (r) => typeof r.pin === 'string' && /^[1-9][0-9]{5}$/.test(r.pin),
   // A stored photo as base64, under the same ceiling as a page to read.
   'ocr:scan': (r) => str(r.image, Math.ceil(LIMITS.bytes * 1.4)) && str(r.mime, 100),
   // Names a question, never a document or a file: the worker decides both.

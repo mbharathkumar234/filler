@@ -61,4 +61,12 @@ for (const [file, ruled] of [['grade-card-ruled.png', true], ['grade-card-open.p
   await tab.locator('#card').screenshot({ path: `${OUT}${file}` });
   console.log(`wrote fixtures/images/${file}`);
 }
+/*
+ * The same card as a university portal hands it over: a PDF with real text in
+ * it, which is read exactly rather than recognised — and whose table has no
+ * picture for a table model, only where each piece of text sits.
+ */
+await tab.setContent(page(true));
+await tab.pdf({ path: fileURLToPath(new URL('../fixtures/pdf/grade-card.pdf', import.meta.url)), width: '1280px', height: '780px', printBackground: true });
+console.log('wrote fixtures/pdf/grade-card.pdf');
 await browser.close();

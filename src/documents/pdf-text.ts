@@ -26,6 +26,8 @@
 import type { PdfTextReader } from './read-document';
 import { openPdf } from './pdfjs';
 import { MAX_PDF_PAGES } from './preprocess';
+import type { ReadTable } from './table';
+import { tablesFromText, type TextFragment } from './text-table';
 
 /**
  * Two fragments within this many units of the same baseline are on one line.
@@ -82,26 +84,31 @@ export const readPdfText: PdfTextReader = async (bytes, password) => {
 
   try {
     const pages: string[] = [];
+    // The tables on each page, laid out from where its text sits (`text-table.ts`).
+    const tables: ReadTable[] = [];
     const count = Math.min(pdf.numPages, MAX_PDF_PAGES);
 
     for (let pageNumber = 1; pageNumber <= count; pageNumber += 1) {
       const page = await pdf.getPage(pageNumber);
       const content = await page.getTextContent();
 
-      const fragments: Fragment[] = [];
+      const fragments: TextFragment[] = [];
       for (const item of content.items) {
         if (!('str' in item) || item.str === '') continue;
-        // `transform` is [a, b, c, d, e, f]; e and f are the position.
+        // `transform` is [a, b, c, d, e, f]: b and d give the font's size, e and f the position.
         const x = item.transform[4] ?? 0;
         const y = item.transform[5] ?? 0;
-        fragments.push({ text: item.str, x, y, width: item.width ?? 0 });
+        const height = item.height || Math.hypot(item.transform[2] ?? 0, item.transform[3] ?? 0);
+        fragments.push({ text: item.str, x, y, width: item.width ?? 0, height });
       }
 
       pages.push(reconstructLines(fragments).join('\n'));
+      tables.push(...tablesFromText(fragments));
       page.cleanup();
     }
 
-    return pages.join('\n').trim();
+    const text = pages.join('\n').trim();
+    return tables.length > 0 ? { text, tables } : { text };
   } finally {
     await task.destroy();
   }

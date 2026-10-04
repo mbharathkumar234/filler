@@ -123,6 +123,22 @@ const REQUIRED = [
     why: 'The table model has no tokens, so its answer means nothing.',
     minBytes: 500,
   },
+  // The lists an IFSC and a PIN are checked against (scripts/fetch-reference-data.mjs).
+  {
+    path: 'dist/reference/ifsc/index.json',
+    why: 'An IFSC could not be looked up: the list of banks is missing.',
+    minBytes: 5_000,
+  },
+  {
+    path: 'dist/reference/ifsc/SBIN.json.gz',
+    why: 'State Bank of India’s branches are missing from the IFSC list.',
+    minBytes: 500_000,
+  },
+  {
+    path: 'dist/reference/pincode.json.gz',
+    why: 'A PIN could not be looked up: India Post’s directory is missing.',
+    minBytes: 500_000,
+  },
   // The other scripts' recognisers, each with the alphabet it reads.
   ...[
     ['devanagari_PP-OCRv5_mobile_rec', 'Hindi, Marathi and every Devanagari document'],

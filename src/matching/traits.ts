@@ -112,6 +112,9 @@ export const TRAITS: Partial<Record<FieldKey, FieldTraits>> = {
   'bank.bank_name': { shape: 'text', minLength: 2, maxLength: 80 },
   'bank.branch': { shape: 'text', minLength: 2, maxLength: 80 },
   'bank.account_type': { shape: 'choice' },
+  // Nine digits: city, bank, branch.
+  'bank.micr': { shape: 'numeric', minLength: 9, maxLength: 9 },
+  'bank.branch_address': { shape: 'text', maxLength: 250 },
 
   /*
    * A semester and a year of study have no entry on purpose.

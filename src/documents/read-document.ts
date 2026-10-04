@@ -38,6 +38,7 @@ import type { DocumentMeta } from '@/shared/types';
 import { detectScripts, readableScripts, type IndicScript } from './indic';
 import { extractFromText, type ExtractionHint, type ExtractionResult } from './extract';
 import type { PageBox } from './evidence-region';
+import { checkAgainstReference, lookUp, type ReferenceLookup } from './reference-check';
 import type { ReadTable } from './table';
 
 /** How the text was obtained. The user should be told which. */
@@ -67,7 +68,10 @@ export interface DocumentText {
   lines?: TextLine[];
   /** Pages read as something other than the stored page, which `lines` on them refer to. */
   pageImages?: PageImage[];
-  /** The tables the reader found, cell by cell (`table.ts`). Only from pixels: a text layer has none. */
+  /**
+   * The tables on the pages, cell by cell: read from pixels by the table model
+   * (`table.ts`), or laid out from where a PDF's own text sits (`text-table.ts`).
+   */
   tables?: ReadTable[];
 }
 
@@ -133,7 +137,13 @@ export interface OcrEngine {
 }
 
 /** Reads a PDF's embedded text layer. Supplied by the caller for testability. */
-export type PdfTextReader = (bytes: Uint8Array, password?: string) => Promise<string>;
+export type PdfTextReader = (bytes: Uint8Array, password?: string) => Promise<PdfText>;
+
+/** A PDF's own text, and the tables laid out from where it sits (`text-table.ts`). */
+export interface PdfText {
+  text: string;
+  tables?: ReadTable[];
+}
 
 /** What reading needs to know about the file: its type, and what a locked PDF opens with. */
 export type ReadMeta = Pick<DocumentMeta, 'mime'> & { password?: string };
@@ -152,6 +162,12 @@ export interface ReadOptions {
    * user picked their language. Otherwise decided from whatever text turns up.
    */
   scripts?: IndicScript[];
+  /**
+   * RBI's IFSC list and India Post's PIN directory, which every IFSC and PIN
+   * read is checked against (`reference-check.ts`). The lists ship inside the
+   * extension; without them a code is offered unchecked, as it always was.
+   */
+  reference?: ReferenceLookup;
 }
 
 /**
@@ -173,7 +189,8 @@ export async function readDocumentText(
   // 1. The exact path.
   if (meta.mime === 'application/pdf' && options.pdfText) {
     try {
-      const text = (await options.pdfText(bytes, meta.password)).trim();
+      const layer = await options.pdfText(bytes, meta.password);
+      const text = layer.text.trim();
       if (text.length >= MIN_TEXT_LAYER) {
         return {
           text,
@@ -181,6 +198,7 @@ export async function readDocumentText(
           scripts: detectScripts(text),
           // How it was read is `source`, which the screen puts in its own words.
           notes: [],
+          ...(layer.tables !== undefined && layer.tables.length > 0 ? { tables: layer.tables } : {}),
         };
       }
       if (text.length > 0) {
@@ -256,6 +274,12 @@ export async function readDocumentText(
  * out of a PDF's text layer is exact and deserves its score; the same value
  * guessed from a photograph does not, and the difference has to survive all the
  * way to the screen where somebody decides whether to save it.
+ *
+ * Every IFSC and PIN is checked against its list first (`reference-check.ts`):
+ * what the list knows and the page did not print is offered, and a code the
+ * list does not have, or that disagrees with what is printed beside it, is
+ * warned of. A list that agrees is said to, and keeps no more standing than
+ * the code it agrees with — a code misread by a digit can still be listed.
  */
 export async function readAndExtract(
   bytes: Uint8Array,
@@ -263,7 +287,14 @@ export async function readAndExtract(
   options: ReadOptions = {},
 ): Promise<ExtractionResult & { read: DocumentText }> {
   const read = await readDocumentText(bytes, meta, options);
-  const extracted = extractFromText(read.text, options.hint ?? {}, { tables: read.tables ?? [] });
+  let extracted = extractFromText(read.text, options.hint ?? {}, { tables: read.tables ?? [] });
+  // Without the lists nothing is looked up — but a code read a character short
+  // is still said to be, rather than dropped without a word.
+  extracted = checkAgainstReference(
+    extracted,
+    options.reference === undefined ? { ifsc: new Map(), pins: new Map() } : await lookUp(extracted, options.reference),
+    read.text.split('\n'),
+  );
 
   if (read.source !== 'ocr') return { ...extracted, read };
 

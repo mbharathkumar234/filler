@@ -4,9 +4,13 @@ import tailwind from '@tailwindcss/vite';
 import { crx } from '@crxjs/vite-plugin';
 import { fileURLToPath, URL } from 'node:url';
 import { existsSync, readFileSync } from 'node:fs';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { parse as parseYaml } from 'yaml';
 import { OCR_MODELS, archivePath } from './scripts/fetch-ocr-models.mjs';
+import { REFERENCE_DATA, referencePath } from './scripts/fetch-reference-data.mjs';
 import { modelConfigFrom } from './src/documents/paddle.ts';
+import { compactIfsc, type RawBranch } from './src/reference/ifsc.ts';
+import { compactPincodes } from './src/reference/pincode.ts';
 import manifest from './manifest.config.ts';
 
 /**
@@ -48,28 +52,35 @@ function practiceForm() {
  * `new URL(..., import.meta.url)`, which Vite emits as an asset of this package.
  * `verify-dist.mjs` fails the build if any of it did not arrive.
  */
+/** The files in an uncompressed ustar archive, by path, GNU long names included. */
+function tarFiles(tar: Buffer): Map<string, Buffer> {
+  const found = new Map<string, Buffer>();
+  let longName: string | null = null;
+  for (let at = 0; at + 512 <= tar.length; ) {
+    const header = tar.subarray(at, at + 512);
+    if (header.every((byte) => byte === 0)) break;
+    const field = (from: number, length: number) =>
+      header.subarray(from, from + length).toString('utf8').replace(/\0.*$/s, '');
+    const size = parseInt(field(124, 12).trim() || '0', 8);
+    const type = field(156, 1);
+    const prefix = field(345, 155);
+    const body = tar.subarray(at + 512, at + 512 + size);
+    const name = longName ?? (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
+    longName = null;
+
+    if (type === 'L') longName = body.toString('utf8').replace(/\0.*$/s, '');
+    else if (type === '0' || type === '') found.set(name, Buffer.from(body));
+
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return found;
+}
+
 function ocrAssets() {
   /** The two files wanted from a PaddleX model archive (uncompressed ustar). */
   function unpack(tar: Buffer): { onnx: Buffer; yml: string } {
     const found: Record<string, Buffer> = {};
-    let longName: string | null = null;
-    for (let at = 0; at + 512 <= tar.length; ) {
-      const header = tar.subarray(at, at + 512);
-      if (header.every((byte) => byte === 0)) break;
-      const field = (from: number, length: number) =>
-        header.subarray(from, from + length).toString('utf8').replace(/\0.*$/s, '');
-      const size = parseInt(field(124, 12).trim() || '0', 8);
-      const type = field(156, 1);
-      const prefix = field(345, 155);
-      const body = tar.subarray(at + 512, at + 512 + size);
-      const name = longName ?? (prefix ? `${prefix}/${field(0, 100)}` : field(0, 100));
-      longName = null;
-
-      if (type === 'L') longName = body.toString('utf8').replace(/\0.*$/s, '');
-      else if (type === '0' || type === '') found[name.split('/').pop()!] = Buffer.from(body);
-
-      at += 512 + Math.ceil(size / 512) * 512;
-    }
+    for (const [name, body] of tarFiles(tar)) found[name.split('/').pop()!] = body;
     const onnx = found['inference.onnx'];
     const yml = found['inference.yml'];
     if (!onnx || !yml) throw new Error('A model archive is missing inference.onnx or inference.yml.');
@@ -97,6 +108,61 @@ function ocrAssets() {
         this.emitFile({ type: 'asset', fileName: `ocr/${model.name}.onnx`, source: onnx });
         this.emitFile({ type: 'asset', fileName: `ocr/${model.name}.json`, source: JSON.stringify(config) });
       }
+    },
+  };
+}
+
+/**
+ * RBI's list of IFSC codes and India Post's PIN directory, packed into
+ * `reference/` (`reference/ifsc.ts`, `reference/pincode.ts`).
+ *
+ * Fetched and hash-checked at build time (`scripts/fetch-reference-data.mjs`)
+ * and read by the extension from its own package, never from the network. The
+ * IFSC list goes one bank to a file, zipped, so a lookup opens one bank: State
+ * Bank of India is a megabyte, most banks a few kilobytes. The PIN directory is
+ * one zipped file of under a megabyte. The browser unzips them itself
+ * (`background/reference-data.ts`).
+ */
+function referenceData() {
+  return {
+    name: 'autofill:reference-data',
+    generateBundle(this: {
+      emitFile: (f: { type: 'asset'; fileName: string; source: Uint8Array | string }) => void;
+    }) {
+      const entry = (name: string) => {
+        const found = REFERENCE_DATA.find((candidate) => candidate.name === name)!;
+        if (!existsSync(referencePath(found))) {
+          throw new Error(
+            `${found.file} is missing from vendor/reference. Run \`npm run reference:data\`; ` +
+              'without it the extension cannot check an IFSC or a PIN.',
+          );
+        }
+        return found;
+      };
+
+      const ifsc = entry('ifsc');
+      const byBank: Record<string, Record<string, RawBranch>> = {};
+      for (const [name, body] of tarFiles(gunzipSync(readFileSync(referencePath(ifsc))))) {
+        const file = /(?:^|\/)([A-Z]{4})\.json$/.exec(name);
+        if (file) byBank[file[1]!] = JSON.parse(body.toString('utf8')) as Record<string, RawBranch>;
+      }
+      const { index, shards } = compactIfsc(byBank, ifsc.source);
+      this.emitFile({ type: 'asset', fileName: 'reference/ifsc/index.json', source: JSON.stringify(index) });
+      for (const [bank, shard] of Object.entries(shards)) {
+        this.emitFile({
+          type: 'asset',
+          fileName: `reference/ifsc/${bank}.json.gz`,
+          source: gzipSync(JSON.stringify(shard), { level: 9 }),
+        });
+      }
+
+      const pincode = entry('pincode');
+      const table = compactPincodes(readFileSync(referencePath(pincode), 'utf8'), pincode.source);
+      this.emitFile({
+        type: 'asset',
+        fileName: 'reference/pincode.json.gz',
+        source: gzipSync(JSON.stringify(table), { level: 9 }),
+      });
     },
   };
 }
@@ -204,6 +270,7 @@ export default defineConfig({
     crx({ manifest }),
     practiceForm(),
     ocrAssets(),
+    referenceData(),
     pdfjsDecoders(),
     workerSafePreload(),
     buildContentScript(),

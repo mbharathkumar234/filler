@@ -50,6 +50,19 @@ AutoFill Assistant — Indian portal forms
 > forms that upload through their own window, such as Google Forms, you open the
 > window, the extension puts the file in, and you press Upload.
 >
+> **IFSC and PIN codes, checked on your device**
+>
+> Type an IFSC or a PIN, or read one off a passbook or an Aadhaar card, and the
+> extension checks it against RBI's list of bank branches and India Post's PIN
+> directory, both kept inside the extension. It tells you when a code does not
+> exist — or belongs to a bank that has since merged — and offers the branch's
+> MICR code and address, or the district and state, for you to accept. No code
+> is sent anywhere to be looked up.
+>
+> *PIN data: All India Pincode Directory, Department of Posts, Government of
+> India, data.gov.in, Government Open Data License – India. IFSC data: RBI's
+> list of bank branches, as published by razorpay/ifsc (MIT).*
+>
 > **Where your details live**
 >
 > On this device, in encrypted storage, under a passphrase only you know. There
@@ -152,7 +165,11 @@ hashes, and never at run time. Nothing is downloaded at any point while the
 extension runs, which is why the CSP includes `wasm-unsafe-eval` and nothing
 else; `connect-src` would refuse such a fetch anyway. (PaddleOCR's own browser
 SDK is not used: its OpenCV.js dependency needs `new Function`, which this CSP
-does not permit.)
+does not permit.) Two lists ship as data files in the same way: RBI's list of
+bank branches (razorpay/ifsc v2.0.62, MIT) and India Post's All India Pincode
+Directory (data.gov.in, Government Open Data License – India, credited in the
+description). They are read by the extension's background worker from its own
+package, so an IFSC or PIN looked up in them is never sent anywhere.
 
 **Reading a document happens on the device.** When the user presses "Read
 details from this" on a document they have saved, the file is decrypted in the
@@ -198,3 +215,9 @@ every suggested value is shown beside the line it came from and can be edited
 first.
 
 Where a number carries a check digit, it is verified before being offered.
+
+An IFSC or a PIN, read off a document or typed, is checked against RBI's list
+of bank branches and India Post's PIN directory — data files inside the
+extension, read on the device. A code the list does not have is pointed out
+rather than offered as good; what the list adds (a MICR code, a branch address,
+a district) is labelled as the list's and saved only if the user accepts it.

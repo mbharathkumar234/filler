@@ -53,6 +53,16 @@ Where a number carries a check digit — Aadhaar does — the extension verifies
 and tells you whether it passed. A number that fails is not offered for saving
 at all; you are told it was probably misread.
 
+**IFSC codes and PIN codes are checked against official lists kept inside the
+extension.** RBI's list of bank branches and India Post's PIN directory ship as
+files in the extension itself. When a document's IFSC or PIN is read, or you
+type one in, it is looked up in those files on your device: the extension can
+then tell you the code does not exist, or offer the branch's MICR code and
+address, or the district and state, for you to accept. **No code is sent
+anywhere to be looked up** — there is no lookup service involved. Anything taken
+from a list is labelled as coming from it, and is saved only when you choose
+to.
+
 **PDFs locked with a password.** An e-Aadhaar or an e-PAN is downloaded locked.
 When you save one, the extension asks you for its password — it never works
 the password out for you — and keeps it with the document, encrypted in your

@@ -18,6 +18,8 @@
 
 import type { IndicScript } from '@/documents/indic';
 import type { ReadTable } from '@/documents/table';
+import type { IfscRecord } from '@/reference/ifsc';
+import type { PinRecord } from '@/reference/pincode';
 import type { AcademicPath } from '@/matching/pathway';
 import type { FieldKey } from '@/matching/taxonomy';
 import type { FillPlan, RunState } from './types';
@@ -374,9 +376,17 @@ export type AuditRequest =
   | { type: 'audit:settings' }
   | { type: 'audit:clear' };
 
+/**
+ * An IFSC or PIN the user typed, looked up in RBI's and India Post's lists —
+ * shipped inside the extension and read by the worker, so the code goes
+ * nowhere (`background/reference-data.ts`). Privileged: it is the user's own.
+ */
+export type ReferenceRequest = { type: 'ref:ifsc'; code: string } | { type: 'ref:pincode'; pin: string };
+
 export type ExtensionRequest =
   | VaultRequest
   | DocumentRequest
+  | ReferenceRequest
   | UploadRequest
   | HarvestRequest
   | FillRequest
@@ -440,6 +450,9 @@ export const PRIVILEGED_TYPES: ReadonlySet<string> = new Set<RequestType>([
   'pdf:text',
   'pdf:render',
   'doc:to-window',
+  // The user's own IFSC or PIN.
+  'ref:ifsc',
+  'ref:pincode',
   'harvest:tab',
   'fill:tab',
   'fill:undo:tab',
@@ -519,6 +532,10 @@ export interface ResponseMap {
   'doc:preflight': { ok: boolean; warnings: string[]; reason?: string };
   'doc:extract': DocumentExtraction;
   'doc:scan': ScannedPage;
+  /** The branch, or null when RBI's list has no such code. */
+  'ref:ifsc': IfscRecord | null;
+  /** The PIN's places, or null when India Post's directory has no such PIN. */
+  'ref:pincode': PinRecord | null;
   'ocr:scan': { image: string; width: number; height: number; flattened: boolean; turns: 0 | 1 | 2 | 3 };
   /**
    * Every piece of text the page recognised, where it sits, and the page's
@@ -542,7 +559,8 @@ export interface ResponseMap {
     seals?: Array<{ box: { x0: number; y0: number; x1: number; y1: number }; text: string[] }>;
   };
   'pdf:lock': { lock: 'open' | 'needs-password' | 'wrong-password' };
-  'pdf:text': { text: string };
+  /** The PDF's own text, and the tables laid out from where it sits. */
+  'pdf:text': { text: string; tables?: ReadTable[] };
   /** A PNG, base64, its size, and how many pages the PDF has. */
   'pdf:render': { image: string; width: number; height: number; pages: number };
   'doc:to-window': WindowPlacement;

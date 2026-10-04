@@ -32,7 +32,7 @@ describe('exact beats guessed, every time', () => {
     const spy = vi.spyOn(ocr, 'recognise');
 
     const result = await readDocumentText(new Uint8Array([1]), { mime: 'application/pdf' }, {
-      pdfText: async () => `Government of India\nRavi Kumar\nDOB: 14/03/1998\n${AADHAAR}`,
+      pdfText: async () => ({ text: `Government of India\nRavi Kumar\nDOB: 14/03/1998\n${AADHAAR}` }),
       ocr,
     });
 
@@ -42,7 +42,7 @@ describe('exact beats guessed, every time', () => {
 
   it('marks a text-layer read as exact, for the screen to say so once', async () => {
     const result = await readDocumentText(new Uint8Array([1]), { mime: 'application/pdf' }, {
-      pdfText: async () => `Government of India\nRavi Kumar\nDOB: 14/03/1998\n${AADHAAR}`,
+      pdfText: async () => ({ text: `Government of India\nRavi Kumar\nDOB: 14/03/1998\n${AADHAAR}` }),
     });
     expect(result.source).toBe('pdf-text-layer');
     expect(result.notes.join(' ')).not.toMatch(/exact/i);
@@ -50,7 +50,7 @@ describe('exact beats guessed, every time', () => {
 
   it('falls through to OCR when a PDF is a scan with no real text', async () => {
     const result = await readDocumentText(new Uint8Array([1]), { mime: 'application/pdf' }, {
-      pdfText: async () => 'Page 1', // scanner furniture, not content
+      pdfText: async () => ({ text: 'Page 1' }), // scanner furniture, not content
       ocr: engine(`Ravi Kumar\n${AADHAAR}`),
     });
 
@@ -70,7 +70,7 @@ describe('exact beats guessed, every time', () => {
 
   it('goes straight to OCR for an image', async () => {
     const result = await readDocumentText(new Uint8Array([1]), { mime: 'image/jpeg' }, {
-      pdfText: async () => 'never called for an image',
+      pdfText: async () => ({ text: 'never called for an image' }),
       ocr: engine(`Ravi Kumar\n${AADHAAR}`),
     });
     expect(result.source).toBe('ocr');
@@ -91,7 +91,7 @@ describe('exact beats guessed, every time', () => {
 describe('when there is no engine', () => {
   it('still reads a PDF text layer', async () => {
     const result = await readDocumentText(new Uint8Array([1]), { mime: 'application/pdf' }, {
-      pdfText: async () => `Ravi Kumar\nDOB: 14/03/1998\n${AADHAAR}\nGovernment of India`,
+      pdfText: async () => ({ text: `Ravi Kumar\nDOB: 14/03/1998\n${AADHAAR}\nGovernment of India` }),
     });
     expect(result.source).toBe('pdf-text-layer');
   });
@@ -142,6 +142,31 @@ describe('language packs it does not have', () => {
   });
 });
 
+describe('a table in a PDF’s own text', () => {
+  it('reaches the rules that read it, as a table recognised from a photo does', async () => {
+    const tables = [
+      {
+        rows: [
+          ['Course Code', 'Course Title', 'Total', 'Grade'],
+          ['21CS32', 'Data Structures and Applications', '105', 'A+'],
+          ['21CS33', 'Analog and Digital Electronics', '91', 'F'],
+          ['21CS35', 'Object Oriented Programming with Java', '101', 'A+'],
+        ],
+      },
+    ];
+    const text = 'SAMPLE TECHNOLOGICAL UNIVERSITY\nPROVISIONAL GRADE CARD\nSGPA 6.10';
+    const result = await readAndExtract(new Uint8Array([1]), { mime: 'application/pdf' }, {
+      pdfText: async () => ({ text, tables }),
+      hint: { documentKey: 'doc.semester_marksheet' },
+    });
+    expect(result.read.source).toBe('pdf-text-layer');
+    expect(result.read.tables).toEqual(tables);
+    const value = (key: string) => result.candidates.find((c) => c.key === key)?.value;
+    expect(value('education.undergraduate.backlogs')).toBe('1');
+    expect(value('education.undergraduate.marks_obtained')).toBe('297');
+  });
+});
+
 describe('a table the reader found', () => {
   const GRADES = {
     rows: [
@@ -178,7 +203,7 @@ describe('the guess is discounted, and the certainty is not', () => {
 
   it('scores a value read from a text layer at full confidence', async () => {
     const result = await readAndExtract(new Uint8Array([1]), { mime: 'application/pdf' }, {
-      pdfText: async () => CARD,
+      pdfText: async () => ({ text: CARD }),
     });
     const name = result.candidates.find((c) => c.key === 'identity.full_name')!;
     expect(name.confidence).toBeCloseTo(0.65, 5);
@@ -197,7 +222,7 @@ describe('the guess is discounted, and the certainty is not', () => {
     // were obtained stops mattering — and pretending otherwise would push the
     // one value we can actually prove below the ones we cannot.
     const fromPdf = await readAndExtract(new Uint8Array([1]), { mime: 'application/pdf' }, {
-      pdfText: async () => CARD,
+      pdfText: async () => ({ text: CARD }),
     });
     const fromImage = await readAndExtract(new Uint8Array([1]), { mime: 'image/jpeg' }, {
       ocr: engine(CARD),
@@ -221,6 +246,141 @@ describe('the guess is discounted, and the certainty is not', () => {
     });
     expect(result.read.source).toBe('ocr');
     expect(result.read.engineConfidence).toBe(0.9);
+  });
+});
+
+describe('the codes it read, checked against RBI’s and India Post’s lists', () => {
+  /* A real public branch code: an IFSC is a branch's address, not anyone's detail. */
+  const PASSBOOK = 'STATE BANK OF INDIA\nBranch : KOLKATA MAIN\nIFSC : SBIN0000001\nAccount Number : 30123456789';
+  const KOLKATA_MAIN = {
+    ifsc: 'SBIN0000001',
+    bank: 'State Bank of India',
+    branch: 'KOLKATA MAIN',
+    address: 'SAMRIDDHI BHAWAN, 1 STRAND ROAD, KOLKATA 700 001',
+    city: 'Kolkata',
+    district: 'Kolkata',
+    state: 'West Bengal',
+    micr: '700002021',
+  };
+  const lists = () => ({
+    ifsc: vi.fn(async (code: string) => (code === 'SBIN0000001' ? KOLKATA_MAIN : null)),
+    pincode: vi.fn(async () => null),
+  });
+
+  it('offers what the list knows and the page did not print, and says the code agrees with the page', async () => {
+    const result = await readAndExtract(new Uint8Array([1]), { mime: 'application/pdf' }, {
+      pdfText: async () => ({ text: PASSBOOK }),
+      reference: lists(),
+    });
+    const pick = (key: string) => result.candidates.find((c) => c.key === key);
+    expect(pick('bank.micr')?.value).toBe('700002021');
+    expect(pick('bank.branch_address')?.evidence).toBe('RBI’s list of IFSC codes: SBIN0000001');
+    expect(pick('bank.ifsc')?.agreement).toMatch(/State Bank of India’s KOLKATA MAIN branch/);
+    expect(pick('bank.ifsc')?.suggestChecked).toBe(false);
+    expect(pick('bank.branch')?.value).toBe('KOLKATA MAIN');
+  });
+
+  it('still discounts a code read off a photo that the list agrees with: only a checksum keeps its standing', async () => {
+    const fromPdf = await readAndExtract(new Uint8Array([1]), { mime: 'application/pdf' }, {
+      pdfText: async () => ({ text: PASSBOOK }),
+      reference: lists(),
+    });
+    const fromImage = await readAndExtract(new Uint8Array([1]), { mime: 'image/jpeg' }, {
+      ocr: engine(PASSBOOK),
+      reference: lists(),
+    });
+    const pick = (r: typeof fromPdf) => r.candidates.find((c) => c.key === 'bank.ifsc')!;
+    expect(pick(fromImage).agreement).toBeDefined();
+    expect(pick(fromImage).confidence).toBeLessThan(pick(fromPdf).confidence);
+  });
+
+  it('warns of a code read off a photo that the list does not have', async () => {
+    const result = await readAndExtract(new Uint8Array([1]), { mime: 'image/jpeg' }, {
+      ocr: engine(PASSBOOK.replace('SBIN0000001', 'SBIN0000007')),
+      reference: lists(),
+    });
+    expect(result.warnings.some((w) => w.startsWith('SBIN0000007 is not in RBI’s list of IFSC codes.'))).toBe(true);
+    expect(result.candidates.find((c) => c.key === 'bank.micr')).toBeUndefined();
+  });
+
+  it('reads as it always did without the lists', async () => {
+    const result = await readAndExtract(new Uint8Array([1]), { mime: 'application/pdf' }, {
+      pdfText: async () => ({ text: PASSBOOK }),
+    });
+    expect(result.candidates.find((c) => c.key === 'bank.micr')).toBeUndefined();
+    expect(result.candidates.find((c) => c.key === 'bank.ifsc')?.agreement).toBeUndefined();
+  });
+
+  describe('a passbook whose IFSC was read a character short', () => {
+    /* The user's own passbook's layout and the reader's slips, with made-up values. */
+    const SHORT = [
+      'Sample Bank Ltd.',
+      'SAMPLEPURT-NIHRUNAGAR',
+      'Branch Name & Address',
+      'SAVINGS BANK A/C No.: 1234500100067890 Business Hours, Weekly Holidays, Telephone Nos.',
+      'NAME AND ADORESS OF THE ACCOUNT HOLDER/S:',
+      '1.MEHTA R ARJUN KUMAR',
+      'S/0 R RAMAPPA,',
+      'SAMPLEPURA',
+      '572101 INDIA',
+      'Customer-id: 1)123456789',
+      'SC COd: ZZZZ000123 MICR CODE:572052123 P.BRANCH MANAGER',
+    ].join('\n');
+    const NEHRU_NAGAR = {
+      ifsc: 'ZZZZ0000123',
+      bank: 'Sample Bank',
+      branch: 'NEHRU NAGAR',
+      address: '1 MG ROAD, NEHRU NAGAR, SAMPLEPURA-572101',
+      city: 'Samplepura',
+      district: 'Samplepura',
+      state: 'Karnataka',
+      micr: '572052103',
+    };
+    const PLACE = { pin: '572101', states: ['Karnataka'], districts: ['Samplepura'], offices: ['Samplepura S.O'] };
+    const listsFor = () => ({
+      ifsc: vi.fn(async () => null),
+      ifscNear: vi.fn(async (code: string) => (code === 'ZZZZ000123' ? [NEHRU_NAGAR] : [])),
+      pincode: vi.fn(async (pin: string) => (pin === '572101' ? PLACE : null)),
+    });
+
+    it('offers everything the passbook says, the IFSC put right and saying so', async () => {
+      const result = await readAndExtract(new Uint8Array([1]), { mime: 'image/jpeg' }, {
+        ocr: engine(SHORT),
+        hint: { documentKey: 'doc.bank_passbook' },
+        reference: listsFor(),
+      });
+      const pick = (key: string) => result.candidates.find((c) => c.key === key);
+      expect(pick('bank.account_number')?.value).toBe('1234500100067890');
+      expect(pick('bank.account_holder')?.value).toBe('MEHTA R ARJUN KUMAR');
+      expect(pick('family.father_name')?.value).toBe('R RAMAPPA');
+      expect(pick('bank.micr')?.value).toBe('572052123');
+      expect(pick('address.permanent.pincode')?.value).toBe('572101');
+      expect(pick('address.permanent.state')?.listed).toEqual({ list: 'pincode', code: '572101' });
+      expect(pick('bank.ifsc')).toMatchObject({ value: 'ZZZZ0000123', suggestChecked: false });
+      expect(pick('bank.ifsc')?.correction).toMatch(/^Read as ZZZZ000123, a character short\./);
+      expect(pick('bank.ifsc')?.agreement).toMatch(/the branch printed on this document \(“SAMPLEPURT-NIHRUNAGAR”\)/);
+      expect(pick('bank.branch')?.value).toBe('NEHRU NAGAR');
+      expect(result.candidates.filter((c) => c.suggestChecked)).toEqual([]);
+    });
+
+    it('says the code was read a character short when it has no lists to put it right with', async () => {
+      const result = await readAndExtract(new Uint8Array([1]), { mime: 'image/jpeg' }, {
+        ocr: engine(SHORT),
+        hint: { documentKey: 'doc.bank_passbook' },
+      });
+      expect(result.candidates.find((c) => c.key === 'bank.ifsc')).toBeUndefined();
+      expect(result.warnings).toContain('The IFSC was read as ZZZZ000123, a character short. Check it against the passbook or a cheque, and type it in.');
+    });
+  });
+
+  it('asks nothing of the lists for a document with no code on it', async () => {
+    const reference = lists();
+    await readAndExtract(new Uint8Array([1]), { mime: 'image/jpeg' }, {
+      ocr: engine(`Government of India\nRavi Kumar\nDOB: 14/03/1998\n${AADHAAR}`),
+      reference,
+    });
+    expect(reference.ifsc).not.toHaveBeenCalled();
+    expect(reference.pincode).not.toHaveBeenCalled();
   });
 });
 
@@ -285,7 +445,7 @@ describe('where on the page the text was', () => {
 
   it('has no boxes for text taken from a PDF’s own text layer', async () => {
     const read = await readDocumentText(new Uint8Array(), { mime: 'application/pdf' }, {
-      pdfText: async () => 'Permanent Account Number ABCPE1234F and enough text to be a text layer',
+      pdfText: async () => ({ text: 'Permanent Account Number ABCPE1234F and enough text to be a text layer' }),
     });
     expect(read.source).toBe('pdf-text-layer');
     expect(read.lines).toBeUndefined();
@@ -308,7 +468,7 @@ describe('a PDF that opens with a password', () => {
       {
         pdfText: async (_bytes, password) => {
           given.push(password);
-          return TEXT;
+          return { text: TEXT };
         },
       },
     );
@@ -322,7 +482,7 @@ describe('a PDF that opens with a password', () => {
       new Uint8Array([1]),
       { mime: 'application/pdf', password: 'RAVI1998' },
       {
-        pdfText: async () => 'Page 1',
+        pdfText: async () => ({ text: 'Page 1' }),
         ocr: engine('', {
           recognise: async (_bytes, _mime, _scripts, password) => {
             given.push(password);
@@ -339,7 +499,7 @@ describe('a PDF that opens with a password', () => {
     await readDocumentText(new Uint8Array([1]), { mime: 'application/pdf' }, {
       pdfText: async (_bytes, password) => {
         given.push(password);
-        return TEXT;
+        return { text: TEXT };
       },
     });
     expect(given).toEqual([undefined]);

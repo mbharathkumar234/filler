@@ -24,6 +24,14 @@
  *  - **The screen says whether the text was read exactly or guessed.** Those
  *    are different levels of trust and the user is entitled to know which one
  *    they are being offered.
+ *  - **A value from RBI's or India Post's list says so** — a passbook's MICR
+ *    code, an Aadhaar's district — in place of a line it was never read from.
+ *    When the list agrees with the page, the IFSC's row says that too, in
+ *    words: a code misread by one digit can still be a real branch, so it is
+ *    still the user who ticks it.
+ *  - **A value put right says what was read**, beside the piece of the page
+ *    it was read from: an IFSC read a character short, put right from RBI's
+ *    list, shows the picture of the code as printed under the code as put right.
  *
  * ## A dozen rows at once
  *
@@ -401,7 +409,7 @@ function Row({
        * table came out as a sliver nobody could read.
        */}
       <div data-evidence className="col-span-3 min-w-0">
-        {candidate.crop !== undefined && (
+        {candidate.crop !== undefined && candidate.listed === undefined && (
           <>
             <div className={fullSize ? 'overflow-x-auto' : ''}>
               <img
@@ -433,13 +441,30 @@ function Row({
             <span className="text-emerald-700">
               Check digit verified — this number is not a misreading.
             </span>
+          ) : candidate.listed !== undefined ? (
+            fromList(candidate.listed)
           ) : (
             <>
               Read from{candidate.page === undefined ? '' : ` page ${candidate.page}`}: “{candidate.evidence}”
             </>
           )}
         </p>
+        {candidate.correction !== undefined && (
+          // Beside the piece of the page it was read from: the picture is the
+          // one thing here that can settle whether the putting right was right.
+          <p className="mt-0.5 text-[11px] text-amber-800">{candidate.correction}</p>
+        )}
+        {candidate.agreement !== undefined && (
+          <p className="mt-0.5 text-[11px] text-slate-600">{candidate.agreement}</p>
+        )}
       </div>
     </li>
   );
+}
+
+/** Where a value that was not read off the page came from. */
+function fromList(listed: NonNullable<ExtractedCandidate['listed']>): string {
+  return listed.list === 'ifsc'
+    ? `From RBI’s list of IFSC codes, for ${listed.code} — not read off this document.`
+    : `From India Post’s PIN directory, for PIN ${listed.code} — not read off this document.`;
 }

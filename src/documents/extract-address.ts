@@ -7,6 +7,11 @@
  * branch's on a passbook — and filing one of those as the applicant's address
  * would put a wrong address on every form they submit afterwards. So this
  * reads an Aadhaar card and nothing else.
+ *
+ * The one other place a holder's own address is printed is a passbook's block
+ * labelled as the account holder's ("NAME AND ADDRESS OF THE ACCOUNT
+ * HOLDER/S"), read by `extract-bank.ts` → `readHolderBlock` — never its
+ * "Branch Name & Address" box.
  */
 
 import { INDIAN_STATES } from '@/matching/deterministic';

@@ -200,7 +200,7 @@ describe('the privileged list is complete, or the build fails', () => {
    * stored profile is privileged by default, and an exception has to be
    * written down here on purpose.
    */
-  const MUST_BE_PRIVILEGED = [/^vault:/, /^doc:/, /^approval:/, /^llm:set-/];
+  const MUST_BE_PRIVILEGED = [/^vault:/, /^doc:/, /^approval:/, /^llm:set-/, /^ref:/];
 
   /**
    * Types a content script legitimately sends, and why.

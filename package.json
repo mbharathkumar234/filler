@@ -6,7 +6,7 @@
   "description": "Browser-extension assistant that stores personal details once and fills repetitive portal forms, stopping before submission.",
   "scripts": {
     "dev": "node scripts/fetch-ocr-models.mjs && vite",
-    "build": "npm run typecheck && node scripts/fetch-ocr-models.mjs && vite build && node scripts/verify-dist.mjs",
+    "build": "npm run typecheck && node scripts/fetch-ocr-models.mjs && node scripts/fetch-reference-data.mjs && vite build && node scripts/verify-dist.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "lint": "eslint .",
     "test": "vitest run",
@@ -14,7 +14,8 @@
     "e2e": "playwright test",
     "harness:build": "vite build -c vite.harness.config.ts",
     "fixtures:serve": "node scripts/serve-fixtures.mjs",
-    "ocr:models": "node scripts/fetch-ocr-models.mjs"
+    "ocr:models": "node scripts/fetch-ocr-models.mjs",
+    "reference:data": "node scripts/fetch-reference-data.mjs"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0",

@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest';
 
 import {
   ORIENTATION_MIN_CONFIDENCE,
+  SMALL_PHOTO_SCALE,
   chooseReading,
   flattenPage,
   readPage,
   readSeals,
   readTables,
+  readingScale,
   uprightPage,
   type OrientationRunner,
   type TableRunner,
@@ -557,6 +559,21 @@ describe('a photo flattened before it is read', () => {
       },
     });
     expect(result).toEqual({ image: original, flattened: false });
+  });
+});
+
+describe('a small photo, read larger', () => {
+  it('reads a photo under a thousand pixels across at one and a half times its size', () => {
+    // The user's passbook photo: 780 x 716.
+    expect(readingScale(780, 716)).toBe(SMALL_PHOTO_SCALE);
+    expect(readingScale(716, 999)).toBe(1.5);
+  });
+
+  it('reads every other page as it came', () => {
+    expect(readingScale(1000, 600)).toBe(1);
+    // The smallest of the documents it was measured on.
+    expect(readingScale(1112, 682)).toBe(1);
+    expect(readingScale(4000, 3000)).toBe(1);
   });
 });
 

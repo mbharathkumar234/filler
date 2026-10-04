@@ -55,7 +55,7 @@ const TABLE_ROWS = 3;
 /** The furthest one row of a table sits below the one above it, in lines. */
 const ROW_GAP_LINES = 1;
 
-interface VisualRow {
+export interface VisualRow {
   y0: number;
   y1: number;
   items: PlacedText[];
@@ -69,7 +69,7 @@ function median(values: readonly number[]): number {
 }
 
 /** The text in rows, top to bottom: a piece joins the row its middle sits in. */
-function visualRows(items: readonly PlacedText[]): VisualRow[] {
+export function visualRows(items: readonly PlacedText[]): VisualRow[] {
   const rows: VisualRow[] = [];
   for (const item of [...items].sort((a, b) => middle(a.box) - middle(b.box))) {
     const centre = middle(item.box);
@@ -88,11 +88,22 @@ function visualRows(items: readonly PlacedText[]): VisualRow[] {
  * of them — a title wrapped onto a second line — when it lies within the
  * table's width; two such rows end the table, as does a gap.
  */
-export function tableRegions(items: readonly PlacedText[]): TableRegion[] {
+export function tableRegions(
+  items: readonly PlacedText[],
+  options: {
+    /** How far apart two rows of one table may be, in lines. */
+    rowGapLines?: number;
+    /** How many rows with less across may sit together inside a table — the lines of a wrapped cell. */
+    looseRows?: number;
+  } = {},
+): TableRegion[] {
+  const gapLines = options.rowGapLines ?? ROW_GAP_LINES;
+  const looseAllowed = options.looseRows ?? 1;
   const rows = visualRows(items.filter((item) => item.text.trim() !== ''));
   const regions: TableRegion[] = [];
 
   let run: VisualRow[] = [];
+  let loose = 0;
   const close = (): void => {
     while (run.length > 0 && run[run.length - 1]!.items.length < ACROSS) run.pop();
     if (run.filter((row) => row.items.length >= ACROSS).length >= TABLE_ROWS) {
@@ -108,20 +119,22 @@ export function tableRegions(items: readonly PlacedText[]): TableRegion[] {
       });
     }
     run = [];
+    loose = 0;
   };
 
   for (const row of rows) {
     const previous = run[run.length - 1];
     if (previous !== undefined) {
       const line = median(previous.items.map((item) => item.box.y1 - item.box.y0));
-      if (row.y0 - previous.y1 > ROW_GAP_LINES * line) close();
+      if (row.y0 - previous.y1 > gapLines * line) close();
     }
 
-    const last = run[run.length - 1];
     if (row.items.length >= ACROSS) {
       run.push(row);
-    } else if (last !== undefined && last.items.length >= ACROSS && withinWidth(row, run)) {
+      loose = 0;
+    } else if (run.length > 0 && loose < looseAllowed && withinWidth(row, run)) {
       run.push(row);
+      loose += 1;
     } else {
       close();
     }

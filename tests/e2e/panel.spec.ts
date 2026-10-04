@@ -35,6 +35,8 @@ interface Row {
   ticked: boolean;
   from: string;
   picture: boolean;
+  /** Everything the row says under its value: where it came from, what agrees, what was put right. */
+  said: string[];
 }
 
 interface Reading {
@@ -116,6 +118,7 @@ async function read(label: string): Promise<Reading> {
         ticked: li.querySelector<HTMLInputElement>('input[type="checkbox"]')?.checked ?? false,
         from: [...li.querySelectorAll('p')].map((p) => __panel.text(p)).find((t) => /^(Read from|Check digit)/.test(t)) ?? '',
         picture: li.querySelector('img') !== null,
+        said: [...li.querySelectorAll('p')].map((p) => __panel.text(p)),
       })),
       notes: [...reading.querySelectorAll('p')].map((p) => __panel.text(p)),
       alerts: [...reading.querySelectorAll('[role="alert"]')].map((a) => __panel.text(a)),
@@ -523,6 +526,48 @@ test('reads a semester grade card’s table: its courses, their total, SGPA, CGP
   expect(reading.rows.filter((row) => row.ticked)).toEqual([]);
 });
 
+test('reads a downloaded grade card’s table from the PDF’s own text: no picture, no table model', async () => {
+  // The same made-up card as a university portal hands it over
+  // (`scripts/make-grade-card-fixtures.mjs`): a PDF with real text in it. Read
+  // as lines, its courses were lost — every row starts with a course code and
+  // one title wraps — and there was no picture for the table model. The grid
+  // is laid out from where each piece of text sits (`text-table.ts`).
+  test.setTimeout(240_000);
+  const CARD = 'Semester marks card';
+  await chooseAndSave(CARD, fixture('grade-card.pdf'));
+  await saved(CARD);
+  // The photo of this card was read into this slot a test ago, and the button
+  // toggles a slot's reading: closed first if it is still open.
+  if (await panel.run((l: string) => __panel.reading(l) !== null, CARD)) {
+    await panel.run((l: string) => __panel.button('Read details from this', __panel.slot(l))!.click(), CARD);
+    await panel.until('the reading to close', (l: string) => __panel.reading(l) === null, [CARD]);
+  }
+  const reading = await read(CARD);
+
+  expect(reading.alerts).toEqual([]);
+  // Read exactly, from the PDF's own characters.
+  expect(reading.notes.join(' ')).toMatch(/Read directly from the document/);
+  const value = (key: string) => valueOf(reading, key)?.value;
+  expect(value('identity.full_name')).toBe('ARJUN MEHTA');
+  expect(value('education.undergraduate.registration_number')).toBe('1SA21CS042');
+  expect(value('education.undergraduate.sgpa')).toBe('8.45');
+  expect(value('education.undergraduate.cgpa')).toBe('8.21');
+  expect(value('education.undergraduate.subjects')).toBe(
+    [
+      'Transform Calculus, Fourier Series and Numerical Techniques',
+      'Data Structures and Applications',
+      'Analog and Digital Electronics',
+      'Computer Organization and Architecture',
+      'Object Oriented Programming with Java',
+      'Data Structures Laboratory',
+      'Samskrutika Kannada',
+    ].join('; '),
+  );
+  expect(value('education.undergraduate.marks_obtained')).toBe('659');
+  expect(value('education.undergraduate.backlogs')).toBe('0');
+  expect(reading.rows.filter((row) => row.ticked)).toEqual([]);
+});
+
 test('reads a certificate’s issuing authority off its seal, and fills a reservation form with it', async () => {
   // Made up (`scripts/make-seal-fixtures.mjs`): the authority is printed only
   // in the seal. Read, ticked, saved — then a central-style reservation form
@@ -753,6 +798,176 @@ test('remakes a scanned PDF of three pages as three pages, inside the portal’s
   });
 });
 
+test('checks a passbook’s IFSC against RBI’s list inside the extension, and says no bank has the made-up one', async () => {
+  // `scripts/make-passbook-fixture.py`: a bank that does not exist, and an
+  // IFSC no bank has. The list is read from the package; the code goes nowhere.
+  test.setTimeout(180_000);
+  if (await panel.run((l: string) => __panel.reading(l) !== null, PASSBOOK)) {
+    await panel.run((l: string) => __panel.button('Read details from this', __panel.slot(l))!.click(), PASSBOOK);
+    await panel.until('the reading to close', (l: string) => __panel.reading(l) === null, [PASSBOOK]);
+  }
+  const reading = await read(PASSBOOK);
+
+  expect(valueOf(reading, 'bank.ifsc')?.value).toBe('SMPL0001234');
+  expect(reading.notes).toContain(
+    'SMPL0001234 is not in RBI’s list of IFSC codes. It was probably misread — check it against the passbook or a cheque.',
+  );
+  // Nothing from the list for a code it does not have, and nothing ticked.
+  expect(valueOf(reading, 'bank.micr')).toBeUndefined();
+  expect(reading.rows.filter((row) => row.ticked)).toEqual([]);
+
+  await panel.run((l: string) => __panel.button('Read details from this', __panel.slot(l))!.click(), PASSBOOK);
+  await panel.until('the reading to close', (l: string) => __panel.reading(l) === null, [PASSBOOK]);
+});
+
+test('reads a small photo of a passbook laid out as the user’s: every detail, the lists’ beside them, nothing ticked', async () => {
+  // Found on the user's own passbook, 780 pixels across: the reading held
+  // nearly every detail and the panel offered two, one of them "& Address".
+  // `scripts/make-passbook-fixture.py` → passbook-holder-block.jpg lays a
+  // made-up passbook out the same way, as small; its two codes are public ones.
+  test.setTimeout(180_000);
+  if (await panel.run((l: string) => __panel.reading(l) !== null, PASSBOOK)) {
+    await panel.run((l: string) => __panel.button('Read details from this', __panel.slot(l))!.click(), PASSBOOK);
+    await panel.until('the reading to close', (l: string) => __panel.reading(l) === null, [PASSBOOK]);
+  }
+  await chooseAndSave(PASSBOOK, picture('passbook-holder-block.jpg'));
+  await saved(PASSBOOK);
+  const reading = await read(PASSBOOK);
+  const value = (key: string) => valueOf(reading, key)?.value;
+
+  // What the passbook prints, from the holder's block down to the codes.
+  expect(value('bank.bank_name')).toBe('STATE BANK OF INDIA');
+  expect(value('bank.account_number')).toBe('30123456789012');
+  expect(value('bank.account_holder')).toBe('ARJUN MEHTA');
+  expect(value('family.father_name')).toBe('RAKESH MEHTA');
+  expect(value('address.permanent.line1')).toBe('12 SAMPLE STREET');
+  expect(value('address.permanent.city')).toBe('Kolkata');
+  expect(value('address.permanent.pincode')).toBe('700001');
+  expect(value('bank.ifsc')).toBe('SBIN0000001');
+  expect(value('bank.micr')).toBe('700002021');
+  // What RBI's list and India Post's directory add, each row saying whose it is.
+  expect(value('bank.branch')).toBe('KOLKATA MAIN');
+  expect(valueOf(reading, 'bank.branch')?.said).toContain('From RBI’s list of IFSC codes, for SBIN0000001 — not read off this document.');
+  expect(value('address.permanent.state')).toBe('West Bengal');
+  // The IFSC agrees with the branch stamped under the bank's name — said, not ticked.
+  expect(valueOf(reading, 'bank.ifsc')?.said.join(' ')).toMatch(/the branch printed on this document \(“KOLKATA MAIN”\)/);
+  // No heading offered as a value, nothing ticked, and each value beside its piece of the photo.
+  expect(reading.rows.map((row) => row.value)).not.toContain('& Address');
+  expect(reading.rows.filter((row) => row.ticked)).toEqual([]);
+  expect(valueOf(reading, 'bank.account_number')?.picture).toBe(true);
+
+  await panel.run((l: string) => __panel.button('Read details from this', __panel.slot(l))!.click(), PASSBOOK);
+  await panel.until('the reading to close', (l: string) => __panel.reading(l) === null, [PASSBOOK]);
+});
+
+test('looks a typed IFSC and PIN up in the lists inside the extension, and fills only what the user accepts', async () => {
+  // A real public branch code and a real public PIN: neither is anyone's detail.
+  test.setTimeout(60_000);
+
+  /*
+   * A box of the vault editor is found by its block and its own label — the
+   * label's first words, not the "sensitive" badge an IFSC's carries beside them.
+   */
+
+  /** Open a block of the vault editor, type into one of its boxes, and press its Save. */
+  async function saveInEditor(group: string, label: string, value: string) {
+    await panel.run((g: string) => {
+      const toggle = [...document.querySelectorAll<HTMLButtonElement>('section > button[aria-expanded]')].find((b) =>
+        __panel.text(b).startsWith(g),
+      )!;
+      if (toggle.getAttribute('aria-expanded') !== 'true') toggle.click();
+    }, group);
+    await panel.until(
+      `the ${label} box, typed into`,
+      (g: string, l: string, v: string) => {
+        const block = [...document.querySelectorAll('section')].find((s) =>
+          __panel.text(s.querySelector(':scope > button[aria-expanded]')).startsWith(g),
+        );
+        const tag = [...(block?.querySelectorAll('label') ?? [])].find((x) => x.querySelector('span')?.firstChild?.textContent?.trim() === l);
+        const box = tag === undefined ? null : (document.getElementById(tag.htmlFor) as HTMLInputElement | null);
+        if (box === null) return false;
+        __panel.type(box, v);
+        return true;
+      },
+      [group, label, value],
+    );
+    // Saved once the row knows it has changed, so Save presses for the new value.
+    await panel.until(
+      `the ${label} row to know it is unsaved`,
+      (g: string, l: string) => {
+        const block = [...document.querySelectorAll('section')].find((s) =>
+          __panel.text(s.querySelector(':scope > button[aria-expanded]')).startsWith(g),
+        );
+        const tag = [...(block?.querySelectorAll('label') ?? [])].find((x) => x.querySelector('span')?.firstChild?.textContent?.trim() === l);
+        return tag !== undefined && /unsaved/.test(__panel.text(tag));
+      },
+      [group, label],
+    );
+    await panel.run(
+      (g: string, l: string) => {
+        const block = [...document.querySelectorAll('section')].find((s) =>
+          __panel.text(s.querySelector(':scope > button[aria-expanded]')).startsWith(g),
+        )!;
+        __panel.button(`Save ${l} to vault`, block)!.click();
+      },
+      group,
+      label,
+    );
+  }
+
+  /** What the list said under the row, once it has said it. */
+  const said = (start: string) =>
+    panel.until(
+      'what the list says',
+      (s: string) => [...document.querySelectorAll('[role="status"]')].map((p) => __panel.text(p)).find((t) => t.startsWith(s)),
+      [start],
+    );
+
+  /** Press "Fill these in" under the row, and read back the boxes it filled. */
+  async function fill(start: string, group: string, labels: string[]) {
+    await panel.run((s: string) => {
+      const note = [...document.querySelectorAll('[role="status"]')].find((p) => __panel.text(p).startsWith(s))!;
+      __panel.button('Fill these in', note)!.click();
+    }, start);
+    const values = await panel.until(
+      'the boxes the list filled',
+      (g: string, ls: string[]) => {
+        const block = [...document.querySelectorAll('section')].find((s) =>
+          __panel.text(s.querySelector(':scope > button[aria-expanded]')).startsWith(g),
+        );
+        const found = ls.map((l) => {
+          const tag = [...(block?.querySelectorAll('label') ?? [])].find((x) => x.querySelector('span')?.firstChild?.textContent?.trim() === l);
+          return tag === undefined ? '' : ((document.getElementById(tag.htmlFor) as HTMLInputElement | null)?.value ?? '');
+        });
+        return found.every((v) => v !== '') ? found : null;
+      },
+      [group, labels],
+    );
+    // The offer goes once it has been taken.
+    await panel.until(
+      'the offer to go',
+      (s: string) => ![...document.querySelectorAll('[role="status"]')].some((p) => __panel.text(p).startsWith(s)),
+      [start],
+    );
+    return values;
+  }
+
+  await saveInEditor('Bank account', 'IFSC code', 'SBIN0000001');
+  const branch = 'RBI’s list has SBIN0000001 as State Bank of India’s KOLKATA MAIN branch, in Kolkata.';
+  expect(await said(branch)).toMatch(/^RBI’s list has SBIN0000001 as State Bank of India’s KOLKATA MAIN branch, in Kolkata\./);
+  expect(await fill(branch, 'Bank account', ['Bank name', 'Branch', 'MICR code', 'Branch address'])).toEqual([
+    'State Bank of India',
+    'KOLKATA MAIN',
+    '700002021',
+    'SAMRIDDHI BHAWAN, 1 STRAND ROAD, KOLKATA 700 001',
+  ]);
+
+  await saveInEditor('Permanent address', 'PIN code', '560001');
+  const place = 'India Post’s PIN directory has 560001 in Bengaluru Urban, Karnataka.';
+  expect(await said(place)).toMatch(/^India Post’s PIN directory has 560001 in Bengaluru Urban, Karnataka\./);
+  expect(await fill(place, 'Permanent address', ['District', 'State'])).toEqual(['Bengaluru Urban', 'Karnataka']);
+});
+
 test('sends nothing anywhere, from any extension page or worker', async () => {
   // The watch must have seen where a document goes — the worker, the offscreen
   // page, the reader inside it — or "nothing" would mean nothing. The reader
@@ -761,6 +976,11 @@ test('sends nothing anywhere, from any extension page or worker', async () => {
   expect(
     panel.traffic.some((request) => request.type === 'worker' && request.url.endsWith('/ocr/PP-OCRv5_mobile_det.onnx')),
   ).toBe(true);
+  // So were the lookups: RBI's and India Post's lists, read by the background
+  // worker from the package — and the codes looked up in them went nowhere.
+  for (const list of ['/reference/ifsc/index.json', '/reference/ifsc/SBIN.json.gz', '/reference/pincode.json.gz']) {
+    expect(panel.traffic.some((request) => request.type === 'service_worker' && request.url.endsWith(list)), list).toBe(true);
+  }
   expect(panel.outside).toEqual([]);
   expect(panel.problems).toEqual([]);
 });

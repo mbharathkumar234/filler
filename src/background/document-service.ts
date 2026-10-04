@@ -28,6 +28,7 @@ import { base64ToBytes, bytesToBase64 } from '@/shared/base64';
 import { admitPdf, type PdfAdmission } from '@/documents/pdf-lock';
 // pdf.js cannot load in this worker: PDFs are opened by the offscreen page.
 import { offscreenJobs, offscreenPdf, offscreenScan, workerRasterBackend } from './ocr-host';
+import { referenceLookup } from './reference-data';
 import type { Candidate, DocumentType } from '@/documents/extract';
 import type { TextSource } from '@/documents/read-document';
 import { VaultLockedError, isUnlocked, withKey } from '@/vault/session';
@@ -309,13 +310,18 @@ async function readOne(document: LoadedDocument): Promise<DocumentExtraction> {
       // it carries. The vault has always known; it was simply never passed on.
       hint: { documentKey: document.key },
       scripts,
+      // Every IFSC and PIN read, checked against the lists shipped inside the
+      // extension — looked up here, on this device.
+      reference: referenceLookup,
     },
   );
 
   const crops = await evidenceCrops(
     document.bytes,
     document.meta.mime,
-    result.candidates,
+    // A value from RBI's or India Post's list was not read off any piece of the
+    // page; the code it was found by shows its own.
+    result.candidates.filter((candidate) => candidate.listed === undefined),
     result.read.lines,
     document.password,
     result.read.pageImages,

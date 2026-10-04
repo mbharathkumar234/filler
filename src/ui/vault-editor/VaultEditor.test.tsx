@@ -5,6 +5,8 @@ import userEvent from '@testing-library/user-event';
 
 import { VaultEditor } from './VaultEditor';
 import type { AcademicPath } from '@/matching/pathway';
+import type { IfscRecord } from '@/reference/ifsc';
+import type { PinRecord } from '@/reference/pincode';
 import type * as Client from '@/ui/lib/client';
 
 /**
@@ -32,6 +34,19 @@ const STUDENT: AcademicPath = {
   claims: ['371j', 'income'],
 };
 
+/* A real public branch code and a real public PIN: neither is anyone's detail. */
+const KOLKATA_MAIN: IfscRecord = {
+  ifsc: 'SBIN0000001',
+  bank: 'State Bank of India',
+  branch: 'KOLKATA MAIN',
+  address: 'SAMRIDDHI BHAWAN, 1 STRAND ROAD, KOLKATA 700 001',
+  city: 'Kolkata',
+  district: 'Kolkata',
+  state: 'West Bengal',
+  micr: '700002021',
+};
+const GPO: PinRecord = { pin: '560001', states: ['Karnataka'], districts: ['Bengaluru'], offices: ['Bangalore G.P.O.'] };
+
 let stored: { key: string; value: string }[] = [];
 let storedPath: AcademicPath | null = null;
 const sent: { type: string; path?: AcademicPath | null; key?: string; value?: string }[] = [];
@@ -54,6 +69,13 @@ vi.mock('@/ui/lib/client', async () => {
       // The panels below do their own loading; answer with empty lists rather
       // than null, which they would render straight into.
       if (request.type === 'doc:list') return Promise.resolve([]);
+      // RBI's and India Post's lists, as the worker answers from them.
+      if (request.type === 'ref:ifsc') {
+        return Promise.resolve((request as { code?: string }).code === 'SBIN0000001' ? KOLKATA_MAIN : null);
+      }
+      if (request.type === 'ref:pincode') {
+        return Promise.resolve((request as { pin?: string }).pin === '560001' ? GPO : null);
+      }
       if (request.type === 'audit:read') return Promise.resolve([]);
       return Promise.resolve(null);
     },
@@ -196,5 +218,66 @@ describe('a vault with a path stored', () => {
     await open();
 
     expect(screen.getByText('Doctorate / PhD')).toBeTruthy();
+  });
+});
+
+describe('an IFSC or PIN, once saved', () => {
+  const written = () => sent.filter((request) => request.type === 'vault:set').map((request) => [request.key, request.value]);
+
+  async function saveIn(group: string, label: RegExp, value: string) {
+    const user = userEvent.setup();
+    await open();
+    await user.click(screen.getByRole('button', { name: new RegExp(group) }));
+    await user.type(screen.getByLabelText(label), value);
+    await user.click(screen.getByRole('button', { name: `Save ${label.source.replace('^', '')} to vault` }));
+    return user;
+  }
+
+  it('is looked up, and fills only the boxes still empty — and only when asked', async () => {
+    stored = [{ key: 'bank.bank_name', value: 'SBI' }];
+    const user = await saveIn('Bank account', /^IFSC code/, 'sbin0000001');
+
+    await screen.findByText('RBI’s list has SBIN0000001 as State Bank of India’s KOLKATA MAIN branch, in Kolkata.');
+    expect(written()).toEqual([['bank.ifsc', 'sbin0000001']]);
+
+    await user.click(screen.getByRole('button', { name: 'Fill these in' }));
+    await waitFor(() =>
+      expect(written()).toEqual([
+        ['bank.ifsc', 'sbin0000001'],
+        ['bank.branch', 'KOLKATA MAIN'],
+        ['bank.micr', '700002021'],
+        ['bank.branch_address', 'SAMRIDDHI BHAWAN, 1 STRAND ROAD, KOLKATA 700 001'],
+      ]),
+    );
+    // The bank name the user typed is theirs.
+    expect(written().some(([key]) => key === 'bank.bank_name')).toBe(false);
+    await waitFor(() => expect(screen.queryByRole('status')).toBeNull());
+  });
+
+  it('writes nothing more when the user says not now', async () => {
+    const user = await saveIn('Bank account', /^IFSC code/, 'SBIN0000001');
+    await screen.findByText(/^RBI’s list has SBIN0000001/);
+    await user.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(screen.queryByText(/^RBI’s list has/)).toBeNull();
+    expect(written()).toEqual([['bank.ifsc', 'SBIN0000001']]);
+  });
+
+  it('says so when the list has no such code, and offers nothing', async () => {
+    await saveIn('Bank account', /^IFSC code/, 'SBIN0999999');
+    await screen.findByText('SBIN0999999 is not in RBI’s list of IFSC codes. Check it against your passbook or a cheque.');
+    expect(screen.queryByRole('button', { name: 'Fill these in' })).toBeNull();
+  });
+
+  it('offers a PIN’s district and state', async () => {
+    const user = await saveIn('Permanent address', /^PIN code/, '560001');
+    await screen.findByText('India Post’s PIN directory has 560001 in Bengaluru, Karnataka.');
+    await user.click(screen.getByRole('button', { name: 'Fill these in' }));
+    await waitFor(() =>
+      expect(written()).toEqual([
+        ['address.permanent.pincode', '560001'],
+        ['address.permanent.district', 'Bengaluru'],
+        ['address.permanent.state', 'Karnataka'],
+      ]),
+    );
   });
 });

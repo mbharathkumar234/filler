@@ -155,7 +155,7 @@ async function openPdf(request: PdfRequest): Promise<ResponseMap[PdfRequest['typ
     case 'pdf:lock':
       return { lock: await pdfLock(bytes, request.password) };
     case 'pdf:text':
-      return { text: await readPdfText(bytes, request.password) };
+      return readPdfText(bytes, request.password);
     case 'pdf:render': {
       const backend = createRasterBackend();
       const { source: page, pages } = await renderPdfPage(

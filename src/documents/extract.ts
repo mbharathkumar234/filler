@@ -74,6 +74,24 @@ export interface Candidate {
   confirmed: false;
   /** Should the suggestion screen tick this by default? */
   suggestChecked: boolean;
+  /**
+   * Not read off the page: taken from RBI's IFSC list or India Post's PIN
+   * directory by a code that was (`reference-check.ts`). The suggestion screen
+   * says so in place of "Read from", and shows no piece of the page for it.
+   */
+  listed?: { list: 'ifsc' | 'pincode'; code: string };
+  /**
+   * What RBI's list says of an IFSC read off the page, when the branch printed
+   * beside it is the branch the list names — said on its row, never ticked:
+   * only a checksum pre-ticks.
+   */
+  agreement?: string;
+  /**
+   * How the value differs from what was read, and why: an IFSC read a
+   * character short, put right from RBI's list (`reference-check.ts`). Said on
+   * its row, which is never ticked.
+   */
+  correction?: string;
 }
 
 export interface ExtractionResult {
@@ -84,6 +102,22 @@ export interface ExtractionResult {
   warnings: string[];
   /** Things read and deliberately not offered, so the omission is not silent. */
   notes: string[];
+  /** Codes read a character from their shape, never offered as read (`NearMiss`). */
+  nearMisses?: NearMiss[];
+}
+
+/**
+ * A code read one character from its shape, under the label that names it: an
+ * IFSC with a character dropped ("SMPL000123" for SMPL0000123). Never offered
+ * as read — it is not a code — but kept, because RBI's list may know the one
+ * code it can be (`reference-check.ts`).
+ */
+export interface NearMiss {
+  key: 'bank.ifsc';
+  /** As read, the fifth character a nought. */
+  read: string;
+  line: number;
+  evidence: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +317,8 @@ export interface Ctx {
   note: (message: string) => void;
   /** Has an earlier extractor already claimed this key? */
   candidatesHave: (key: FieldKey) => boolean;
+  /** A code read a character from its shape, for a list to put right. */
+  nearMiss: (miss: NearMiss) => void;
 }
 
 function extractAadhaar(ctx: Ctx): void {
@@ -394,8 +430,9 @@ function extractBank(ctx: Ctx): void {
       });
     }
 
-    // Account numbers have no shared format, so this is label-anchored only.
-    const account = /(?:account\s*(?:no|number)?|a\/c)\s*[:.-]?\s*(\d{9,18})\b/i.exec(line);
+    // Account numbers have no shared format, so this is label-anchored only:
+    // "Account No", and "A/C No.:", the commonest a passbook prints.
+    const account = /(?:account|a\/c)\s*(?:no\.?|number|num)?\s*[:.-]?\s*(\d{9,18})\b/i.exec(line);
     if (account) {
       ctx.push({
         key: 'bank.account_number',
@@ -407,6 +444,20 @@ function extractBank(ctx: Ctx): void {
       });
     }
   });
+}
+
+/** The words a form's headings are made of, and no value is. */
+const LABEL_WORDS = new Set([
+  'name', 'names', 'address', 'and', 'of', 'the', 'branch', 'code', 'number', 'details', 'holder', 'holders',
+  'account', 'bank', 'ifsc', 'micr', 'telephone', 'phone', 'nos', 'hours', 'date', 'signature', 'seal',
+]);
+
+/** A value made of nothing but heading words: "& Address", "Name", "Branch Name". */
+export function isOnlyLabelWords(value: string): boolean {
+  // Another script, or a digit: a value, whatever words are beside it.
+  if (/[\u0080-￿]/.test(value) || /\d/.test(value)) return false;
+  const words = value.toLowerCase().match(/[a-z]+/g) ?? [];
+  return words.length > 0 && words.every((word) => LABEL_WORDS.has(word));
 }
 
 /** Day-first, because that is what Indian documents print. */
@@ -661,6 +712,7 @@ export function extractFromText(
   const candidates: Array<Omit<Candidate, 'confirmed' | 'suggestChecked'>> = [];
   const warnings: string[] = [];
   const notes: string[] = [];
+  const nearMisses: NearMiss[] = [];
 
   const ctx: Ctx = {
     lines,
@@ -673,6 +725,9 @@ export function extractFromText(
       rows: table.rows.map((row) => row.map((cell) => latinise(zeroesForOs(normaliseDigits(cell)).trim()))),
     })),
     push: (candidate) => {
+      // A heading is not a value: "& Address" is the rest of "Branch Name &
+      // Address", an empty box's label, and was once offered as the branch.
+      if (isOnlyLabelWords(candidate.value)) return;
       // One value per key. The extractors run in rough order of evidence, but
       // order alone is not enough: a guess from position (the line above a date
       // of birth) runs before a name the document certifies in a sentence, and
@@ -692,6 +747,9 @@ export function extractFromText(
       if (!notes.includes(message)) notes.push(message);
     },
     candidatesHave: (key) => candidates.some((c) => c.key === key),
+    nearMiss: (miss) => {
+      if (!nearMisses.some((known) => known.key === miss.key && known.read === miss.read)) nearMisses.push(miss);
+    },
   };
 
   extractAadhaar(ctx);
@@ -713,11 +771,15 @@ export function extractFromText(
   extractDrivingLicence(ctx);
   extractAddress(ctx);
 
+  // A code read whole needs no putting right.
+  const missed = nearMisses.filter((miss) => !ctx.candidatesHave(miss.key));
+
   return {
     documentType: ctx.type,
     scripts: detectScripts(raw),
     warnings,
     notes,
+    ...(missed.length > 0 ? { nearMisses: missed } : {}),
     candidates: candidates
       .sort((a, b) => b.confidence - a.confidence)
       .map((candidate) => ({

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Scholarship Application — Bank Details (made up)</title>
+<!--
+  A state scholarship form's bank page: the account the scholarship is paid
+  into, asked for with its MICR code and the branch's address as well as its
+  IFSC — all three of which RBI's list knows from the IFSC alone. Below it, the
+  applicant's own address. "Branch Address" is the bank's, never the
+  applicant's, and "Address" under the applicant's heading is theirs, never the
+  bank's. `data-expect` is ground truth for tests; the matcher never reads it.
+-->
+<style>
+  body { font-family: sans-serif; margin: 24px; max-width: 760px; }
+  fieldset { margin: 18px 0; padding: 10px 16px; }
+  .row { margin: 12px 0; }
+  label { display: block; margin-bottom: 4px; }
+  input, textarea { width: 360px; padding: 6px; }
+</style>
+</head>
+<body>
+<h1>Bank Details for Disbursal</h1>
+<form id="reg" action="#" method="post">
+  <fieldset>
+    <legend>Bank Account Details</legend>
+    <div class="row">
+      <label for="b1">Name of Account Holder</label>
+      <input id="b1" name="b1" type="text" data-expect="bank.account_holder" />
+    </div>
+    <div class="row">
+      <label for="b2">Bank Account Number</label>
+      <input id="b2" name="b2" type="text" data-expect="bank.account_number" />
+    </div>
+    <div class="row">
+      <label for="b3">IFSC Code</label>
+      <input id="b3" name="b3" type="text" maxlength="11" data-expect="bank.ifsc" />
+    </div>
+    <div class="row">
+      <label for="b4">MICR No.</label>
+      <input id="b4" name="b4" type="text" maxlength="9" data-expect="bank.micr" />
+    </div>
+    <div class="row">
+      <label for="b5">Bank Name</label>
+      <input id="b5" name="b5" type="text" data-expect="bank.bank_name" />
+    </div>
+    <div class="row">
+      <label for="b6">Branch Name</label>
+      <input id="b6" name="b6" type="text" data-expect="bank.branch" />
+    </div>
+    <div class="row">
+      <label for="b7">Address of the Bank Branch</label>
+      <textarea id="b7" name="b7" rows="3" data-expect="bank.branch_address"></textarea>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Applicant's Permanent Address</legend>
+    <div class="row">
+      <label for="a1">Address Line 1</label>
+      <input id="a1" name="a1" type="text" data-expect="address.permanent.line1" />
+    </div>
+    <div class="row">
+      <label for="a2">District</label>
+      <input id="a2" name="a2" type="text" data-expect="address.permanent.district" />
+    </div>
+    <div class="row">
+      <label for="a3">State</label>
+      <input id="a3" name="a3" type="text" data-expect="address.permanent.state" />
+    </div>
+    <div class="row">
+      <label for="a4">PIN Code</label>
+      <input id="a4" name="a4" type="text" maxlength="6" data-expect="address.permanent.pincode" />
+    </div>
+  </fieldset>
+</form>
+</body>
+</html>

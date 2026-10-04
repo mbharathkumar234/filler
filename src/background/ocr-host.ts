@@ -32,7 +32,7 @@ import { readableWithBundled } from '@/documents/ocr';
 import { MAX_PDF_PAGES, readingScale, tooSmallToRead } from '@/documents/preprocess';
 import { layoutLines, SCRIPT_MISREAD_BELOW } from '@/documents/layout';
 import { toFractions } from '@/documents/evidence-region';
-import type { OcrEngine, PageImage, TextLine } from '@/documents/read-document';
+import type { OcrEngine, PageImage, PdfText, TextLine } from '@/documents/read-document';
 import type { IndicScript } from '@/documents/indic';
 import type { ReadTable } from '@/documents/table';
 import { base64ToBytes, bytesToBase64 } from '@/shared/base64';
@@ -373,8 +373,8 @@ export const offscreenJobs = serialiseReads(offscreenReader);
  */
 export interface PdfEngine {
   lock(bytes: Uint8Array, password?: string): Promise<PdfLock>;
-  /** The text layer, as lines. */
-  text(bytes: Uint8Array, password?: string): Promise<string>;
+  /** The text layer, as lines, and the tables laid out from where it sits. */
+  text(bytes: Uint8Array, password?: string): Promise<PdfText>;
   /** Page `page` (from 1; the first by default) as a PNG `width` pixels wide, and how many pages there are. */
   render(
     bytes: Uint8Array,
@@ -400,8 +400,8 @@ export function createPdfEngine(ask: AskPdf, jobs: Jobs): PdfEngine {
       return lock;
     },
     async text(bytes, password) {
-      const { text } = await jobs(() => ask({ type: 'pdf:text', ...opening(bytes, password) }));
-      return text;
+      const { text, tables } = await jobs(() => ask({ type: 'pdf:text', ...opening(bytes, password) }));
+      return tables === undefined ? { text } : { text, tables };
     },
     async render(bytes, width, password, page) {
       const { image, pages } = await jobs(() =>

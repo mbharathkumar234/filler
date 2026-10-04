@@ -403,6 +403,17 @@ describe('what it refuses to look for at all', () => {
   });
 });
 
+describe('a heading is not a value', () => {
+  /*
+   * Found on the user's own passbook: "Branch Name & Address", the heading of
+   * an empty box, was offered as the branch "& Address".
+   */
+  it('offers no value made only of a heading’s words', () => {
+    const result = extractFromText('Sample Bank Ltd.\nBranch Name : Address\nIFSC : SBIN0000001', { documentKey: 'doc.bank_passbook' });
+    expect(result.candidates.find((c) => c.key === 'bank.branch')).toBeUndefined();
+  });
+});
+
 describe('nothing is ever offered as already-decided', () => {
   it('marks every candidate as needing confirmation', () => {
     const result = extractFromText(`Ravi Kumar\nDOB: 14/03/1998\n${VALID_AADHAAR[0]}`);

@@ -122,11 +122,32 @@ without (`scripts/make-grade-card-fixtures.mjs`) — its courses a table whose
 rows start with a course code and whose first title wraps onto a second line.
 Read as lines it gave only its result; read as a table (SLANet_plus, Stage 3),
 its courses, their total, SGPA, CGPA and backlogs. Every name and number is
-invented, and the card says SAMPLE on its face.
+invented, and the card says SAMPLE on its face. `pdf/grade-card.pdf` is the
+same card printed to a PDF by Chromium, with real text in it, as a university
+portal hands one over: its table is laid out from where the text sits.
 
 `placement-portal/grades.html` is a made-up campus placement form asking what such
 a card answers — the USN, the SGPA, the CGPA and the backlogs — annotated with
 `data-expect`.
+
+## bank-portal/
+
+`bank-portal/bank-details.html` is a made-up scholarship page for the account a
+scholarship is paid into. Beside the IFSC it asks for the MICR code and the
+branch's address — what RBI's list fills from the IFSC alone — and then for the
+applicant's own address, so neither address box may take the other; annotated
+with `data-expect`. The passbook (`images/passbook.jpg`) prints an IFSC no bank
+has, SMPL0001234, and the panel test checks that RBI's list says so. The real
+codes the tests look up — SBIN0000001, State Bank of India's Kolkata Main
+branch, and PIN 560001, Bengaluru G.P.O. — are the addresses of a branch and a
+post office, not anyone's detail.
+
+`images/passbook-holder-block.jpg` (`scripts/make-passbook-fixture.py`) is a
+made-up passbook laid out as the user's own is, and as small — 780 pixels
+across, compressed: the bank's name with the branch stamped under it, an empty
+"Branch Name & Address" box, the account number after "A/C No.", the holder's
+name, "S/O" and address under one label, and the codes on the last line. Its
+codes are the same public ones, so the lists can be checked against it.
 
 ## images/caste-certificate-seal.png and certificate-portal/
 

@@ -36,6 +36,8 @@ const LABELS: Partial<Record<FieldKey, string>> = {
   'id.abc_id': 'ABC ID',
   'id.apaar': 'APAAR ID',
   'bank.ifsc': 'IFSC code',
+  'bank.micr': 'MICR code',
+  'bank.branch_address': 'Branch address',
   'contact.alt_mobile': 'Alternate mobile',
   'address.permanent.line1': 'Address line 1',
   'address.permanent.line2': 'Address line 2',

@@ -247,6 +247,38 @@ describe('the dependency licences (§ Phase F)', () => {
   });
 });
 
+describe('RBI’s and India Post’s lists (§ checking a code)', () => {
+  /*
+   * An IFSC or a PIN — typed, or read off a passbook — is looked up in files
+   * shipped inside the extension. No server is asked, so the code goes nowhere;
+   * and the files are pinned, so a changed list fails the build rather than
+   * quietly changing what the extension says about somebody's branch.
+   */
+  it('are fetched when the extension is built, pinned by hash, each crediting its source and licence', () => {
+    const fetcher = readFileSync('scripts/fetch-reference-data.mjs', 'utf8');
+    const pinned = [...fetcher.matchAll(/name: '([^']+)',[\s\S]*?url: '(https:\/\/[^']+)',\s*sha256: '([0-9a-f]{64})'/g)];
+    expect(pinned.map((m) => m[1])).toEqual(['ifsc', 'pincode']);
+    expect(fetcher).toContain('razorpay/ifsc v2.0.62 (MIT)');
+    // GODL-India allows reuse with credit, so the credit is part of the pin.
+    expect(fetcher).toContain('Department of Posts, Government of India, data.gov.in (Government Open Data License – India)');
+  });
+
+  it('are read from this package, never from a server', () => {
+    const lookup = readFileSync('src/background/reference-data.ts', 'utf8');
+    expect(lookup.match(/fetch\([^)]*\)/g)).toEqual(['fetch(chrome.runtime.getURL(`reference/${path}`)']);
+    for (const file of [
+      'src/background/reference-data.ts',
+      'src/reference/ifsc.ts',
+      'src/reference/pincode.ts',
+      'src/reference/places.ts',
+      'src/documents/reference-check.ts',
+      'src/ui/lib/reference-offer.ts',
+    ]) {
+      expect(readFileSync(file, 'utf8'), file).not.toMatch(/https?:\/\//);
+    }
+  });
+});
+
 describe('the reader’s threads (§ reading a document)', () => {
   /*
    * More than one thread needs memory shared between workers, which a browser

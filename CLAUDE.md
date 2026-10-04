@@ -19,6 +19,8 @@
 - Test-first for `matching/`, `documents/`, `runtime/machine.ts`, `vault/crypto.ts`.
 - One phase per branch: `phase/<n>-<slug>`.
 - Do not start phase N+1 until phase N's "Must Achieve" checklist is green.
+- The roadmap beyond the original plan is `MASTER_PROMPT.md` (phases U0–U11). Build only for the
+  first phase in `GATES.md` that is not `APPROVED`; only the human approves a gate or waives a goal.
 - Prefer small, pure functions in `matching/` and `documents/` — they must be unit-testable
   without a browser.
 
@@ -88,7 +90,9 @@ If a requested feature conflicts with these, stop and flag it rather than implem
   by each column's median edges — the model draws some cells badly). The grids travel with the
   reading (`tables`) to `extract-education.ts` → `coursesIn`, which reads a table of courses by
   its header: the course list, the total, each school subject's marks, and the backlogs — only
-  when every grade or result was read. A PDF's text layer has no tables.
+  when every grade or result was read. A PDF with real text in it — a grade card downloaded from
+  a portal — has no picture for the model: its tables are laid out from where each piece of text
+  sits (`documents/text-table.ts` → `tablesFromText`, called by `pdf-text.ts`).
 - Seals: a round seal of coloured ink is found (`documents/seal.ts` → `findSeals`), unrolled into
   two strips keeping only its own ink (`unrollSeal`), and read by the page's own reader
   (`paddle-reader.ts` → `readSeals`); PaddleOCR's seal detector has no ONNX build. Each seal is a
@@ -128,6 +132,23 @@ If a requested feature conflicts with these, stop and flag it rather than implem
   links and anything submit-ish. `content/fill-field.ts` is the one entry for a field, and writes
   a native "Other"'s "please specify" box. Such a box is never matched as the key itself
   (`deterministic.ts` → `isOtherBoxOf`).
+- IFSC and PIN codes: RBI's branch list and India Post's PIN directory are fetched only at build
+  time, pinned by hash (`scripts/fetch-reference-data.mjs`), packed by `vite.config.ts` →
+  `referenceData()` into `dist/reference/` (one zipped file per bank), and read by the worker from
+  the package (`background/reference-data.ts`) — a code is never sent anywhere. The pure rules are
+  `src/reference/` (`ifsc.ts` with merged banks, `pincode.ts`, `places.ts`). A document's codes are
+  checked in `documents/reference-check.ts`: a list's agreement is said on the row, never ticked
+  (only a checksum pre-ticks), a PIN is never said to agree (a misread last digit is its
+  neighbour), and what a list adds is marked `listed`. A typed code is looked up after its save
+  (`ui/lib/reference-offer.ts`, `ref:ifsc`/`ref:pincode`) and fills only empty boxes, on the
+  user's "Fill these in". An IFSC read a character short is a `NearMiss`, never a value; the list
+  puts it right only when one branch fits (`reference/ifsc.ts` → `nearCodes`), and the row's
+  `correction` says so.
+- Passbooks: the holder's block ("NAME AND ADDRESS OF THE ACCOUNT HOLDER/S") gives the holder, the
+  father from "S/O", and the holder's own address (`extract-bank.ts` → `readHolderBlock`); the
+  "Branch Name & Address" box never does. A value made only of heading words is never offered
+  (`extract.ts` → `isOnlyLabelWords`). A photo under 1,000 px across is read at 1.5x
+  (`paddle-reader.ts` → `readingScale`); a second look at unsure lines was measured and not shipped.
 - Degree and branch names: `src/matching/courses.ts` — a catalogue of suggestions only. The
   fields stay free text; the setup card writes the chosen pair into
   `education.<level>.course`/`.branch`, and never over an answer the user typed.

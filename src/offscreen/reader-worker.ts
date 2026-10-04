@@ -21,6 +21,7 @@ import {
   readPage,
   readSeals,
   readTables,
+  readingScale,
   uprightPage,
   type Alternate,
   type ReadSeal,
@@ -357,17 +358,31 @@ function orientationRunnerFor(ort: Runtime, orientation: Loaded): OrientationRun
   };
 }
 
-async function pixelsOf(image: ArrayBuffer, mime: string): Promise<RgbaImage> {
+/**
+ * An image as pixels, `scaleFor` times its size — enlarged by the browser's
+ * own resampling, which is what reads a small photo's narrow characters apart
+ * (`paddle-reader.ts` → `readingScale`).
+ */
+async function pixelsOf(
+  image: ArrayBuffer,
+  mime: string,
+  scaleFor: (width: number, height: number) => number = () => 1,
+): Promise<RgbaImage> {
   const bitmap = await createImageBitmap(new Blob([image], { type: mime }));
   try {
-    const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
+    const scale = scaleFor(bitmap.width, bitmap.height);
+    const width = Math.round(bitmap.width * scale);
+    const height = Math.round(bitmap.height * scale);
+    const canvas = new OffscreenCanvas(width, height);
     const context = canvas.getContext('2d');
     if (!context) throw new Error('This worker cannot draw an image to read.');
     // White under anything transparent: an unflattened PNG reads as black.
     context.fillStyle = '#ffffff';
-    context.fillRect(0, 0, bitmap.width, bitmap.height);
-    context.drawImage(bitmap, 0, 0);
-    const data = context.getImageData(0, 0, bitmap.width, bitmap.height);
+    context.fillRect(0, 0, width, height);
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(bitmap, 0, 0, width, height);
+    const data = context.getImageData(0, 0, width, height);
     return { data: data.data, width: data.width, height: data.height };
   } finally {
     bitmap.close();
@@ -376,7 +391,9 @@ async function pixelsOf(image: ArrayBuffer, mime: string): Promise<RgbaImage> {
 
 async function read(request: ReadRequest) {
   const { ort, detector, recogniser, orientation, textline } = await modelsReady(request.base);
-  const pixels = await pixelsOf(request.image, request.mime);
+  // A small photo is read larger; the boxes come back in the larger page's
+  // pixels, beside its size, so where each line sat is the same share of it.
+  const pixels = await pixelsOf(request.image, request.mime, readingScale);
 
   const detection = detector.config.detection;
   const characters = recogniser.config.characters;

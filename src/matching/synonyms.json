@@ -448,6 +448,23 @@
     "type of account",
     "savings current"
   ],
+  "bank.micr": [
+    "micr",
+    "micr code",
+    "micr no",
+    "micr number",
+    "magnetic ink character recognition",
+    "magnetic ink character recognition code"
+  ],
+  "bank.branch_address": [
+    "branch address",
+    "bank branch address",
+    "address of the bank branch",
+    "address of bank branch",
+    "address of the branch",
+    "bank address",
+    "शाखा का पता"
+  ],
   "doc.photo": [
     "photo",
     "photograph",
