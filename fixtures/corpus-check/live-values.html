@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="csrf-token" content="CANARY-META">
+<title>Corpus check: a form with values typed in (made up)</title>
+<!--
+  The capture tool's own test page (tests/e2e/capture.spec.ts). After it
+  loads, its script types into the form the way a person — or a portal filling
+  in its own session — would. Everything marked CANARY, and the typed date,
+  must be absent from the snapshot; the form itself must be there.
+-->
+<style>.secret { display: none } label { display: block; margin-top: 8px }</style>
+</head>
+<body>
+<!-- logged in as CANARY-COMMENT -->
+<h1>Registration</h1>
+<form action="/submit?session=CANARY-ACTION" method="post">
+  <input type="hidden" name="token" value="CANARY-HIDDEN">
+  <label for="name">Full name</label><input id="name" name="name">
+  <label for="dob">Date of birth</label><input id="dob" name="dob" type="date">
+  <label for="state">State</label>
+  <select id="state" name="state"><option value="">Select</option><option value="KA">Karnataka</option><option value="TN">Tamil Nadu</option></select>
+  <label for="about">About you</label><textarea id="about" name="about"></textarea>
+  <div class="secret"><label for="hid">Hidden question</label><input id="hid" name="hid"></div>
+  <button type="submit">Register</button>
+</form>
+<script>
+  document.getElementById('name').value = 'CANARY-TYPED-NAME';
+  document.getElementById('dob').value = '2001-02-03';
+  document.getElementById('state').value = 'TN';
+  document.getElementById('about').value = 'CANARY-TYPED-ABOUT';
+  window.__user = 'CANARY-WINDOW';
+</script>
+</body>
+</html>

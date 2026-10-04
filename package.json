@@ -15,7 +15,11 @@
     "harness:build": "vite build -c vite.harness.config.ts",
     "fixtures:serve": "node scripts/serve-fixtures.mjs",
     "ocr:models": "node scripts/fetch-ocr-models.mjs",
-    "reference:data": "node scripts/fetch-reference-data.mjs"
+    "reference:data": "node scripts/fetch-reference-data.mjs",
+    "scan-values": "node scripts/scan-values.mjs",
+    "capture": "node scripts/capture-snapshot.mjs",
+    "bench": "node scripts/bench.mjs",
+    "doc-bench": "node scripts/doc-bench.mjs"
   },
   "dependencies": {
     "hash-wasm": "^4.12.0",

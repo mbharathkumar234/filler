@@ -260,6 +260,24 @@ if (existsSync('dist/assets')) {
   }
 }
 
+/*
+ * The corpus capture tool (`src/corpus/snapshot.ts`, U0.M1) reads whole pages.
+ * It is a developer's tool run from a terminal, and must never reach users.
+ */
+if (existsSync('dist')) {
+  const walk = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory() ? walk(`${dir}/${entry.name}`) : [`${dir}/${entry.name}`],
+    );
+  const shipped = walk('dist').filter((path) => /\.(js|html|json)$/.test(path) && !path.startsWith('dist/reference/'));
+  const carrying = shipped.filter((path) => readFileSync(path, 'utf8').includes('autofill-corpus-snapshot'));
+  if (carrying.length > 0) {
+    problems.push(
+      `${carrying.join(', ')} contains the corpus capture tool. It reads whole pages and is for developers only.`,
+    );
+  }
+}
+
 if (problems.length > 0) {
   console.error('\nThe build did not produce a loadable extension:\n');
   for (const problem of problems) console.error(`  - ${problem}`);

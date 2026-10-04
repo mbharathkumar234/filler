@@ -28,7 +28,7 @@
 
 | Phase | Name | Status | Gate report | Approved (by, date) | Waivers |
 |---|---|---|---|---|---|
-| U0 | Ground truth: measure before building | NOT-STARTED | — | — | — |
+| U0 | Ground truth: measure before building | IN-PROGRESS | — | — | — |
 | U1 | Read the portal's errors and fix them first | NOT-STARTED | — | — | — |
 | U2 | Every form control a real portal uses | NOT-STARTED | — | — | — |
 | U3 | Names "as per document", checked before submitting | NOT-STARTED | — | — | — |

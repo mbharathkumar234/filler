@@ -168,3 +168,15 @@ each marked SAMPLE clear of its text — a watermark across a line damages it,
 which is measured and noted rather than tested away. `indic-portal/name-in-hindi.html`
 asks for the name in English, in Hindi and in Kannada; the vault's Hindi spelling
 answers the second and leaves the third blank.
+
+## corpus/ and corpus-check/
+
+`corpus/<category>/<name>.html` is the U0 corpus (`MASTER_PROMPT.md`): real forms captured with
+`npm run capture`, every value, token, script and URL removed (`src/corpus/snapshot.ts`), each field
+marked with its right answer in `data-expect`. Only forms whose terms-of-service verdict is
+`assistive-ok` are captured (`docs/portal-notes/CORPUS_CANDIDATES.md`). Measured by `npm run bench`
+(`bench/README.md`).
+
+`corpus-check/live-values.html` is made up: the capture tool's own test page
+(`tests/e2e/capture.spec.ts`), whose script types canary values into its form after it loads.
+

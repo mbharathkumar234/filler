@@ -149,6 +149,11 @@ If a requested feature conflicts with these, stop and flag it rather than implem
   "Branch Name & Address" box never does. A value made only of heading words is never offered
   (`extract.ts` → `isOnlyLabelWords`). A photo under 1,000 px across is read at 1.5x
   (`paddle-reader.ts` → `readingScale`); a second look at unsure lines was measured and not shipped.
+- Measuring (U0): `src/corpus/` holds the tools, never imported by product code
+  (`no-cheating.test.ts`): `snapshot.ts` (a real form with every value removed — run by
+  `npm run capture`), `metrics.ts` (how a field is scored), `split.ts` (tune/held-out, never moved),
+  `bench.run.ts` (`npm run bench` → `bench/`), `doc-bench.run.ts` (`npm run doc-bench`, your own
+  documents from git-ignored `.private/bench/`). `npm run scan-values` reads `.private/values.txt`.
 - Degree and branch names: `src/matching/courses.ts` — a catalogue of suggestions only. The
   fields stay free text; the setup card writes the chosen pair into
   `education.<level>.course`/`.branch`, and never over an answer the user typed.

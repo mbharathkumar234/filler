@@ -301,8 +301,8 @@ forms, and make every later gate measurable.
 | Form builders (Google Forms, Microsoft Forms, Typeform-style) | 5 |
 | Legacy stacks (ASP.NET WebForms, PHP, jQuery) | 5 |
 
-- [ ] **U0.M3 Ground truth.** Every field in every snapshot carries its expected key (or `none`) in
-      `data-expect`. Label it twice: a first pass, then a second pass from the label and context
+- [ ] **U0.M3 Ground truth.** Every field in every snapshot carries its expected key in
+      `data-expect` — or `unknown` for a field nothing should fill, as the existing fixtures mark it. Label it twice: a first pass, then a second pass from the label and context
       alone without looking at the first answer; resolve every disagreement in a notes column.
       Fields that are genuinely ambiguous are marked `ambiguous`, excluded from accuracy and counted
       separately.

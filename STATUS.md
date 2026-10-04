@@ -2125,3 +2125,87 @@ Aadhaar's VID, which must never be stored.
 
 **Not yet:** a passbook that prints its holder under some other label, or a
 cheque's address band; the PUC card's total marks (516) still read as "8".
+
+# U0 — Ground truth: measure before building (`MASTER_PROMPT.md`)
+
+## Plan
+
+**The non-negotiables, and how this phase could break them**
+
+| N | How U0 could break it | How it is prevented |
+|---|---|---|
+| N1 Documents never leave | The capture tool, the bench and the self-test all touch real pages and documents; a snapshot or a report could carry a value | The capture strips every value before anything is written; canary tests on snapshots, document-bench reports and self-test reports; the bench asserts it makes no request |
+| N2 No server AI | Measuring the existing Anthropic path (U0.S2) | Only with the human's own key and approval, never in CI |
+| N3 P1–P6 | The capture tool drives a browser on a real portal | Headed only, the human at the keyboard; it reads the page once when told and never types, clicks or submits |
+| N4 Hard rules | Real pages carry real submit buttons; site-specific selectors could creep into tools | Snapshots drop scripts and neutralise form actions; nothing is clicked; the tools name no site selectors |
+| N5 Nothing fetched at run time | A snapshot could pull remote scripts, styles or images when opened | The cleaner removes every remote reference; the bench runs with no network |
+| N6 Real values never in the repo | A logged-in page shows the user's name or numbers as plain text, which no cleaner can tell from a label | Pages behind a login are captured and reviewed by the human; `npm run scan-values` runs over the corpus before any commit; `.private/` is git-ignored |
+| N7 Test-first | The cleaner, the split and the metrics are new code | Their tests are written first and shown failing |
+| N8 Measure, then ship | Tempting to fix what the baseline shows | Nothing in the matcher, synonyms or thresholds changes in U0 |
+| N9 Only a checksum pre-ticks | — | Not touched |
+| N10 Never weaken | The baseline may look bad | It is recorded as measured |
+| N11 Git | — | Branch `phase/u0-ground-truth`; commit only when told |
+| N12 Words | The self-test's copy | Plain words; none of the four banned ones |
+| N13 Licences | — | No new dependency: Playwright and Rolldown are already in the tree |
+
+**Decisions**
+
+- A snapshot is the form's own HTML with every value removed, not a JSON summary. The existing
+  harvester, matcher and filler run on it unchanged: in jsdom to score mapping, in a browser to
+  fill. Its limit, recorded with every result: scripts are removed, so a control driven by a
+  JavaScript library is static in a snapshot. U2 tests those against the real libraries.
+- The capture tool is a Playwright script outside the extension (`scripts/capture-snapshot.mjs`),
+  headed, with its own browser profile under `.private/` so the human can log in. The cleaner it
+  injects is never bundled into the extension; `verify-dist` asserts that.
+- Terms-of-service verdicts are the human's (`docs/portal-notes/README.md`). U0 prepares a list of
+  candidate portals for them to decide on.
+- The split is decided by a hash of each snapshot's name: 60% tune, 40% held-out, recorded in
+  `bench/split.json`. A snapshot cannot be moved between the two by hand without a test failing.
+
+**Tests and fixtures first**
+
+1. The cleaner: a page pre-filled with canary values, hidden tokens, scripts, handlers, remote
+   images and URL query strings comes out with none of them, and with its labels, options,
+   attributes and headings intact.
+2. No product code under `src/` reads `data-expect` or names a fixture path.
+3. `npm run scan-values` fails on a planted value.
+4. The split: deterministic, about 60/40, and tamper-evident.
+5. The bench: a planted wrong mapping is reported as a mismatch.
+6. The document bench and the self-test: canary values never reach a report.
+
+**Measurements:** the mapping baseline from `npm run bench` over the corpus; document accuracy
+from the document bench on the human's own machine.
+
+**Risks:** the corpus size depends on the human's verdicts and logins; static snapshots overstate
+fill-stick for script-driven controls (reported apart, and U2's job); the same hand labels and
+later tunes, which is why the held-out split is frozen before any tuning and every label gets a
+second pass.
+
+## Progress — session 1 (2026-10-04)
+
+| MUST | Status | Evidence |
+|---|---|---|
+| U0.M1 Snapshot tool | Done | `src/corpus/snapshot.test.ts` (11: every value, token, script, handler, URL and choice gone; labels, options, codes, headings, components and hidden fields kept); `src/corpus/fidelity.test.ts` (34 forms: the matcher sees the same fields, options and answers in the snapshot as on the page); `tests/e2e/capture.spec.ts` — the tool on a live page whose script types into it, 20 runs of 20; `verify-dist` refuses a build carrying it |
+| U0.M2 Corpus | BLOCKED-HUMAN | Candidates in `docs/portal-notes/CORPUS_CANDIDATES.md`; the verdicts, and captures behind a login, are the human's |
+| U0.M3 Ground truth | Waiting on M2 | — |
+| U0.M4 Split | Done (tooling) | `src/corpus/split.test.ts` (6: 60/40 per category, never moved, order not chosen, a hand-moved entry detected); `bench/split.json` fills as snapshots join |
+| U0.M5 Bench | Mapping stage done; browser fill stage next | `npm run bench`: 8 checks pass — split honest, every page measured, the same answers twice, a planted mistake caught, no request made, no page script failing, results written, the bar held. Made-up fixtures: 0 confident mistakes |
+| U0.M6 No cheating | Done | `src/shared/no-cheating.test.ts` (5), shown failing on a planted file that read `data-expect` |
+| U0.M7 Document bench | Done (tooling); moving the documents is the human's | `src/corpus/doc-score.test.ts` (3: no value or file name reaches a score); `npm run doc-bench` on two made-up documents: 8 of 9, the one answer planted wrong caught |
+| U0.M8 Self-test | Not started | Next session |
+| U0.M9 Values scan | Done (tooling); the values file is the human's | `src/shared/scan-values.test.ts` (6: working tree, history, case, never printing the value, refusing to call "nothing to check" clean, `.private/` ignored) |
+| U0.M10 Baseline | Waiting on M2 and M3 | Metrics and tolerances defined in `bench/README.md` |
+| U0.M11 Honest report | Waiting on M2 and M3 | — |
+
+Found on the way: comparing the options' real values in the fidelity test showed the cleaner was
+stripping a Google Forms question's option codes (`data-value`), so a snapshot would have measured a
+different form. Option codes are now kept on choice roles only, and the cleaner also strips
+`aria-checked`, `aria-selected` and `aria-pressed` — they record what a person chose.
+
+**Blocked on the human:** verdicts on the candidate portals, and captures of pages behind a login;
+`.private/values.txt`; the five documents and their answer key moved into `.private/bench/`; the
+reference machine in `GATES.md`.
+
+**Next session:** the browser half of the bench (fill-stick, real timings) and the self-test (U0.M8).
+
+3,374 unit tests pass; the capture tool's browser test passes 20 of 20.

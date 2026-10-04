@@ -1892,6 +1892,75 @@ exports[`fixture corpus > 'choice-portal/native-other.html' — harvest output s
 }
 `;
 
+exports[`fixture corpus > 'corpus-check/live-values.html' — harvest output snapshot 1`] = `
+{
+  "blockers": [],
+  "fields": [
+    {
+      "enabled": true,
+      "labelText": "Full name",
+      "maxLength": undefined,
+      "nearbyText": "Registration",
+      "optionCount": undefined,
+      "ref": "f0",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Date of birth",
+      "maxLength": undefined,
+      "nearbyText": "Registration",
+      "optionCount": undefined,
+      "ref": "f1",
+      "required": false,
+      "tag": "input",
+      "type": "date",
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "State",
+      "maxLength": undefined,
+      "nearbyText": "Registration",
+      "optionCount": 3,
+      "ref": "f2",
+      "required": false,
+      "tag": "select",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "About you",
+      "maxLength": undefined,
+      "nearbyText": "Registration",
+      "optionCount": undefined,
+      "ref": "f3",
+      "required": false,
+      "tag": "textarea",
+      "type": undefined,
+      "visible": true,
+    },
+    {
+      "enabled": true,
+      "labelText": "Hidden question",
+      "maxLength": undefined,
+      "nearbyText": "Registration",
+      "optionCount": undefined,
+      "ref": "f4",
+      "required": false,
+      "tag": "input",
+      "type": undefined,
+      "visible": false,
+    },
+  ],
+  "wizard": null,
+}
+`;
+
 exports[`fixture corpus > 'demo-portal/page-1.html' — harvest output snapshot 1`] = `
 {
   "blockers": [],

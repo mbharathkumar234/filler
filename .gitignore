@@ -19,3 +19,9 @@ fixtures/_harness/
 
 # PaddleOCR model archives, fetched and hash-checked at build time (scripts/fetch-ocr-models.mjs)
 vendor/
+
+# The user's own values and documents, for the values scan and the document bench (U0). Never committed.
+.private/
+
+# Bench timings vary run to run; the baseline records the median (bench/README.md).
+bench/timing.json
